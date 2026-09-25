@@ -68,6 +68,15 @@ inventory CRUD with duplicate-SKU rejection, the analytics report, SVG barcode r
 page rendering for each role. Runs are independent — each presents its own client IP, so a
 repeat run does not inherit the previous run's rate-limit bucket.
 
+`npm run verify:driver` (`scripts/verify-driver.mjs`) is the check that stands in for the one
+thing this environment cannot do — run the Supabase driver against a live Supabase project. It
+applies `schema.sql` to the same ephemeral Postgres, then asserts against the live catalog that
+every table, column, RPC, RPC argument and `finalize_sale` payload key the driver names actually
+exists. A renamed column or a typo'd RPC fails here instead of in production. It is deliberately
+self-checking: it fails if its own parser extracts nothing, and it was mutation-tested — renaming
+`change_due` in the driver, renaming a column in the schema, and adding an unread payload key each
+turn it red.
+
 `npm run verify:sql` (`scripts/verify-sql.mjs`) boots a throwaway Postgres via
 `embedded-postgres` (`npm i -D embedded-postgres` — deliberately not a runtime dependency),
 applies `supabase/schema.sql` and `supabase/seed.sql` verbatim, then exercises
@@ -176,7 +185,8 @@ decrement path as a counter sale.
 **Back office.** RBAC keeps pricing, stock edits and financial reports to admin/manager;
 cashiers get the terminal only — enforced in the layout *and* re-checked in every API route.
 The dashboard shows today's gross revenue, window revenue, average order value, realised
-margin, a 14-day revenue chart, channel split, top categories, best sellers, inventory
+margin, a 14-day revenue chart, channel split, **tender mix (cash in the drawer vs MTN MoMo vs
+Airtel Money vs Bank, for end-of-day reconciliation)**, top categories, best sellers, inventory
 valuation at cost and retail, low-stock queue, and pending online orders awaiting approval.
 
 ---

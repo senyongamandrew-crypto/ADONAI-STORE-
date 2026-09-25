@@ -56,6 +56,34 @@ export function ChannelSplit({ rows }: { rows: Analytics["byChannel"] }) {
   );
 }
 
+/** Tender mix — cash in the drawer vs Mobile Money, for end-of-day reconciliation. */
+export function TenderMix({ rows }: { rows: Analytics["byTender"] }) {
+  const total = rows.reduce((a, r) => a + r.revenue, 0) || 1;
+  const tones = ["bg-ink-900", "bg-brass-500", "bg-clay-500", "bg-emerald-700", "bg-ink-600"];
+  return (
+    <div className="card p-4">
+      <h3 className="mb-3 font-display text-base font-bold">Tender mix</h3>
+      <div className="flex h-4 w-full overflow-hidden rounded-full">
+        {rows.map((r, i) => (
+          <div key={r.tender} className={tones[i % tones.length]} style={{ width: `${(r.revenue / total) * 100}%` }} title={`${r.tender}: UGX ${fmtNumber(r.revenue)}`} />
+        ))}
+      </div>
+      <ul className="mt-3 space-y-1.5 text-sm">
+        {rows.map((r, i) => (
+          <li key={r.tender} className="flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <span className={`h-2.5 w-2.5 rounded-full ${tones[i % tones.length]}`} />
+              {r.tender}
+            </span>
+            <span className="tabular-nums">{fmtNumber(r.revenue)} · {r.transactions}</span>
+          </li>
+        ))}
+        {!rows.length && <li className="text-ink-600">No settled transactions in this window.</li>}
+      </ul>
+    </div>
+  );
+}
+
 export function CategoryBars({ rows }: { rows: Analytics["byCategory"] }) {
   const top = rows.slice(0, 6);
   const max = Math.max(1, ...top.map((r) => r.revenue));

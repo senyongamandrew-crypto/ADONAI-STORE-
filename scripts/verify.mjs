@@ -256,6 +256,13 @@ const analytics = await call("/api/analytics?days=30", { cookie: admin });
 const a = analytics.json?.data;
 check("analytics report is returned", analytics.status === 200 && !!a);
 check("report has both channels", Array.isArray(a?.byChannel) && a.byChannel.length > 0, (a?.byChannel ?? []).map((c) => c.channel).join("+"));
+check(
+  "report breaks revenue down by tender",
+  Array.isArray(a?.byTender) && a.byTender.length > 0 && a.byTender.every((t) => typeof t.revenue === "number"),
+  (a?.byTender ?? []).map((t) => `${t.tender}=${t.revenue}`).join(" "),
+);
+const tenderSum = (a?.byTender ?? []).reduce((x, t) => x + t.revenue, 0);
+check("tender mix reconciles to window revenue", tenderSum === a?.window?.revenue, `${tenderSum} vs ${a?.window?.revenue}`);
 check("report has 14 daily points", a?.daily?.length === 14, `${a?.daily?.length}`);
 check("report values revenue", (a?.window?.revenue ?? 0) > 0, `UGX ${a?.window?.revenue}`);
 check("low-stock flags are computed", Array.isArray(a?.lowStock), `${a?.lowStock?.length} flagged`);

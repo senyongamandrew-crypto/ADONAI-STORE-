@@ -26,6 +26,16 @@ export function buildAnalytics(allSales: Sale[], products: Product[], days = 30)
     byChannelMap.set(s.channel, e);
   }
 
+  // Tender mix — what the till actually took, for end-of-day reconciliation.
+  const tenderMap = new Map<string, { revenue: number; transactions: number }>();
+  for (const s of win) {
+    const tender = s.tender ?? (s.channel === "online" ? "Unpaid (online)" : "Unrecorded");
+    const e = tenderMap.get(tender) ?? { revenue: 0, transactions: 0 };
+    e.revenue += s.total;
+    e.transactions += 1;
+    tenderMap.set(tender, e);
+  }
+
   const byId = new Map(products.map((p) => [p.id, p]));
   const catMap = new Map<string, { revenue: number; units: number }>();
   const prodMap = new Map<string, { title: string; sku: string; revenue: number; units: number }>();
@@ -60,6 +70,7 @@ export function buildAnalytics(allSales: Sale[], products: Product[], days = 30)
     today: { revenue: sum(today), transactions: today.length, units: units(today), aov: aov(today) },
     window: { revenue: sum(win), transactions: win.length, units: units(win), aov: aov(win) },
     byChannel: [...byChannelMap.entries()].map(([channel, v]) => ({ channel: channel as "pos" | "online", ...v })),
+    byTender: [...tenderMap.entries()].map(([tender, v]) => ({ tender, ...v })).sort((a, b) => b.revenue - a.revenue),
     byCategory: [...catMap.entries()].map(([category, v]) => ({ category, ...v })).sort((a, b) => b.revenue - a.revenue),
     topProducts: [...prodMap.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 8),
     daily: [...dayMap.entries()].map(([date, v]) => ({ date, ...v })),

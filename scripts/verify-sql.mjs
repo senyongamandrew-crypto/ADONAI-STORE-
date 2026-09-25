@@ -183,6 +183,17 @@ try {
       and created_at >= now() - interval '30 days'`);
   check("dashboard aggregate query runs", report.tx > 0 && report.revenue > 0, `${report.tx} tx · UGX ${report.revenue} · ${report.channels} channels`);
 
+  const tender = await q(`
+    select coalesce(tender, 'Unpaid (online)') as tender,
+           count(*)::int as tx, coalesce(sum(total),0)::bigint as revenue
+    from sales where status = 'completed' and created_at >= now() - interval '30 days'
+    group by 1 order by revenue desc`);
+  check(
+    "tender-mix aggregate runs and reconciles",
+    tender.length > 0 && tender.reduce((x, r) => x + Number(r.revenue), 0) === Number(report.revenue),
+    tender.map((r) => `${r.tender}=${r.revenue}`).join(" "),
+  );
+
   const lowStock = await q("select sku from products where stock <= min_stock and active");
   check("low-stock reorder query runs", Array.isArray(lowStock), `${lowStock.length} flagged`);
 } finally {

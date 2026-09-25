@@ -77,6 +77,7 @@ export type Analytics = {
   today: { revenue: number; transactions: number; units: number; aov: number };
   window: { revenue: number; transactions: number; units: number; aov: number };
   byChannel: { channel: Channel; revenue: number; transactions: number }[];
+  byTender: { tender: string; revenue: number; transactions: number }[];
   byCategory: { category: string; revenue: number; units: number }[];
   topProducts: { title: string; sku: string; revenue: number; units: number }[];
   daily: { date: string; revenue: number; transactions: number }[];

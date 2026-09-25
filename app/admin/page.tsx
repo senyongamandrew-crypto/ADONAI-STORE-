@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 import { fmt, fmtNumber } from "@/lib/money";
 import { computeMargin } from "@/lib/margin";
 import { Badge, Stat } from "@/components/ui";
-import { CategoryBars, ChannelSplit, DailyBars, TopProducts } from "@/components/admin/Charts";
+import { CategoryBars, ChannelSplit, DailyBars, TenderMix, TopProducts } from "@/components/admin/Charts";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +49,10 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <DailyBars daily={a.daily} />
-        <ChannelSplit rows={a.byChannel} />
+        <div className="space-y-3">
+          <ChannelSplit rows={a.byChannel} />
+          <TenderMix rows={a.byTender} />
+        </div>
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">

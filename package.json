@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "db:reset-local": "node scripts/reset-local.mjs",
     "verify": "node scripts/verify.mjs",
-    "verify:sql": "node scripts/verify-sql.mjs"
+    "verify:sql": "node scripts/verify-sql.mjs",
+    "verify:driver": "node scripts/verify-driver.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
