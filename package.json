@@ -1,0 +1,35 @@
+{
+  "name": "adonai-thrift",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Adonai Thrift \u2014 unified dual-channel retail (public showroom + POS terminal + inventory + analytics)",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p 3000",
+    "typecheck": "tsc --noEmit",
+    "db:reset-local": "node scripts/reset-local.mjs",
+    "verify": "node scripts/verify.mjs",
+    "verify:sql": "node scripts/verify-sql.mjs"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.47.0",
+    "bwip-js": "^4.5.1",
+    "lucide-react": "^0.462.0",
+    "next": "^16.3.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "server-only": "^0.0.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.7.2"
+  }
+}
