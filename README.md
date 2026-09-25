@@ -54,16 +54,19 @@ Two suites, both runnable here:
 
 ```bash
 npm run dev          # terminal 1
-npm run verify       # terminal 2 — 41 end-to-end checks over HTTP
+npm run verify       # terminal 2 — 52 end-to-end checks over HTTP
 npm run verify:sql   # 24 checks against a real ephemeral Postgres
 npm run typecheck && npm run build
 ```
 
 `npm run verify` (`scripts/verify.mjs`) drives the real routes: catalog reads, RBAC rejection of
 anonymous POS/analytics/write calls, a POS settlement (totals + change), the atomic stock
-decrement, the oversell guard, the online-order lifecycle (pending → approve decrements → refund
-restocks), inventory CRUD with duplicate-SKU rejection, the analytics report, SVG barcode
-rendering, and page rendering for each role.
+decrement, absurd-quantity and oversell rejection, **six simultaneous buys against three units
+(exactly three win, stock lands on zero, refs stay distinct)**, the online-order lifecycle
+(pending → approve decrements → refund restocks), anonymous-order validation and rate limiting,
+inventory CRUD with duplicate-SKU rejection, the analytics report, SVG barcode rendering, and
+page rendering for each role. Runs are independent — each presents its own client IP, so a
+repeat run does not inherit the previous run's rate-limit bucket.
 
 `npm run verify:sql` (`scripts/verify-sql.mjs`) boots a throwaway Postgres via
 `embedded-postgres` (`npm i -D embedded-postgres` — deliberately not a runtime dependency),
@@ -164,6 +167,12 @@ modal with a margin calculator that suggests a retail price for a target margin,
 rejection, low-stock flags against a per-product reorder point, and Code 128 / QR label sheets
 generated server-side for printing.
 
+**Closing the online loop.** The cart drawer's *reserve* option posts the same basket to
+`POST /api/sales` as a **pending** order alongside the WhatsApp message, so the shop can see it
+on the till and approve it — and staff can log a phone/WhatsApp order from the sales ledger with
+the same *Log order* form. Pending orders never move stock; approving them runs the identical
+decrement path as a counter sale.
+
 **Back office.** RBAC keeps pricing, stock edits and financial reports to admin/manager;
 cashiers get the terminal only — enforced in the layout *and* re-checked in every API route.
 The dashboard shows today's gross revenue, window revenue, average order value, realised
@@ -171,6 +180,24 @@ margin, a 14-day revenue chart, channel split, top categories, best sellers, inv
 valuation at cost and retail, low-stock queue, and pending online orders awaiting approval.
 
 ---
+
+## Guarantees, and where they stop
+
+- **No oversell, verified.** Concurrent settlements are serialised: in Postgres by the
+  `stock >= qty` guard plus `CHECK (stock >= 0)` inside one transaction, in the local driver by a
+  promise-chain transaction. The suite fires six parallel buys at a three-unit product and
+  asserts exactly three succeed.
+- **Single process.** The local driver's serialisation, the in-memory order rate limiter and the
+  session cookie are all per-process. Correct for `next dev` and a single `next start`; if you
+  scale horizontally, move to the Supabase driver and put a shared store behind
+  `lib/ratelimit.ts`.
+- **Rate limiting is a speed bump.** `x-forwarded-for` is trustworthy behind a proxy and
+  spoofable if this app is ever exposed directly.
+- **No live payment gateway** by design: online orders are confirmed by the shop and settled by
+  Mobile Money or cash, then logged. `lib/whatsapp.ts` and `POST /api/sales` are the two seams
+  where a gateway would slot in.
+- **Stock mirroring is polling** (15 s showroom, 20 s POS), not Supabase Realtime — swap the
+  interval for a `postgres_changes` subscription in `components/Showroom.tsx` if you want pushes.
 
 ## Environment
 

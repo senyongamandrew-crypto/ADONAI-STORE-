@@ -15,13 +15,58 @@ import { Empty, Money } from "@/components/ui";
 export function CartDrawer() {
   const { lines, open, setOpen, setQty, remove, clear } = useWebCart();
   const [customer, setCustomer] = useState({ name: "", phone: "", note: "" });
+  const [reserve, setReserve] = useState(true);
+  const [reserved, setReserved] = useState<string | null>(null);
+  const [reserveError, setReserveError] = useState<string | null>(null);
   const { units, subtotal } = cartTotals(lines);
 
   const orderLines = useMemo(
-    () => lines.map((l) => ({ sku: l.sku, title: l.title, size: l.size, qty: l.qty, unit_price: l.unit_price, line_total: l.unit_price * l.qty })),
+    () =>
+      lines.map((l) => ({
+        product_id: l.product_id,
+        sku: l.sku,
+        title: l.title,
+        size: l.size,
+        qty: l.qty,
+        unit_price: l.unit_price,
+        line_total: l.unit_price * l.qty,
+      })),
     [lines],
   );
   const href = useMemo(() => whatsappOrderUrl(orderLines, customer), [orderLines, customer]);
+
+  /**
+   * Dispatches the order twice: a WhatsApp message to the shop, and — when
+   * reserve is on — a pending sale in the database so the till can approve it
+   * and the stock decrement happens through the same path as a counter sale.
+   */
+  const dispatch = async () => {
+    setReserved(null);
+    setReserveError(null);
+    const snapshot = orderLines;
+    if (reserve) {
+      try {
+        const res = await fetch("/api/sales", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            channel: "online",
+            status: "pending",
+            customer_name: customer.name || "WhatsApp customer",
+            customer_phone: customer.phone || STORE.whatsapp,
+            note: customer.note || "Sent from the website cart",
+            lines: snapshot.map((l) => ({ product_id: l.product_id, qty: l.qty, unit_price: l.unit_price })),
+          }),
+        });
+        const json = await res.json();
+        if (json.ok) setReserved(json.data.ref);
+        else setReserveError(json.error ?? "Could not reserve — the shop will still see your WhatsApp message.");
+      } catch {
+        setReserveError("Offline — your WhatsApp message still goes through.");
+      }
+    }
+    setTimeout(() => clear(), 900);
+  };
   const oversold = lines.filter((l) => l.qty > l.stock);
 
   return (
@@ -100,9 +145,24 @@ export function CartDrawer() {
               <span className="text-xl font-bold tabular-nums"><Money value={subtotal} /></span>
             </div>
 
-            <a href={href} target="_blank" rel="noopener noreferrer" onClick={() => setTimeout(() => clear(), 800)} className="btn-brass w-full py-3">
+            <label className="flex items-start gap-2 rounded-lg bg-[#faf7f2] px-2.5 py-2 text-[11px] leading-snug text-ink-700">
+              <input type="checkbox" checked={reserve} onChange={(e) => setReserve(e.target.checked)} className="mt-0.5" />
+              <span>
+                <strong>Reserve these in the shop&rsquo;s system.</strong> Creates a pending order the till can see, so stock is held
+                while you confirm payment on WhatsApp.
+              </span>
+            </label>
+
+            <a href={href} target="_blank" rel="noopener noreferrer" onClick={dispatch} className="btn-brass w-full py-3">
               <MessageCircle size={17} /> Send order on WhatsApp
             </a>
+
+            {reserved && (
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
+                Reserved as {reserved} — the shop can see it on the till and will confirm on WhatsApp.
+              </p>
+            )}
+            {reserveError && <p className="rounded-lg bg-clay-50 px-3 py-2 text-[11px] font-semibold text-clay-600">{reserveError}</p>}
             <p className="text-center text-[11px] leading-relaxed text-ink-600">
               Opens WhatsApp with your items, quantities and total pre-written to {STORE.whatsapp}. Stock is confirmed by the shop before payment.
             </p>

@@ -1,16 +1,18 @@
 "use client";
 import { useMemo, useState } from "react";
-import { CheckCircle2, Eye, Receipt as ReceiptIcon, Undo2, XCircle } from "lucide-react";
+import { CheckCircle2, Eye, Plus, Receipt as ReceiptIcon, Undo2, XCircle } from "lucide-react";
 import { fmt, fmtNumber } from "@/lib/money";
 import { Badge } from "@/components/ui";
 import { Receipt } from "@/components/Receipt";
-import type { Sale, SaleStatus } from "@/lib/db/types";
+import { OrderForm } from "@/components/admin/OrderForm";
+import type { Product, Sale, SaleStatus } from "@/lib/db/types";
 
 const statusTone = (s: SaleStatus) => (s === "completed" ? "good" : s === "pending" ? "warn" : "bad");
 
 /** Sales & orders ledger: review, approve (decrements stock), cancel/refund (restocks). */
-export function SalesLedger({ initial, initialStatus }: { initial: Sale[]; initialStatus: string }) {
+export function SalesLedger({ initial, initialStatus, products }: { initial: Sale[]; initialStatus: string; products: Product[] }) {
   const [sales, setSales] = useState<Sale[]>(initial);
+  const [showForm, setShowForm] = useState(false);
   const [status, setStatus] = useState(initialStatus || "all");
   const [channel, setChannel] = useState("all");
   const [open, setOpen] = useState<Sale | null>(null);
@@ -67,6 +69,7 @@ export function SalesLedger({ initial, initialStatus }: { initial: Sale[]; initi
             <option value="cancelled">Cancelled</option>
             <option value="refunded">Refunded</option>
           </select>
+          <button onClick={() => setShowForm(true)} className="btn-primary"><Plus size={15} /> Log order</button>
         </div>
       </div>
 
@@ -128,6 +131,19 @@ export function SalesLedger({ initial, initialStatus }: { initial: Sale[]; initi
       </p>
 
       {open && <Receipt sale={open} onClose={() => setOpen(null)} />}
+
+      {showForm && (
+        <OrderForm
+          products={products}
+          onClose={() => setShowForm(false)}
+          onCreated={(sale) => {
+            setSales((prev) => [sale, ...prev]);
+            setShowForm(false);
+            setNotice(`${sale.ref} logged as pending — approve it to decrement stock.`);
+            setTimeout(() => setNotice(null), 4000);
+          }}
+        />
+      )}
     </div>
   );
 }

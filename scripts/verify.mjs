@@ -9,6 +9,10 @@
  */
 const BASE = process.env.BASE_URL || "http://127.0.0.1:3000";
 
+// The order rate limiter keys off the client IP and lives in the server process,
+// so each run presents its own address to stay independent of previous runs.
+const RUN_IP = `198.51.100.${(Date.now() % 200) + 20}`;
+
 let pass = 0;
 let fail = 0;
 const failures = [];
@@ -24,12 +28,13 @@ const check = (name, cond, detail = "") => {
   }
 };
 
-const call = async (path, { method = "GET", body, cookie } = {}) => {
+const call = async (path, { method = "GET", body, cookie, ip } = {}) => {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: {
       ...(body ? { "content-type": "application/json" } : {}),
       ...(cookie ? { cookie } : {}),
+      ...(ip ? { "x-forwarded-for": ip } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     redirect: "manual",
@@ -122,15 +127,24 @@ check(
 const after = (await call("/api/products")).json.data.find((p) => p.sku === target.sku).stock;
 check("stock is decremented atomically on settlement", after === before - qty, `${before} → ${after}`);
 
-const oversell = await call("/api/sales", {
+// An absurd quantity is caught by input validation; a realistic one by the stock guard.
+const absurd = await call("/api/sales", {
   method: "POST",
   cookie: cashier,
   body: { channel: "pos", tender: "Cash", lines: [{ product_id: target.sku, qty: 9999 }] },
 });
-check("oversell is refused", oversell.status === 400 && /insufficient stock/i.test(oversell.json?.error ?? ""), oversell.json?.error);
+check("absurd quantity is refused by validation", absurd.status === 400 && /between 1 and/i.test(absurd.json?.error ?? ""), absurd.json?.error);
+
+const oversell = await call("/api/sales", {
+  method: "POST",
+  cookie: cashier,
+  body: { channel: "pos", tender: "Cash", lines: [{ product_id: target.sku, qty: after + 1 }] },
+});
+check("oversell is refused by the stock guard", oversell.status === 400 && /insufficient stock/i.test(oversell.json?.error ?? ""), oversell.json?.error);
 
 // -------------------------------------------------- 5. online order lifecycle
 const online = await call("/api/sales", {
+  ip: RUN_IP,
   method: "POST",
   body: { channel: "online", customer_name: "Verify Buyer", customer_phone: "+256700111222", lines: [{ product_id: target.sku, qty: 1 }] },
 });
@@ -141,6 +155,8 @@ check("pending online orders do NOT move stock", pendingStock === after, `still 
 const admin = await login("admin@adonai.ug", "adonai-admin").catch(() => null);
 check("admin can sign in", !!admin);
 
+check("online order returned an id", !!online.json?.data?.id);
+if (!online.json?.data?.id) throw new Error("cannot continue without an online order");
 const approve = await call(`/api/sales/${online.json.data.id}`, { method: "PATCH", cookie: admin, body: { status: "completed" } });
 check("admin can approve an online order", approve.status === 200 && approve.json?.data?.status === "completed");
 const approvedStock = (await call("/api/products")).json.data.find((p) => p.sku === target.sku).stock;
@@ -181,6 +197,59 @@ check("manual stock adjustment works", adjusted.json?.data?.stock === 6, `stock=
 
 const deleted = await call(`/api/products/${created.json.data.id}`, { method: "DELETE", cookie: admin });
 check("admin can delete a product", deleted.status === 200 && deleted.json?.ok === true);
+
+// ------------------------------------------------- 7b. concurrent settlement
+const raceSku = `RACE-${Date.now().toString().slice(-6)}`;
+const race = await call("/api/products", {
+  method: "POST",
+  cookie: admin,
+  body: { sku: raceSku, title: "Concurrency Tee", category: "Tops & Blouses", condition: "Good", size: "M", cost_price: 5000, price: 15000, stock: 3, min_stock: 0 },
+});
+check("race product created with 3 units", race.status === 201, raceSku);
+
+const attempts = await Promise.all(
+  Array.from({ length: 6 }, () =>
+    call("/api/sales", { method: "POST", cookie: cashier, body: { channel: "pos", tender: "Cash", lines: [{ product_id: race.json.data.id, qty: 1 }] } }),
+  ),
+);
+const accepted = attempts.filter((r) => r.status === 201);
+const raceStock = (await call("/api/products")).json.data.find((p) => p.id === race.json.data.id).stock;
+const raceRefs = accepted.map((r) => r.json.data.ref);
+check("6 simultaneous buys of 3 units → exactly 3 accepted", accepted.length === 3, `${accepted.length} accepted, ${attempts.length - accepted.length} refused`);
+check("concurrent settlement never oversells", raceStock === 0, `stock=${raceStock}`);
+check("concurrent sales get distinct refs", new Set(raceRefs).size === raceRefs.length, raceRefs.join(" "));
+await call(`/api/products/${race.json.data.id}`, { method: "DELETE", cookie: admin });
+
+// ---------------------------------------------- 7c. anonymous order hardening
+const noPhone = await call("/api/sales", { ip: RUN_IP, method: "POST", body: { channel: "online", customer_name: "No Phone", lines: [{ product_id: target.sku, qty: 1 }] } });
+check("online order without a phone is rejected", noPhone.status === 400, noPhone.json?.error?.slice(0, 40));
+
+const noLines = await call("/api/sales", { ip: RUN_IP, method: "POST", body: { channel: "online", customer_name: "Empty", customer_phone: "+256700000000", lines: [] } });
+check("online order with no lines is rejected", noLines.status === 400, noLines.json?.error?.slice(0, 40));
+
+const forced = await call("/api/sales", {
+  ip: RUN_IP,
+  method: "POST",
+  body: { channel: "online", status: "completed", tender: "Cash", amount_received: 999999, customer_name: "Pushy", customer_phone: "+256700000001", lines: [{ product_id: target.sku, qty: 1 }] },
+});
+check("anonymous callers cannot force status=completed", forced.json?.data?.status === "pending", `status=${forced.json?.data?.status}`);
+check("a forced order does not move stock", (await call("/api/products")).json.data.find((p) => p.sku === target.sku).stock === refundedStock, "unchanged");
+
+// Fresh client key per run: the limiter is in-process, so a repeat run must not
+// inherit the previous run's used-up bucket.
+const spamIp = `203.0.113.${(Date.now() % 200) + 20}`;
+const spam = await Promise.all(
+  Array.from({ length: 12 }, (_, i) =>
+    call("/api/sales", {
+      ip: spamIp,
+      method: "POST",
+      body: { channel: "online", customer_name: `Spam ${i}`, customer_phone: "+256700000002", lines: [{ product_id: target.sku, qty: 1 }] },
+    }),
+  ),
+);
+const throttled = spam.filter((r) => r.status === 429).length;
+const letThrough = spam.filter((r) => r.status === 201).length;
+check("anonymous order endpoint rate-limits", throttled > 0, `${letThrough} through, ${throttled} throttled`);
 
 // --------------------------------------------------------------- 8. analytics
 const analytics = await call("/api/analytics?days=30", { cookie: admin });
