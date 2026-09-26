@@ -48,6 +48,10 @@ export const SEED_PRODUCTS: Product[] = ROWS.map((r, i) => {
     min_stock: DEFAULT_MIN_STOCK,
     barcode: generateBarcode(sku),
     discount_pct: r[7] ?? 0,
+    // Advisory only — sellable stock is untouched. Seeded deterministically so
+    // the Trial and Inspection tabs have something to show on a fresh install.
+    on_trial: i % 7 === 2 ? 1 : 0,
+    in_inspection: i % 5 === 3 ? (i % 2 ? 2 : 1) : 0,
     active: true,
     created_at: new Date(Date.now() - (ROWS.length - i) * 86400000).toISOString(),
     updated_at: new Date().toISOString(),

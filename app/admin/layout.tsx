@@ -22,7 +22,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     <>
       <TopBar user={user} mode={dataMode()} showCart={false} />
       <div className="mx-auto max-w-[1400px] px-3 py-4 sm:px-5">
-        <AdminNav />
+        <AdminNav role={user.role as Role} />
         {children}
       </div>
     </>

@@ -4,34 +4,59 @@
  * system is fully runnable (and demoable) with zero cloud accounts. Same `Store`
  * contract as the Supabase driver, including atomic stock decrement.
  */
-import { createHash, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { DEFAULT_MIN_STOCK, DEMO_USERS } from "@/lib/config";
 import { generateBarcode } from "@/lib/barcode";
 import { toShillings } from "@/lib/money";
-import type { CreateSaleInput, ProductInput, ProductQuery, SaleQuery, Store } from "@/lib/db/store";
-import type { Analytics, Product, Profile, Sale, SaleStatus, Session, StockMovement } from "@/lib/db/types";
+import type { CreateSaleInput, HoldBucket, PasskeyInput, ProductInput, ProductQuery, SaleQuery, Store } from "@/lib/db/store";
+import type {
+  Analytics,
+  PasskeyCredential,
+  Product,
+  Profile,
+  Sale,
+  SaleStatus,
+  Session,
+  StockMovement,
+  UserSummary,
+} from "@/lib/db/types";
 import { SEED_PRODUCTS, seedSales } from "@/lib/db/seed-data";
 import { buildAnalytics } from "@/lib/db/analytics";
 import { publishStock } from "@/lib/events";
+import { signSession, verifySession, sessionIsRevoked } from "@/lib/session";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "adonai.json");
 const SECRET = process.env.LOCAL_AUTH_SECRET || "adonai-local-dev-secret";
 
+type DbUser = { id: string; password_hash: string; sessions_invalid_before: string | null } & Profile;
+
 type Db = {
   products: Product[];
   sales: Sale[];
   movements: StockMovement[];
-  users: ({ id: string; password_hash: string } & Profile)[];
+  users: DbUser[];
+  passkeys: PasskeyCredential[];
   seq: number;
 };
 
 /** Push a stock change to any connected browser (showroom, second terminal). */
-const announce = (p: { id: string; sku: string; stock: number }, reason: string) =>
-  publishStock({ product_id: p.id, sku: p.sku, stock: p.stock, reason });
+const announce = (
+  p: { id: string; sku: string; stock: number; min_stock: number; on_trial: number; in_inspection: number },
+  reason: string,
+) =>
+  publishStock({
+    product_id: p.id,
+    sku: p.sku,
+    stock: p.stock,
+    min_stock: p.min_stock,
+    on_trial: p.on_trial,
+    in_inspection: p.in_inspection,
+    reason,
+  });
 
 const hash = (pw: string) => scryptSync(pw, SECRET, 32).toString("hex");
 const now = () => new Date().toISOString();
@@ -49,7 +74,9 @@ function blankDb(): Db {
       name: u.name,
       role: u.role,
       password_hash: hash(u.password),
+      sessions_invalid_before: null,
     })),
+    passkeys: [],
     seq: 1,
   };
 }
@@ -69,11 +96,23 @@ function tx<T>(fn: (db: Db) => T | Promise<T>): Promise<T> {
   return next;
 }
 
+/** Fills in columns added after a .data/adonai.json was first written. */
+function migrate(db: Db): Db {
+  db.products ??= [];
+  for (const p of db.products) {
+    p.on_trial = Number(p.on_trial ?? 0);
+    p.in_inspection = Number(p.in_inspection ?? 0);
+  }
+  for (const u of db.users ??= []) u.sessions_invalid_before ??= null;
+  db.passkeys ??= [];
+  return db;
+}
+
 function load(): Db {
   if (cache) return cache;
   if (existsSync(DATA_FILE)) {
     try {
-      cache = JSON.parse(readFileSync(DATA_FILE, "utf8")) as Db;
+      cache = migrate(JSON.parse(readFileSync(DATA_FILE, "utf8")) as Db);
       return cache;
     } catch {
       /* fall through to reseed */
@@ -199,27 +238,6 @@ function reverseStock(db: Db, sale: Sale) {
   }
 }
 
-function sign(payload: object) {
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = createHash("sha256").update(`${body}.${SECRET}`).digest("base64url");
-  return `${body}.${sig}`;
-}
-
-function verify<T>(token: string): T | null {
-  const [body, sig] = token.split(".");
-  if (!body || !sig) return null;
-  const expect = createHash("sha256").update(`${body}.${SECRET}`).digest("base64url");
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expect);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as T & { exp: number };
-    return payload.exp > Date.now() ? payload : null;
-  } catch {
-    return null;
-  }
-}
-
 export const localStore: Store = {
   kind: "local",
 
@@ -258,6 +276,9 @@ export const localStore: Store = {
         barcode: (input.barcode || existing?.barcode || generateBarcode(sku)).trim(),
         discount_pct: Math.min(Math.max(input.discount_pct ?? existing?.discount_pct ?? 0, 0), 90),
         active: input.active ?? existing?.active ?? true,
+        // Advisory counters are owned by /api/hold, not by the product form.
+        on_trial: existing?.on_trial ?? 0,
+        in_inspection: existing?.in_inspection ?? 0,
         created_at: existing?.created_at ?? now(),
         updated_at: now(),
       };
@@ -336,15 +357,156 @@ export const localStore: Store = {
     const b = Buffer.from(hash(password));
     if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
     const profile: Profile = { id: user.id, email: user.email, name: user.name, role: user.role };
-    return { user: profile, token: sign({ sub: user.id, exp: Date.now() + 12 * 3600 * 1000 }) };
+    return { user: profile, token: issueToken(user.id) };
   },
 
   async getSession(token) {
-    const payload = verify<{ sub: string }>(token);
+    const payload = verifySession(token);
     if (!payload) return null;
     const db = load();
     const user = db.users.find((u) => u.id === payload.sub);
     if (!user) return null;
-    return { user: { id: user.id, email: user.email, name: user.name, role: user.role } };
+    // An admin revoking a passkey can also cut existing sessions: any token
+    // issued at or before that moment stops working here, immediately.
+    if (sessionIsRevoked(payload, user.sessions_invalid_before)) return null;
+    return { user: toProfile(user) };
+  },
+
+  async createSession(userId) {
+    const db = load();
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return null;
+    return { user: toProfile(user), token: issueToken(user.id) };
+  },
+
+  // ---------------------------------------------------------------- holds --
+  // Advisory only: `stock` is untouched, so the counter can still sell a piece
+  // that happens to be on the fitting-room rail or the QC bench.
+  async setHold(id, bucket: HoldBucket, next, actor) {
+    return tx((db) => {
+      const p = db.products.find((x) => x.id === id);
+      if (!p) throw new Error("Product not found.");
+      const n = Math.floor(Number(next));
+      if (!Number.isFinite(n) || n < 0) throw new Error("Count cannot be negative.");
+      p[bucket] = n;
+      p.updated_at = now();
+      // No StockMovement row: the sellable count did not change, and that ledger
+      // is what reconciles sales against inventory. The push below is the audit.
+      void actor;
+      announce(p, `Moved to ${bucket === "on_trial" ? "trial" : "inspection"}`);
+      return p;
+    });
+  },
+
+  // -------------------------------------------------------------- passkeys --
+  async listUsers(): Promise<UserSummary[]> {
+    const db = load();
+    return db.users.map((u) => {
+      const mine = db.passkeys.filter((k) => k.user_id === u.id);
+      const active = mine.filter((k) => !k.revoked_at);
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        passkeys: mine.length,
+        active_passkeys: active.length,
+        revoked_passkeys: mine.length - active.length,
+        last_used_at: active.map((k) => k.last_used_at).filter(Boolean).sort().pop() ?? null,
+        sessions_invalid_before: u.sessions_invalid_before,
+      };
+    });
+  },
+
+  async listPasskeys(userId, includeRevoked = true) {
+    const db = load();
+    let rows = [...db.passkeys];
+    if (userId) rows = rows.filter((k) => k.user_id === userId);
+    if (!includeRevoked) rows = rows.filter((k) => !k.revoked_at);
+    const byId = new Map(db.users.map((u) => [u.id, u]));
+    rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return rows.map((k) => decorate(k, byId.get(k.user_id)));
+  },
+
+  async findPasskey(credentialId) {
+    const db = load();
+    const k = db.passkeys.find((x) => x.id === credentialId);
+    if (!k) return null;
+    return decorate(k, db.users.find((u) => u.id === k.user_id));
+  },
+
+  async addPasskey(input: PasskeyInput) {
+    return tx((db) => {
+      const dup = db.passkeys.find((k) => k.id === input.id && !k.revoked_at);
+      if (dup) throw new Error("That authenticator is already registered.");
+      const row: PasskeyCredential = {
+        id: input.id,
+        user_id: input.user_id,
+        user_email: null,
+        user_name: null,
+        user_role: null,
+        public_key: input.public_key,
+        counter: Math.max(0, Math.floor(input.counter)),
+        transports: input.transports ?? [],
+        name: input.name?.trim() || "Passkey",
+        device_type: input.device_type ?? null,
+        backed_up: !!input.backed_up,
+        created_at: now(),
+        last_used_at: null,
+        revoked_at: null,
+        revoked_by: null,
+      };
+      db.passkeys.push(row);
+      return decorate(row, db.users.find((u) => u.id === row.user_id));
+    });
+  },
+
+  async recordPasskeyUse(credentialId, counter, at) {
+    return tx((db) => {
+      const k = db.passkeys.find((x) => x.id === credentialId);
+      if (!k) return;
+      k.last_used_at = at;
+      // Never let the sign count go backwards: that is the replay signal.
+      k.counter = Math.max(k.counter, Math.floor(counter));
+    });
+  },
+
+  async revokePasskey(credentialId, by, invalidateSessions) {
+    return tx((db) => {
+      const k = db.passkeys.find((x) => x.id === credentialId);
+      if (!k) throw new Error("Passkey not found.");
+      if (k.revoked_at) throw new Error("That passkey is already revoked.");
+      k.revoked_at = now();
+      k.revoked_by = by.email;
+      if (invalidateSessions) killSessions(db, k.user_id);
+      return decorate(k, db.users.find((u) => u.id === k.user_id));
+    });
+  },
+
+  async revokeAllPasskeys(userId, by, invalidateSessions) {
+    return tx((db) => {
+      const mine = db.passkeys.filter((k) => k.user_id === userId && !k.revoked_at);
+      for (const k of mine) {
+        k.revoked_at = now();
+        k.revoked_by = by.email;
+      }
+      if (invalidateSessions) killSessions(db, userId);
+      return mine.length;
+    });
   },
 };
+
+const toProfile = (u: DbUser): Profile => ({ id: u.id, email: u.email, name: u.name, role: u.role });
+
+const issueToken = (sub: string) => signSession(sub);
+
+/** Denylist by timestamp: every session issued before `now` stops resolving. */
+function killSessions(db: Db, userId: string) {
+  const u = db.users.find((x) => x.id === userId);
+  if (u) u.sessions_invalid_before = now();
+}
+
+/** Join the owner onto a credential row so the admin panel can render one table. */
+function decorate(k: PasskeyCredential, u: DbUser | undefined): PasskeyCredential {
+  return { ...k, user_email: u?.email ?? null, user_name: u?.name ?? null, user_role: u?.role ?? null };
+}

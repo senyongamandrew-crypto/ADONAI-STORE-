@@ -73,6 +73,57 @@ try {
   await q(seed);
   check("seed.sql applies cleanly", true);
 
+  // --------------------------------------------------- passkeys & hold columns
+  console.log("re-applying supabase/schema.sql (idempotency)");
+  await q(schema);
+  check("schema.sql is idempotent — a second apply changes nothing", true);
+
+  const holdCols = await q(
+    "select column_name, column_default from information_schema.columns where table_schema='public' and table_name='products' and column_name in ('on_trial','in_inspection')",
+  );
+  check(
+    "products carries the advisory trial/inspection counters",
+    holdCols.length === 2 && holdCols.every((c) => c.column_default === "0"),
+    holdCols.map((c) => `${c.column_name} default ${c.column_default}`).join(" "),
+  );
+  const negHold = await one(
+    `do $$ begin update products set on_trial = -1 where sku = (select sku from products limit 1); exception when check_violation then raise 'CHECK_OK'; end $$;`,
+  ).catch((e) => ({ err: e.message }));
+  check("a negative trial count is refused by a CHECK constraint", /CHECK_OK/.test(String(negHold?.err ?? "")), String(negHold?.err ?? "").slice(0, 40));
+
+  const sessCol = await one(
+    "select column_name from information_schema.columns where table_schema='public' and table_name='profiles' and column_name='sessions_invalid_before'",
+  );
+  check("profiles can invalidate sessions from a moment in time", !!sessCol);
+
+  const pkRls = await one(
+    "select c.relrowsecurity as rls, (select count(*)::int from pg_policies p where p.schemaname='public' and p.tablename='passkeys') as policies from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='passkeys'",
+  );
+  check("passkeys table exists", !!pkRls);
+  check(
+    "passkeys is RLS-locked with no policies (service role only)",
+    pkRls?.rls === true && pkRls?.policies === 0,
+    `rls=${pkRls?.rls} policies=${pkRls?.policies}`,
+  );
+
+  const owner = await one("select id, email from profiles where email = 'cashier@adonai.ug'");
+  await q(
+    `insert into passkeys (id, user_id, public_key, counter, transports, name, device_type, backed_up)
+     values ('sql-test-credential', $1, 'pQECAyYgASFYItest', 0, '{internal}', 'SQL harness key', 'singleDevice', false)`,
+    [owner.id],
+  );
+  const viaView = await one("select id, user_email, user_role, revoked_at from passkeys_admin where id = 'sql-test-credential'");
+  check(
+    "the admin view joins the owner onto each registration",
+    viaView?.user_email === "cashier@adonai.ug" && viaView?.user_role === "cashier" && viaView?.revoked_at === null,
+    `${viaView?.user_email}/${viaView?.user_role}`,
+  );
+  const held = await one(
+    `update products set on_trial = 2, in_inspection = 1 where id = (select id from products order by sku limit 1) returning on_trial, in_inspection, stock`,
+  );
+  check("advisory counters update without touching sellable stock", held?.on_trial === 2 && held?.in_inspection === 1, `stock=${held?.stock}`);
+  await q("delete from passkeys where id = 'sql-test-credential'");
+
   // ------------------------------------------------------------- catalog seed
   const { n: productCount } = await one("select count(*)::int as n from products");
   check("24 demo products seeded", productCount === 24, `${productCount}`);

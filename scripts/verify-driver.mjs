@@ -46,8 +46,27 @@ const noteColumn = (table, col) => {
   referencedColumns.get(table).add(col);
 };
 
+/**
+ * Row mappers are module-scope arrow functions, so they are not part of any
+ * .from() chain — but textually they sit inside whatever segment precedes them.
+ * Locate their spans so both passes can treat them as what they are.
+ */
+const MAPPER_NAMES = { toProduct: "products", toSale: "sales", toLine: "sale_lines", toPasskey: "passkeys_admin", toProfile: "profiles" };
+const mapperSpans = [];
+for (const fn of Object.keys(MAPPER_NAMES)) {
+  const at = driver.indexOf(`const ${fn} = `);
+  if (at === -1) continue;
+  // Ends at the first of "\n});" or "\n};" — taking only one overruns the body.
+  const ends = ["\n});", "\n};"].map((t) => driver.indexOf(t, at)).filter((i) => i !== -1);
+  if (!ends.length) continue;
+  mapperSpans.push({ fn, start: at, end: Math.min(...ends) });
+}
+
+/** The driver with every mapper body blanked out, for the chain-scoped pass. */
+const chainSource = mapperSpans.reduce((src, { start, end }) => src.slice(0, start) + " ".repeat(end - start) + src.slice(end), driver);
+
 // .from("t") ... .eq/.gt/.gte/.lt/.lte/.in/.neq("col", ...) / .order("col") / .select("col")
-const chained = driver.split(/\.from\("([a-z_]+)"\)/);
+const chained = chainSource.split(/\.from\("([a-z_]+)"\)/);
 for (let i = 1; i < chained.length; i += 2) {
   const table = chained[i];
   const segment = chained[i + 1] ?? "";
@@ -73,16 +92,14 @@ for (let i = 1; i < chained.length; i += 2) {
  * them to their table by hand and collect every r.<column> they read. This is
  * where a renamed column would actually break at runtime.
  */
-const MAPPERS = { toProduct: "products", toSale: "sales", toLine: "sale_lines" };
-for (const [fn, table] of Object.entries(MAPPERS)) {
-  const at = driver.indexOf(`const ${fn} = `);
-  if (at === -1) continue;
-  // The mapper is an arrow function returning an object literal, so it ends at
-  // the first of "\n});" or "\n};" — taking only one of them overruns the body.
-  const ends = ["\n});", "\n};"].map((t) => driver.indexOf(t, at)).filter((i) => i !== -1);
-  if (!ends.length) continue;
-  const body = driver.slice(at, Math.min(...ends));
+for (const { fn, start, end } of mapperSpans) {
+  const table = MAPPER_NAMES[fn];
+  const body = driver.slice(start, end);
   for (const m of body.matchAll(/\br\.([a-z_]+)/g)) noteColumn(table, m[1]);
+}
+// Guard against a silently unmatched mapper: the whole point of this block.
+for (const fn of Object.keys(MAPPER_NAMES)) {
+  if (!mapperSpans.some((sp) => sp.fn === fn)) throw new Error(`verify-driver: mapper ${fn} was not located in the driver`);
 }
 
 /**

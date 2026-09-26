@@ -13,10 +13,12 @@ begin
 exception when duplicate_object then null;
 end $$;
 
-create type sale_channel as enum ('pos', 'online');
-create type sale_status   as enum ('completed', 'pending', 'cancelled', 'refunded');
-create type user_role     as enum ('admin', 'manager', 'cashier');
-create type product_condition as enum ('New with tags', 'Like new', 'Good', 'Fair');
+-- Postgres has no CREATE TYPE IF NOT EXISTS, so each one is guarded. That makes
+-- the whole file safe to re-apply to a project that already has the schema.
+do $$ begin create type sale_channel      as enum ('pos', 'online');                                exception when duplicate_object then null; end $$;
+do $$ begin create type sale_status       as enum ('completed', 'pending', 'cancelled', 'refunded'); exception when duplicate_object then null; end $$;
+do $$ begin create type user_role         as enum ('admin', 'manager', 'cashier');                   exception when duplicate_object then null; end $$;
+do $$ begin create type product_condition as enum ('New with tags', 'Like new', 'Good', 'Fair');     exception when duplicate_object then null; end $$;
 
 -- ---------------------------------------------------------------- profiles --
 create table if not exists public.profiles (
@@ -24,8 +26,39 @@ create table if not exists public.profiles (
   email      text unique not null,
   name       text not null default '',
   role       user_role not null default 'cashier',
+  -- Set by an admin revocation: every session token issued at or before this
+  -- instant stops resolving. NULL means nothing has been cut.
+  sessions_invalid_before timestamptz,
   created_at timestamptz not null default now()
 );
+
+-- ---------------------------------------------------------------- passkeys --
+-- One row per enrolled authenticator. Public material only. RLS is on with no
+-- policies, so only service_role (which the app's routes use) can read it.
+create table if not exists public.passkeys (
+  id           text primary key,               -- base64url credentialID
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  public_key   text not null,                  -- base64url COSE key
+  counter      bigint not null default 0 check (counter >= 0),
+  transports   text[] not null default '{}',
+  name         text not null default 'Passkey',
+  device_type  text check (device_type in ('singleDevice', 'multiDevice')),
+  backed_up    boolean not null default false,
+  created_at   timestamptz not null default now(),
+  last_used_at timestamptz,
+  -- Soft delete: revoked credentials stay for the audit trail and can never
+  -- sign in again, because the app filters on revoked_at before verifying.
+  revoked_at   timestamptz,
+  revoked_by   text
+);
+create index if not exists passkeys_user_idx on public.passkeys(user_id) where revoked_at is null;
+alter table public.passkeys enable row level security;
+
+-- Read model for the admin Security panel (owner joined in, one round trip).
+create or replace view public.passkeys_admin as
+select p.*, pr.email as user_email, pr.name as user_name, pr.role as user_role
+from public.passkeys p
+join public.profiles pr on pr.id = p.user_id;
 
 -- ---------------------------------------------------------------- products --
 create table if not exists public.products (
@@ -43,10 +76,20 @@ create table if not exists public.products (
   discount_pct integer not null default 0 check (discount_pct between 0 and 90),
   stock        integer not null default 0 check (stock >= 0),   -- CHECK = atomic floor
   min_stock    integer not null default 3 check (min_stock >= 0),
+  -- Advisory counters: where a unit physically is. They never affect `stock`,
+  -- so the counter can still sell a piece that is in the fitting room.
+  on_trial      integer not null default 0 check (on_trial >= 0),
+  in_inspection integer not null default 0 check (in_inspection >= 0),
   active       boolean not null default true,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
 );
+-- For installs created before these columns existed (create table if not exists
+-- will not add columns to a table that is already there).
+alter table public.products  add column if not exists on_trial      integer not null default 0 check (on_trial >= 0);
+alter table public.products  add column if not exists in_inspection integer not null default 0 check (in_inspection >= 0);
+alter table public.profiles  add column if not exists sessions_invalid_before timestamptz;
+
 create index if not exists products_category_idx on public.products(category);
 create index if not exists products_active_idx   on public.products(active, stock);
 create index if not exists products_title_trgm   on public.products using gin (to_tsvector('simple', title));
@@ -242,6 +285,7 @@ end $$;
 
 create or replace function public.touch_updated_at() returns trigger language plpgsql as $$
 begin new.updated_at = now(); return new; end $$;
+drop trigger if exists products_touch on public.products;
 create trigger products_touch before update on public.products
   for each row execute function public.touch_updated_at();
 
@@ -260,28 +304,37 @@ language sql stable security definer set search_path = public
 as $$ select role from public.profiles where id = auth.uid() $$;
 
 -- Showroom is public; only active, in-stock rows are exposed anonymously.
+drop policy if exists products_public_read on public.products;
 create policy products_public_read on public.products for select using (active);
+drop policy if exists products_staff_read on public.products;
 create policy products_staff_read  on public.products for select
   to authenticated using (true);
+drop policy if exists products_staff_write on public.products;
 create policy products_staff_write on public.products for all
   to authenticated using (public.current_role_name() in ('admin','manager'))
   with check (public.current_role_name() in ('admin','manager'));
 
+drop policy if exists sales_staff_read on public.sales;
 create policy sales_staff_read on public.sales for select to authenticated
   using (public.current_role_name() in ('admin','manager','cashier'));
+drop policy if exists sales_staff_write on public.sales;
 create policy sales_staff_write on public.sales for all to authenticated
   using (public.current_role_name() in ('admin','manager','cashier'))
   with check (public.current_role_name() in ('admin','manager','cashier'));
 
+drop policy if exists sale_lines_staff on public.sale_lines;
 create policy sale_lines_staff on public.sale_lines for all to authenticated
   using (public.current_role_name() in ('admin','manager','cashier'))
   with check (public.current_role_name() in ('admin','manager','cashier'));
 
+drop policy if exists movements_staff on public.stock_movements;
 create policy movements_staff on public.stock_movements for all to authenticated
   using (public.current_role_name() in ('admin','manager'))
   with check (public.current_role_name() in ('admin','manager'));
 
+drop policy if exists profiles_self on public.profiles;
 create policy profiles_self on public.profiles for select to authenticated
   using (id = auth.uid() or public.current_role_name() in ('admin','manager'));
+drop policy if exists profiles_admin_write on public.profiles;
 create policy profiles_admin_write on public.profiles for all to authenticated
   using (public.current_role_name() = 'admin') with check (public.current_role_name() = 'admin');

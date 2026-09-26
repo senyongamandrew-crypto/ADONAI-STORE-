@@ -1,5 +1,15 @@
 import type { Channel, Role } from "@/lib/config";
-import type { Analytics, Product, Profile, Sale, SaleStatus, Session, StockMovement } from "@/lib/db/types";
+import type {
+  Analytics,
+  PasskeyCredential,
+  Product,
+  Profile,
+  Sale,
+  SaleStatus,
+  Session,
+  StockMovement,
+  UserSummary,
+} from "@/lib/db/types";
 
 export type ProductInput = {
   id?: string;
@@ -42,6 +52,20 @@ export type ProductQuery = {
 
 export type SaleQuery = { from?: string; to?: string; channel?: Channel; status?: SaleStatus; limit?: number };
 
+/** Where a physical unit is, without affecting whether it can be sold. */
+export type HoldBucket = "on_trial" | "in_inspection";
+
+export type PasskeyInput = {
+  id: string;
+  user_id: string;
+  public_key: string;
+  counter: number;
+  transports: string[];
+  name: string;
+  device_type: "singleDevice" | "multiDevice" | null;
+  backed_up: boolean;
+};
+
 /**
  * Separation of concerns: the app only ever talks to this interface.
  * `supabaseDriver` is production (Postgres + RLS + RPC); `localDriver` is the
@@ -61,4 +85,19 @@ export interface Store {
   analytics(days?: number): Promise<Analytics>;
   signIn(email: string, password: string): Promise<Session | null>;
   getSession(token: string): Promise<Session | null>;
+  /** Mint a session for an already-authenticated user (the passkey path). */
+  createSession(userId: string): Promise<Session | null>;
+
+  // --- advisory trial / inspection counters -------------------------------
+  setHold(id: string, bucket: HoldBucket, next: number, actor: Profile | null): Promise<Product>;
+
+  // --- passkeys ------------------------------------------------------------
+  listUsers(): Promise<UserSummary[]>;
+  listPasskeys(userId?: string, includeRevoked?: boolean): Promise<PasskeyCredential[]>;
+  addPasskey(input: PasskeyInput): Promise<PasskeyCredential>;
+  findPasskey(credentialId: string): Promise<PasskeyCredential | null>;
+  recordPasskeyUse(credentialId: string, counter: number, at: string): Promise<void>;
+  revokePasskey(credentialId: string, by: Profile, invalidateSessions: boolean): Promise<PasskeyCredential>;
+  /** The admin "reset flow": revoke every credential a user holds, in one action. */
+  revokeAllPasskeys(userId: string, by: Profile, invalidateSessions: boolean): Promise<number>;
 }

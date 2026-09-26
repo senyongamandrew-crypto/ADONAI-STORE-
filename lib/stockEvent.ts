@@ -6,6 +6,11 @@ export type StockEvent = {
   product_id: string;
   sku: string;
   stock: number;
+  /** Advisory counters, carried so the Trial / Inspection tabs need no refetch. */
+  on_trial?: number;
+  in_inspection?: number;
+  /** Lets a listener flag low stock without a second round trip. */
+  min_stock?: number;
   reason: string;
   at: string;
 };

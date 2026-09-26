@@ -30,6 +30,18 @@ export async function requireRole(...roles: Role[]): Promise<Profile> {
   return user;
 }
 
+/** Set the session cookie on a response. One definition so every login path agrees. */
+export function attachSession(res: import("next/server").NextResponse, token: string) {
+  res.cookies.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 12,
+    secure: process.env.NODE_ENV === "production",
+  });
+  return res;
+}
+
 /** Role guard for a route path — used by the admin layout to bounce unauthorised users. */
 export function rolesForPath(pathname: string): Role[] {
   const keys = Object.keys(ROUTE_GUARDS).filter((k) => pathname === k || pathname.startsWith(`${k}/`));

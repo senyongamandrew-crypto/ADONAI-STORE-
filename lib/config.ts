@@ -90,6 +90,9 @@ export const ROUTE_GUARDS: Record<string, Role[]> = {
   "/admin/inventory": [ROLES.ADMIN, ROLES.MANAGER],
   "/admin/sales": [ROLES.ADMIN, ROLES.MANAGER],
   "/admin/labels": [ROLES.ADMIN, ROLES.MANAGER],
+  "/admin/stock": [ROLES.ADMIN, ROLES.MANAGER],
+  // Passkey administration is the one page managers do not get.
+  "/admin/security": [ROLES.ADMIN],
   "/pos": [ROLES.ADMIN, ROLES.MANAGER, ROLES.CASHIER],
 };
 

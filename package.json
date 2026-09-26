@@ -2,7 +2,7 @@
   "name": "adonai-thrift",
   "version": "1.0.0",
   "private": true,
-  "description": "Adonai Thrift \u2014 unified dual-channel retail (public showroom + POS terminal + inventory + analytics)",
+  "description": "Adonai Thrift — unified dual-channel retail (public showroom + POS terminal + inventory + analytics)",
   "scripts": {
     "dev": "next dev -H 0.0.0.0 -p 3000",
     "build": "next build",
@@ -14,6 +14,8 @@
     "verify:driver": "node scripts/verify-driver.mjs"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.3",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.0",
     "bwip-js": "^4.5.1",

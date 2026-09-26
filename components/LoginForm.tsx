@@ -1,7 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Loader2 } from "lucide-react";
+import { startAuthentication } from "@simplewebauthn/browser";
+import { Fingerprint, KeyRound, Loader2 } from "lucide-react";
 import { DEMO_USERS } from "@/lib/config";
 
 export function LoginForm({ mode }: { mode: string }) {
@@ -10,6 +11,43 @@ export function LoginForm({ mode }: { mode: string }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+
+  /**
+   * Passkey sign-in. If an email is typed we narrow the prompt to that
+   * account's keys; with the field empty the browser offers whichever
+   * discoverable credential the device holds.
+   */
+  const passkey = async () => {
+    setPasskeyBusy(true);
+    setError(null);
+    try {
+      const begin = await fetch("/api/auth/passkey/login/begin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: email.trim() || undefined }),
+      }).then((r) => r.json());
+      if (!begin.ok) throw new Error(begin.error ?? "Passkeys are not available here.");
+      const credential = await startAuthentication({ optionsJSON: begin.data.options });
+      const done = await fetch("/api/auth/passkey/login/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ credential }),
+      }).then((r) => r.json());
+      if (!done.ok) throw new Error(done.error ?? "That passkey was rejected.");
+      router.push(done.data.role === "cashier" ? "/pos" : "/admin");
+      router.refresh();
+    } catch (e) {
+      const err = e as Error & { name?: string };
+      setError(
+        err.name === "ERROR_CEREMONY_ABORTED"
+          ? "Passkey prompt dismissed."
+          : err.message || "Passkey sign-in failed.",
+      );
+    } finally {
+      setPasskeyBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent, as?: { email: string; password: string }) => {
     e.preventDefault();
@@ -45,6 +83,17 @@ export function LoginForm({ mode }: { mode: string }) {
         {error && <p className="rounded-lg bg-clay-50 px-3 py-2 text-sm font-semibold text-clay-600">{error}</p>}
         <button disabled={busy} className="btn-primary w-full py-3">{busy ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />} Sign in</button>
       </form>
+
+      <div className="card mt-3 p-4">
+        <button onClick={() => void passkey()} disabled={passkeyBusy} className="btn-ghost w-full py-3">
+          {passkeyBusy ? <Loader2 size={16} className="animate-spin" /> : <Fingerprint size={16} />}
+          Continue with a passkey
+        </button>
+        <p className="mt-2 text-[11px] text-ink-600">
+          Fingerprint, face or device PIN. Enrol one under Admin → Security &amp; Passkeys. Passkeys are bound to the
+          domain they were created on, so re-enrol if the shop moves to a new address.
+        </p>
+      </div>
 
       {mode === "local" && (
         <div className="card mt-3 p-4">
