@@ -4,6 +4,15 @@
 -- ============================================================================
 create extension if not exists "pgcrypto";
 
+-- Required for the /api/stream Realtime subscription to receive product updates.
+do $$
+begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    execute 'alter publication supabase_realtime add table public.products';
+  end if;
+exception when duplicate_object then null;
+end $$;
+
 create type sale_channel as enum ('pos', 'online');
 create type sale_status   as enum ('completed', 'pending', 'cancelled', 'refunded');
 create type user_role     as enum ('admin', 'manager', 'cashier');

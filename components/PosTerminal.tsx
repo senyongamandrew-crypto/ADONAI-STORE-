@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Layers, Minus, Plus, ScanBarcode, Search, ShoppingCart, Store, Trash2, X } from "lucide-react";
 import { CATEGORIES, TENDERS, type Tender } from "@/lib/config";
 import { cartTotals, usePosLedger } from "@/lib/cart";
+import { useStockStream } from "@/lib/useStockStream";
 import { useBarcodeScanner } from "@/lib/useBarcodeScanner";
 import { changeFor, fmt, quickTenders, unitPrice } from "@/lib/money";
 import { placeholderImage } from "@/lib/photo";
@@ -49,9 +50,25 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
   };
 
   useEffect(() => {
-    const id = setInterval(refresh, 20000);
+    refresh();
+    const id = setInterval(refresh, 60_000);
     return () => clearInterval(id);
   }, []);
+
+  /**
+   * Keeps two terminals honest: a sale rung up elsewhere arrives here instantly,
+   * and if it eats into the open ticket the cashier is told straight away.
+   */
+  const stream = useStockStream((event) => {
+    setProducts((prev) => prev.map((p) => (p.id === event.product_id ? { ...p, stock: event.stock } : p)));
+    const line = usePosLedger.getState().lines.find((l) => l.product_id === event.product_id);
+    if (line && line.qty > event.stock) {
+      flash({
+        tone: "error",
+        text: event.stock === 0 ? `${line.title} just sold out elsewhere — remove it from the ticket` : `Only ${event.stock} × ${line.title} left after another sale`,
+      });
+    }
+  });
 
   /** Scanner burst → inventory match in one pass (barcode, SKU, then title). */
   const handleScan = (raw: string) => {
@@ -147,6 +164,9 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
         </div>
         <Badge tone={view === "counter" ? "good" : "brass"}>
           {view === "counter" ? "Scanner armed — scan anywhere on this page" : "Customer-facing catalog"}
+        </Badge>
+        <Badge tone={stream === "live" ? "good" : "neutral"}>
+          {stream === "live" ? "Stock live" : stream === "connecting" ? "Connecting" : "Offline"}
         </Badge>
         <span className="ml-auto text-xs text-ink-600">Cashier: <strong>{user.name}</strong></span>
       </div>

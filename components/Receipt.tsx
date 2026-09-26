@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { Printer, Share2, X } from "lucide-react";
 import { STORE } from "@/lib/config";
 import { fmt } from "@/lib/money";
@@ -8,7 +9,10 @@ import type { Sale } from "@/lib/db/types";
 const stamp = (iso: string) => new Date(iso).toLocaleString("en-GB", { timeZone: "Africa/Kampala" });
 
 /** Receipt & Invoice Generator — thermal-print layout that also dispatches over WhatsApp. */
+const PAPER = [58, 80] as const;
+
 export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void }) {
+  const [paper, setPaper] = useState<(typeof PAPER)[number]>(80);
   const waText = buildOrderMessage(
     sale.lines.map((l) => ({ sku: l.sku, title: l.title, qty: l.qty, unit_price: l.unit_price, line_total: l.line_total })),
     { name: sale.customer_name ?? undefined, phone: sale.customer_phone ?? undefined, note: `Receipt ${sale.ref}` },
@@ -16,10 +20,22 @@ export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void })
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/50 p-3 no-print-bg">
-      <div className="print-area card my-6 w-full max-w-sm bg-white p-4">
+      <div className="print-area card my-6 w-full bg-white p-4" style={{ maxWidth: `${paper}mm` }}>
         <div className="no-print mb-2 flex items-center justify-between">
           <span className="text-xs font-bold uppercase tracking-wide text-ink-600">Receipt</span>
           <div className="flex gap-1.5">
+            <div className="inline-flex rounded-lg border border-ink-900/15 p-0.5">
+              {PAPER.map((w) => (
+                <button
+                  key={w}
+                  onClick={() => setPaper(w)}
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${paper === w ? "bg-ink-900 text-[#faf7f2]" : "text-ink-600 hover:bg-ink-900/5"}`}
+                  title={`${w}mm thermal roll`}
+                >
+                  {w}mm
+                </button>
+              ))}
+            </div>
             <button onClick={() => window.print()} className="btn-ghost px-2.5 py-1.5 text-xs"><Printer size={13} /> Print</button>
             <a href={`https://wa.me/${(sale.customer_phone || STORE.whatsapp).replace(/[^\d]/g, "")}?text=${encodeURIComponent(waText)}`} target="_blank" rel="noopener noreferrer" className="btn-brass px-2.5 py-1.5 text-xs"><Share2 size={13} /> Send</a>
             {onClose && <button onClick={onClose} className="btn-ghost px-2 py-1.5" aria-label="Close receipt"><X size={14} /></button>}

@@ -54,12 +54,14 @@ Two suites, both runnable here:
 
 ```bash
 npm run dev          # terminal 1
-npm run verify       # terminal 2 — 52 end-to-end checks over HTTP
+npm run verify       # terminal 2 — 60 end-to-end checks over HTTP
 npm run verify:sql   # 24 checks against a real ephemeral Postgres
 npm run typecheck && npm run build
 ```
 
-`npm run verify` (`scripts/verify.mjs`) drives the real routes: catalog reads, RBAC rejection of
+`npm run verify` (`scripts/verify.mjs`) drives the real routes — including opening the SSE
+stream, ringing up two counter sales and asserting both stock frames arrive (the second one
+`stock=0`, which is what flips the public site to "Sold out") — plus catalog reads, RBAC rejection of
 anonymous POS/analytics/write calls, a POS settlement (totals + change), the atomic stock
 decrement, absurd-quantity and oversell rejection, **six simultaneous buys against three units
 (exactly three win, stock lands on zero, refs stay distinct)**, the online-order lifecycle
@@ -124,6 +126,7 @@ app/
     sales/                  GET (staff) · POST (cashier+, or anonymous online)
     sales/[id]/             PATCH status — approve / cancel / refund
     stock/                  POST manual adjustment
+    stream/                 GET SSE — live stock pushes to catalog + terminals
     analytics/              GET (manager+)
     barcode/                GET SVG (Code 128 / QR)
     auth/{login,logout,me}  session cookie lifecycle
@@ -134,6 +137,8 @@ lib/
   db/                       Store interface, drivers, analytics, seed data
   supabase/                 env, clients, Postgres driver
   auth.ts                   cookie session + role guards
+  events.ts stockEvent.ts   in-process stock bus + wire format
+  useStockStream.ts         EventSource hook for the catalog and POS
   money.ts margin.ts        UGX arithmetic, change, markups, net margin
   barcode.ts                Code 128 / QR / EAN-13 generation
   whatsapp.ts               order message encoder + wa.me deep links
@@ -206,8 +211,11 @@ valuation at cost and retail, low-stock queue, and pending online orders awaitin
 - **No live payment gateway** by design: online orders are confirmed by the shop and settled by
   Mobile Money or cash, then logged. `lib/whatsapp.ts` and `POST /api/sales` are the two seams
   where a gateway would slot in.
-- **Stock mirroring is polling** (15 s showroom, 20 s POS), not Supabase Realtime — swap the
-  interval for a `postgres_changes` subscription in `components/Showroom.tsx` if you want pushes.
+- **Stock mirroring is push, not polling.** `/api/stream` is an SSE endpoint fed by two
+  non-overlapping sources: the in-process bus (`lib/events.ts`, which every write in either
+  driver publishes to) and, in Supabase mode, a `postgres_changes` Realtime subscription that
+  also catches writes from other processes. The verified latency from counter settlement to a
+  connected browser is under 300 ms, and a 60 s refetch remains as a backstop for reconnect gaps.
 
 ## Storefront content
 

@@ -251,6 +251,60 @@ const throttled = spam.filter((r) => r.status === 429).length;
 const letThrough = spam.filter((r) => r.status === 201).length;
 check("anonymous order endpoint rate-limits", throttled > 0, `${letThrough} through, ${throttled} throttled`);
 
+// --------------------------------------------------- 7d. realtime stock push
+const sseSku = `SSE-${Date.now().toString().slice(-6)}`;
+const sseProduct = await call("/api/products", {
+  method: "POST",
+  cookie: admin,
+  body: { sku: sseSku, title: "Realtime Probe", category: "Dresses", condition: "Good", size: "M", cost_price: 5000, price: 20000, stock: 2, min_stock: 0 },
+});
+check("realtime probe product created", sseProduct.status === 201, `${sseSku} stock=2`);
+
+const frames = [];
+const sseAbort = new AbortController();
+const reader = await (async () => {
+  const res = await fetch(`${BASE}/api/stream`, { headers: { accept: "text/event-stream" }, signal: sseAbort.signal });
+  check("SSE endpoint serves an event stream", res.status === 200 && (res.headers.get("content-type") || "").includes("text/event-stream"), res.headers.get("content-type"));
+  return res.body.getReader();
+})();
+
+(async () => {
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) !== -1) {
+        const frame = buf.slice(0, i);
+        buf = buf.slice(i + 2);
+        const ev = (frame.match(/^event: (.+)$/m) || [])[1];
+        const data = (frame.match(/^data: (.+)$/m) || [])[1];
+        if (ev && data) frames.push({ ev, data: JSON.parse(data) });
+      }
+    }
+  } catch {
+    /* aborted */
+  }
+})();
+
+await new Promise((r) => setTimeout(r, 600));
+check("stream announces itself on connect", frames.some((f) => f.ev === "hello"));
+
+await call("/api/sales", { method: "POST", cookie: cashier, body: { channel: "pos", tender: "Cash", lines: [{ product_id: sseProduct.json.data.id, qty: 1 }] } });
+await call("/api/sales", { method: "POST", cookie: cashier, body: { channel: "pos", tender: "Cash", lines: [{ product_id: sseProduct.json.data.id, qty: 1 }] } });
+await new Promise((r) => setTimeout(r, 1200));
+sseAbort.abort();
+
+const mine = frames.filter((f) => f.ev === "stock" && f.data.product_id === sseProduct.json.data.id);
+check("counter sales push stock frames to open browsers", mine.length === 2, mine.map((f) => `stock=${f.data.stock}`).join(" "));
+check("a sell-out pushes stock=0 so the site flips to Sold out", mine.some((f) => f.data.stock === 0));
+const sseStockNow = (await call("/api/products")).json.data.find((p) => p.id === sseProduct.json.data.id)?.stock;
+check("pushed stock matches the database", sseStockNow === 0, `db=${sseStockNow}`);
+await call(`/api/products/${sseProduct.json.data.id}`, { method: "DELETE", cookie: admin });
+
 // --------------------------------------------------------------- 8. analytics
 const analytics = await call("/api/analytics?days=30", { cookie: admin });
 const a = analytics.json?.data;

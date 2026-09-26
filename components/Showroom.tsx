@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Filter, RefreshCw, Search } from "lucide-react";
 import { CATEGORIES } from "@/lib/config";
 import { useWebCart } from "@/lib/cart";
+import { useStockStream } from "@/lib/useStockStream";
 import { unitPrice } from "@/lib/money";
 import { ProductCard } from "@/components/ProductCard";
 import { CartDrawer } from "@/components/CartDrawer";
@@ -25,37 +26,50 @@ export function Showroom({ initial }: { initial: { products: Product[]; user: Pr
   const [syncing, setSyncing] = useState(false);
   const add = useWebCart((s) => s.add);
 
-  /** Out-of-stock mirroring: re-read stock/price from the API so the grid matches the till. */
-  useEffect(() => {
-    let alive = true;
-    const sync = async () => {
-      setSyncing(true);
-      try {
-        const res = await fetch("/api/products", { cache: "no-store" });
-        const json = await res.json();
-        if (!alive || !json.ok) return;
-        const live = json.data as Product[];
-        const byId = new Map(live.map((p) => [p.id, p]));
-        setProducts((prev) => {
-          const merged = prev
-            .map((p) => (byId.has(p.id) ? byId.get(p.id)! : { ...p, active: false }))
-            .filter((p) => p.active);
-          for (const p of live) if (!merged.some((m) => m.id === p.id)) merged.push(p);
-          return merged;
-        });
-      } catch {
-        /* preview offline — keep showing the last known catalog */
-      } finally {
-        if (alive) setSyncing(false);
-      }
-    };
-    sync();
-    const id = setInterval(sync, 15000);
-    return () => {
-      alive = false;
-      clearInterval(id);
-    };
+  /** Full re-read from the API — initial load, reconnect, and unknown-product pushes. */
+  const sync = useCallback(async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/products", { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) return;
+      const live = json.data as Product[];
+      const byId = new Map(live.map((p) => [p.id, p]));
+      setProducts((prev) => {
+        const merged = prev
+          .map((p) => (byId.has(p.id) ? byId.get(p.id)! : { ...p, active: false }))
+          .filter((p) => p.active);
+        for (const p of live) if (!merged.some((m) => m.id === p.id)) merged.push(p);
+        return merged;
+      });
+    } catch {
+      /* offline — keep showing the last known catalog */
+    } finally {
+      setSyncing(false);
+    }
   }, []);
+
+  useEffect(() => {
+    sync();
+    // Backstop for the window between a dropped stream and its reconnect.
+    const id = setInterval(sync, 60_000);
+    return () => clearInterval(id);
+  }, [sync]);
+
+  /**
+   * Out-of-stock mirroring: the counter publishes on every sale, so a piece sold
+   * in store flips to "Sold out" here without a reload.
+   */
+  const stream = useStockStream((event) => {
+    setProducts((prev) => {
+      const known = prev.some((p) => p.id === event.product_id);
+      if (!known) {
+        void sync(); // new or deleted product — take the full snapshot
+        return prev;
+      }
+      return prev.map((p) => (p.id === event.product_id ? { ...p, stock: event.stock } : p));
+    });
+  });
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -101,7 +115,18 @@ export function Showroom({ initial }: { initial: { products: Product[]; user: Pr
             <button onClick={() => setInStockOnly((v) => !v)} className={`btn-ghost ${inStockOnly ? "border-brass-500 bg-brass-500/15" : ""}`}>
               <Filter size={15} /> In stock
             </button>
-            <span className="inline-flex items-center gap-1 text-xs text-ink-600" title="Stock refreshes from the counter every 15 seconds">
+            <span
+              className="inline-flex items-center gap-1.5 text-xs text-ink-600"
+              title={
+                stream === "live"
+                  ? "Live: stock updates the moment something sells at the counter"
+                  : stream === "connecting"
+                    ? "Connecting to live stock"
+                    : "Live updates unavailable — refreshing every minute"
+              }
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${stream === "live" ? "bg-emerald-500" : stream === "connecting" ? "bg-amber-500" : "bg-ink-600/40"}`} />
+              {stream === "live" ? "Live stock" : stream === "connecting" ? "Connecting" : "Offline"}
               <RefreshCw size={13} className={syncing ? "animate-spin" : ""} /> {visible.length} shown
             </span>
           </div>

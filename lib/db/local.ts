@@ -15,6 +15,7 @@ import type { CreateSaleInput, ProductInput, ProductQuery, SaleQuery, Store } fr
 import type { Analytics, Product, Profile, Sale, SaleStatus, Session, StockMovement } from "@/lib/db/types";
 import { SEED_PRODUCTS, seedSales } from "@/lib/db/seed-data";
 import { buildAnalytics } from "@/lib/db/analytics";
+import { publishStock } from "@/lib/events";
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "adonai.json");
@@ -27,6 +28,10 @@ type Db = {
   users: ({ id: string; password_hash: string } & Profile)[];
   seq: number;
 };
+
+/** Push a stock change to any connected browser (showroom, second terminal). */
+const announce = (p: { id: string; sku: string; stock: number }, reason: string) =>
+  publishStock({ product_id: p.id, sku: p.sku, stock: p.stock, reason });
 
 const hash = (pw: string) => scryptSync(pw, SECRET, 32).toString("hex");
 const now = () => new Date().toISOString();
@@ -160,15 +165,17 @@ function applyStock(db: Db, lines: { product_id: string; qty: number; sku: strin
     if (p.stock < l.qty) throw new Error(`Insufficient stock for ${p.title} (${p.stock} left, ${l.qty} requested).`);
     p.stock -= l.qty;
     p.updated_at = now();
+    const reason = `${sale.channel === "pos" ? "Counter sale" : "Online order"} ${sale.ref}`;
     db.movements.unshift({
       id: randomUUID(),
       product_id: p.id,
       sku: p.sku,
       delta: -l.qty,
-      reason: `${sale.channel === "pos" ? "Counter sale" : "Online order"} ${sale.ref}`,
+      reason,
       sale_id: sale.id,
       created_at: sale.created_at,
     });
+    announce(p, reason);
   }
 }
 
@@ -178,15 +185,17 @@ function reverseStock(db: Db, sale: Sale) {
     if (!p) continue;
     p.stock += l.qty;
     p.updated_at = now();
+    const reason = `Stock returned from ${sale.ref}`;
     db.movements.unshift({
       id: randomUUID(),
       product_id: p.id,
       sku: p.sku,
       delta: l.qty,
-      reason: `Stock returned from ${sale.ref}`,
+      reason,
       sale_id: sale.id,
       created_at: now(),
     });
+    announce(p, reason);
   }
 }
 
@@ -254,6 +263,7 @@ export const localStore: Store = {
       };
       if (existing) Object.assign(existing, record);
       else db.products.push(record);
+      announce(record, existing ? "Product updated" : "Product added");
       return record;
     });
   },
@@ -275,6 +285,7 @@ export const localStore: Store = {
       p.stock = next;
       p.updated_at = now();
       db.movements.unshift({ id: randomUUID(), product_id: p.id, sku: p.sku, delta, reason, sale_id: saleId, created_at: now() });
+      announce(p, reason);
       return p;
     });
   },
