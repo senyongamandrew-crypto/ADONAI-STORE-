@@ -92,9 +92,9 @@ export function CartDrawer() {
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {!lines.length ? (
             <Empty>
-              <p className="text-sm">Nothing here yet. Add pieces from the rail and they will appear in this drawer.</p>
+              <p className="text-[15px] leading-[1.6]">Your basket is empty. Add pieces from the rail and they will show up here.</p>
               <a href={whatsappChatUrl()} target="_blank" rel="noopener noreferrer" className="btn-ghost mt-1 py-1.5 text-xs">
-                Ask the shop a question on WhatsApp
+                Message us about a piece
               </a>
             </Empty>
           ) : (
@@ -148,8 +148,8 @@ export function CartDrawer() {
             <label className="flex items-start gap-2 rounded-lg bg-[#faf7f2] px-2.5 py-2 text-[11px] leading-snug text-ink-700">
               <input type="checkbox" checked={reserve} onChange={(e) => setReserve(e.target.checked)} className="mt-0.5" />
               <span>
-                <strong>Reserve these in the shop&rsquo;s system.</strong> Creates a pending order the till can see, so stock is held
-                while you confirm payment on WhatsApp.
+                <strong>Hold these for me.</strong> Puts the order on the shop&rsquo;s till so the pieces are kept aside while you
+                confirm payment on WhatsApp.
               </span>
             </label>
 
@@ -159,15 +159,16 @@ export function CartDrawer() {
 
             {reserved && (
               <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
-                Reserved as {reserved} — the shop can see it on the till and will confirm on WhatsApp.
+                Held as {reserved}. We will confirm on WhatsApp before you pay.
               </p>
             )}
             {reserveError && <p className="rounded-lg bg-clay-50 px-3 py-2 text-[11px] font-semibold text-clay-600">{reserveError}</p>}
             <p className="text-center text-[11px] leading-relaxed text-ink-600">
-              Opens WhatsApp with your items, quantities and total pre-written to {STORE.whatsapp}. Stock is confirmed by the shop before payment.
+              Opens WhatsApp with your items and total already written out to {STORE.whatsapp}. We
+              check the rail before you pay.
             </p>
             <button onClick={clear} className="w-full text-center text-[11px] font-semibold text-ink-600 underline">Clear basket</button>
-            {oversold.length > 0 && <p className="text-[11px] font-semibold text-clay-600">Some quantities exceed current stock — the shop will confirm what is available.</p>}
+            {oversold.length > 0 && <p className="text-[11px] font-semibold text-clay-600">You have asked for more than we have. We will tell you what is actually available.</p>}
           </footer>
         )}
       </aside>

@@ -4,7 +4,7 @@
  */
 export const STORE = {
   name: "ADONAI THRIFT",
-  tagline: "Pre-loved fashion · Kampala",
+  tagline: "Pre-loved clothing, Kampala",
   /** E.164, digits only — used by the WhatsApp order orchestrator. */
   whatsapp: "+2567XXXXXXXX",
   address: "Ntinda, Kampala, Uganda",
@@ -37,6 +37,31 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * Delivery bands for the storefront. Deliberately plain: region, the towns it
+ * covers, an honest timeline and how the parcel actually moves.
+ */
+export const DELIVERY = [
+  {
+    region: "Central Region",
+    towns: "Kampala, Wakiso, Mukono, Entebbe",
+    eta: "Same day",
+    detail: "Order before 4pm and a boda brings it to you. Pay on delivery or by MoMo.",
+  },
+  {
+    region: "Eastern Region",
+    towns: "Jinja, Mbale, Tororo, Iganga",
+    eta: "1–2 days",
+    detail: "Sent by coach parcel. We message you the bus and the driver's number.",
+  },
+  {
+    region: "Western Region",
+    towns: "Mbarara, Fort Portal, Kabale, Kasese",
+    eta: "2–3 days",
+    detail: "Coach parcel. MoMo before it travels, or pay the agent on collection.",
+  },
+] as const;
 
 export const CONDITIONS = ["New with tags", "Like new", "Good", "Fair"] as const;
 export type Condition = (typeof CONDITIONS)[number];

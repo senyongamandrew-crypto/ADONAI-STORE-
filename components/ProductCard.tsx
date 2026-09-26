@@ -12,7 +12,7 @@ export function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: P
   const img = product.image_url || placeholderImage(product.sku + product.title, product.title);
 
   return (
-    <article className={`card group relative flex flex-col overflow-hidden transition ${soldOut ? "opacity-60" : "hover:-translate-y-0.5 hover:shadow-lg"}`}>
+    <article className={`tile group relative flex flex-col overflow-hidden transition ${soldOut ? "opacity-60" : "hover:-translate-y-0.5 hover:shadow-lg"}`}>
       <div className="relative aspect-square overflow-hidden bg-[#efe9df]">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={img} alt={product.title} loading="lazy" className={`h-full w-full object-cover ${soldOut ? "grayscale" : ""}`} />
@@ -25,7 +25,7 @@ export function ProductCard({ product, onAdd }: { product: Product; onAdd: (p: P
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-3">
-        <h3 className="line-clamp-2 text-sm font-semibold leading-snug">{product.title}</h3>
+        <h3 className="line-clamp-2 font-sans text-sm font-medium leading-snug tracking-card">{product.title}</h3>
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge tone="brass">{product.condition}</Badge>
           <Badge>{product.size}</Badge>

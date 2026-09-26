@@ -50,8 +50,9 @@ export function TopBar({ user, mode, showCart = true }: { user: Profile | null; 
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          {/* The driver name is an internal detail — only show it to signed-in staff. */}
           <span className="hidden items-center gap-1.5 rounded-full border border-[#faf7f2]/15 px-2.5 py-1 text-[11px] font-semibold text-[#faf7f2]/70 md:inline-flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> live stock · {mode}
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {user ? `live stock · ${mode}` : "Stock updated live"}
           </span>
           {showCart && (
             <button onClick={() => setOpen(true)} className="relative inline-flex items-center gap-2 rounded-xl bg-brass-500 px-3 py-2 text-sm font-bold text-ink-900 hover:bg-brass-400">

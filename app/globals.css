@@ -9,13 +9,23 @@
 html, body { height: 100%; }
 
 body {
-  @apply bg-[#faf7f2] text-ink-900 antialiased;
+  @apply bg-[#FAF8F4] font-sans text-ink-900 antialiased;
+  line-height: 1.6;
   font-feature-settings: "tnum" 1;
 }
 
+h1, h2 { @apply font-display font-bold tracking-editorial; }
+
 @layer components {
-  .card { @apply rounded-2xl border border-ink-900/10 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04),0_12px_28px_-24px_rgba(0,0,0,0.35)]; }
+  /* Radius is 12px everywhere; padding stays opt-in so data grids can bleed. */
+  .card { @apply rounded-xl border border-ink-900/10 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04),0_12px_28px_-24px_rgba(0,0,0,0.35)]; }
+  /* Content cards: 24px padding, as specified. */
+  .panel { @apply card p-6; }
+  /* Card headings: medium-weight sans, slight letter-spacing. */
+  .card-heading { @apply font-sans text-[13px] font-medium uppercase tracking-card text-ink-900; }
   .btn { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45; }
+  /* Catalog tiles keep their own tight internal padding. */
+  .tile { @apply rounded-xl border border-ink-900/10 bg-white shadow-[0_1px_0_rgba(0,0,0,0.04),0_12px_28px_-24px_rgba(0,0,0,0.35)]; }
   .btn-primary { @apply btn bg-ink-900 text-[#faf7f2] hover:bg-ink-700; }
   .btn-brass { @apply btn bg-brass-500 text-ink-900 hover:bg-brass-400; }
   .btn-ghost { @apply btn border border-ink-900/15 bg-white hover:bg-ink-900/5; }

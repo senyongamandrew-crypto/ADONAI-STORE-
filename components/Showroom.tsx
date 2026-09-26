@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { Filter, RefreshCw, Search } from "lucide-react";
-import { CATEGORIES, STORE } from "@/lib/config";
+import { CATEGORIES } from "@/lib/config";
 import { useWebCart } from "@/lib/cart";
 import { unitPrice } from "@/lib/money";
 import { ProductCard } from "@/components/ProductCard";
@@ -129,18 +129,21 @@ export function Showroom({ initial }: { initial: { products: Product[]; user: Pr
       <main className="mx-auto max-w-[1400px] px-3 py-5 sm:px-5">
         <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h1 className="font-display text-2xl font-bold">{category === "All" ? "The rail" : category}</h1>
-            <p className="text-sm text-ink-600">
-              {STORE.tagline} — every piece is one-of-a-kind. Reserve on WhatsApp, pay by Mobile Money or in store.
+            <h2 className="text-[1.75rem] leading-tight">{category === "All" ? "The rail" : category}</h2>
+            <p className="mt-1.5 max-w-xl text-[15px] leading-[1.6] text-ink-600">
+              One of each, exactly as photographed. Send your basket to WhatsApp and we will confirm
+              it is still here.
             </p>
           </div>
-          <Badge tone="brass">Prices in UGX · updated live from the counter</Badge>
+          <Badge tone="brass">Prices in UGX · stock shared with the counter</Badge>
         </div>
 
         {visible.length === 0 ? (
           <Empty>
-            <p className="font-semibold">Nothing matches that search.</p>
-            <p className="text-sm">Try a different size or category — the rail is restocked from new bales every week.</p>
+            <p className="text-[15px] font-semibold text-ink-900">Nothing on the rail matches that.</p>
+            <p className="max-w-sm text-[15px] leading-[1.6]">
+              New bales are opened most weeks. Tell us what you are after and we will watch for it.
+            </p>
           </Empty>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

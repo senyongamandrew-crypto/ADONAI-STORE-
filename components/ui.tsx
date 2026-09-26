@@ -21,7 +21,7 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "good
 
 export function Stat({ label, value, sub, tone = "default" }: { label: string; value: React.ReactNode; sub?: string; tone?: "default" | "brass" }) {
   return (
-    <div className={`card p-4 ${tone === "brass" ? "bg-ink-900 text-[#faf7f2]" : ""}`}>
+    <div className={`panel ${tone === "brass" ? "bg-ink-900 text-[#faf7f2]" : ""}`}>
       <div className={`text-[11px] font-bold uppercase tracking-wide ${tone === "brass" ? "text-[#faf7f2]/60" : "text-ink-600"}`}>{label}</div>
       <div className="mt-1 text-2xl font-bold tabular-nums">{value}</div>
       {sub && <div className={`mt-0.5 text-xs ${tone === "brass" ? "text-[#faf7f2]/60" : "text-ink-600"}`}>{sub}</div>}
@@ -32,7 +32,7 @@ export function Stat({ label, value, sub, tone = "default" }: { label: string; v
 export function SectionTitle({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="mb-3 flex items-end justify-between gap-3">
-      <h2 className="font-display text-xl font-bold">{children}</h2>
+      <h2 className="text-xl leading-tight">{children}</h2>
       {action}
     </div>
   );

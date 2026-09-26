@@ -209,6 +209,21 @@ valuation at cost and retail, low-stock queue, and pending online orders awaitin
 - **Stock mirroring is polling** (15 s showroom, 20 s POS), not Supabase Realtime — swap the
   interval for a `postgres_changes` subscription in `components/Showroom.tsx` if you want pushes.
 
+## Storefront content
+
+The public page is `app/page.tsx`: brand intro → rail → delivery bands → footer.
+
+- **Copy** lives in `components/BrandStory.tsx` (story, delivery intro) and `lib/config.ts`
+  (`STORE`, `DELIVERY` region bands).
+- **Photography**: drop a hero image at `public/brand/intro.jpg` (or `.jpeg`/`.png`/`.webp`).
+  `BrandStory` checks for it on each request and renders it; until then it shows an empty frame
+  sized for a real shoot rather than a stock placeholder.
+- **Type**: Playfair Display for H1/H2 (700, −0.02em), Inter for body (line-height 1.6, `#1A1A1A`
+  on `#FAF8F4`), loaded from the Google Fonts CDN with Georgia/system fallbacks — the sandbox
+  blocks that CDN, so the preview shows fallbacks while production shows the real faces.
+- **Cards**: `.card` is 12px radius with opt-in padding; `.panel` is a content card at 24px;
+  `.card-heading` is the 13px medium-weight tracked H3.
+
 ## Environment
 
 | Variable | Purpose |

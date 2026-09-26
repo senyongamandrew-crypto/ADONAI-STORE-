@@ -2,6 +2,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { db, dataMode } from "@/lib/db";
 import { Showroom } from "@/components/Showroom";
 import { TopBar } from "@/components/TopBar";
+import { BrandIntro, DeliveryBands } from "@/components/BrandStory";
 import { STORE } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -11,21 +12,31 @@ export default async function ShowroomPage() {
   return (
     <>
       <TopBar user={user} mode={dataMode()} />
+      <BrandIntro />
       <Showroom initial={{ products, user }} />
-      <footer className="no-print border-t border-ink-900/10 bg-white">
-        <div className="mx-auto grid max-w-[1400px] gap-4 px-3 py-6 text-sm text-ink-600 sm:grid-cols-3 sm:px-5">
+      <DeliveryBands />
+
+      <footer className="no-print bg-white">
+        <div className="mx-auto grid max-w-[1400px] gap-8 px-5 py-12 text-ink-700 sm:px-8 md:grid-cols-3">
           <div>
-            <p className="font-display text-base font-bold text-ink-900">{STORE.name}</p>
-            <p>{STORE.address}</p>
-            <p>{STORE.hours}</p>
+            <p className="font-display text-xl font-bold tracking-editorial text-ink-900">{STORE.name}</p>
+            <p className="mt-3 text-[15px] leading-[1.6]">{STORE.address}</p>
+            <p className="text-[15px] leading-[1.6]">{STORE.hours}</p>
+            <p className="text-[15px] leading-[1.6]">{STORE.phone}</p>
           </div>
           <div>
-            <p className="font-semibold text-ink-900">Ordering</p>
-            <p>Orders are sent to WhatsApp and confirmed by the shop before payment (MTN MoMo, Airtel Money or cash in store).</p>
+            <p className="card-heading">Ordering</p>
+            <p className="mt-3 max-w-sm text-[15px] leading-[1.6]">
+              Send your basket to WhatsApp. We check the rail, tell you it is still there, and you
+              pay by MTN MoMo, Airtel Money or cash in store.
+            </p>
           </div>
           <div>
-            <p className="font-semibold text-ink-900">Stock</p>
-            <p>Quantities mirror the counter terminal — if it says sold out here, it is off the rail.</p>
+            <p className="card-heading">Stock</p>
+            <p className="mt-3 max-w-sm text-[15px] leading-[1.6]">
+              One of each, and the counter works off the same numbers this page shows. Sold out here
+              means it has already gone.
+            </p>
           </div>
         </div>
       </footer>
