@@ -82,7 +82,7 @@ export default async function AdminDashboard({ searchParams }: { searchParams: P
           ) : (
             <ul className="max-h-56 space-y-1.5 overflow-y-auto text-sm">
               {a.lowStock.map((l) => (
-                <li key={l.id} className="flex items-center justify-between gap-2 rounded-lg border border-ink-900/10 px-2.5 py-1.5">
+                <li key={l.id} className="flex items-center justify-between gap-2 rounded-lg border border-clay-700/10 px-2.5 py-1.5">
                   <span className="flex min-w-0 items-center gap-2">
                     <AlertTriangle size={14} className={l.stock === 0 ? "text-clay-600" : "text-brass-600"} />
                     <span className="truncate">{l.title}</span>

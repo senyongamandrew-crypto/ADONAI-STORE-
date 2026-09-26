@@ -67,14 +67,14 @@ export function OrderForm({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/50 p-3">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-clay-700/50 p-3">
       <form onSubmit={submit} className="card my-6 w-full max-w-xl space-y-3 p-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-display text-lg font-bold">Log an order</h2>
             <p className="text-xs text-ink-600">Saved as pending — stock moves when you approve it.</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-ink-900/5" aria-label="Close"><X size={16} /></button>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-clay-50" aria-label="Close"><X size={16} /></button>
         </div>
 
         <div className="grid gap-2.5 sm:grid-cols-2">
@@ -96,7 +96,7 @@ export function OrderForm({
           <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-600" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} className="field pl-9" placeholder="Search the rail to add items…" aria-label="Search products" />
           {results.length > 0 && (
-            <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-ink-900/15 bg-white shadow-lg">
+            <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-clay-700/15 bg-sand-50 shadow-lg">
               {results.map((p) => (
                 <li key={p.id}>
                   <button type="button" onClick={() => add(p)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-sand-50">
@@ -112,21 +112,21 @@ export function OrderForm({
         {lines.length > 0 ? (
           <ul className="space-y-1.5">
             {lines.map((l) => (
-              <li key={l.product_id} className="flex items-center gap-2 rounded-lg border border-ink-900/10 px-2 py-1.5">
+              <li key={l.product_id} className="flex items-center gap-2 rounded-lg border border-clay-700/10 px-2 py-1.5">
                 <span className="min-w-0 flex-1 truncate text-sm">{l.title} <span className="font-mono text-[10px] text-ink-600">{l.sku}</span></span>
-                <button type="button" onClick={() => setLines((prev) => prev.map((x) => (x.product_id === l.product_id ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))} className="grid h-6 w-6 place-items-center rounded-md border border-ink-900/15" aria-label="Decrease"><Minus size={12} /></button>
+                <button type="button" onClick={() => setLines((prev) => prev.map((x) => (x.product_id === l.product_id ? { ...x, qty: Math.max(1, x.qty - 1) } : x)))} className="grid h-6 w-6 place-items-center rounded-md border border-clay-700/15" aria-label="Decrease"><Minus size={12} /></button>
                 <span className="w-6 text-center text-sm font-bold tabular-nums">{l.qty}</span>
-                <button type="button" onClick={() => setLines((prev) => prev.map((x) => (x.product_id === l.product_id ? { ...x, qty: x.qty + 1 } : x)))} className="grid h-6 w-6 place-items-center rounded-md border border-ink-900/15" aria-label="Increase"><Plus size={12} /></button>
+                <button type="button" onClick={() => setLines((prev) => prev.map((x) => (x.product_id === l.product_id ? { ...x, qty: x.qty + 1 } : x)))} className="grid h-6 w-6 place-items-center rounded-md border border-clay-700/15" aria-label="Increase"><Plus size={12} /></button>
                 <span className="w-24 text-right text-sm tabular-nums"><Money value={l.unit_price * l.qty} /></span>
                 <button type="button" onClick={() => setLines((prev) => prev.filter((x) => x.product_id !== l.product_id))} className="rounded-md p-1 text-clay-500 hover:bg-clay-50" aria-label="Remove line"><X size={13} /></button>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="rounded-lg bg-ink-900/5 px-3 py-4 text-center text-sm text-ink-600">No items yet — search above.</p>
+          <p className="rounded-lg bg-clay-700/5 px-3 py-4 text-center text-sm text-ink-600">No items yet — search above.</p>
         )}
 
-        <div className="flex items-center justify-between border-t border-ink-900/10 pt-2 text-sm">
+        <div className="flex items-center justify-between border-t border-clay-700/10 pt-2 text-sm">
           <span className="text-ink-600">Order total</span>
           <span className="text-lg font-bold tabular-nums"><Money value={total} /></span>
         </div>

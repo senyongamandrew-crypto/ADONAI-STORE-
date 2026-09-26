@@ -77,7 +77,7 @@ export function SalesLedger({ initial, initialStatus, products }: { initial: Sal
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[54rem]">
-          <thead className="border-b border-ink-900/10 bg-sand-50">
+          <thead className="border-b border-clay-700/10 bg-sand-50">
             <tr>
               <th className="th">Ref</th>
               <th className="th">When</th>
@@ -91,7 +91,7 @@ export function SalesLedger({ initial, initialStatus, products }: { initial: Sal
           </thead>
           <tbody>
             {rows.map((s) => (
-              <tr key={s.id} className="border-b border-ink-900/5 last:border-0 hover:bg-sand-50/60">
+              <tr key={s.id} className="border-b border-clay-700/5 last:border-0 hover:bg-sand-50/60">
                 <td className="td font-mono text-xs font-bold">{s.ref}</td>
                 <td className="td text-ink-600">{new Date(s.created_at).toLocaleString("en-GB", { timeZone: "Africa/Kampala", dateStyle: "short", timeStyle: "short" })}</td>
                 <td className="td">{s.channel === "pos" ? "Counter" : "Online"}</td>
@@ -107,7 +107,7 @@ export function SalesLedger({ initial, initialStatus, products }: { initial: Sal
                 <td className="td"><Badge tone={statusTone(s.status)}>{s.status}</Badge></td>
                 <td className="td">
                   <div className="flex items-center justify-end gap-1">
-                    <button onClick={() => setOpen(s)} className="rounded-lg border border-ink-900/15 p-1.5 hover:bg-ink-900/5" aria-label={`Open receipt ${s.ref}`}><Eye size={14} /></button>
+                    <button onClick={() => setOpen(s)} className="rounded-lg border border-clay-700/15 p-1.5 hover:bg-clay-50" aria-label={`Open receipt ${s.ref}`}><Eye size={14} /></button>
                     {s.status === "pending" && (
                       <button onClick={() => move(s, "completed")} className="btn-brass px-2 py-1.5 text-xs" title="Approve and decrement stock"><CheckCircle2 size={13} /> Approve</button>
                     )}
@@ -115,7 +115,7 @@ export function SalesLedger({ initial, initialStatus, products }: { initial: Sal
                       <button onClick={() => move(s, "refunded")} className="rounded-lg border border-clay-500/30 p-1.5 text-clay-500 hover:bg-clay-50" title="Refund and restock"><Undo2 size={14} /></button>
                     )}
                     {s.status === "pending" && (
-                      <button onClick={() => move(s, "cancelled")} className="rounded-lg border border-ink-900/15 p-1.5 hover:bg-ink-900/5" title="Cancel order"><XCircle size={14} /></button>
+                      <button onClick={() => move(s, "cancelled")} className="rounded-lg border border-clay-700/15 p-1.5 hover:bg-clay-50" title="Cancel order"><XCircle size={14} /></button>
                     )}
                   </div>
                 </td>

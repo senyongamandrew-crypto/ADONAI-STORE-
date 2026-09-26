@@ -57,7 +57,7 @@ export function BrandIntro() {
           {/* Image container — sized and cropped for real inventory photography. */}
           <figure className="m-0">
             {/* Arch-topped frame — the signature shape of this design. */}
-            <div className="aspect-[4/5] w-full overflow-hidden rounded-t-[14rem] rounded-b-card border border-clay-700/12 bg-sand-200 shadow-lift">
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-t-[14rem] rounded-b-card border border-clay-700/10 bg-sand-200 shadow-lift">
               {photo ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={photo} alt="A piece from the current rail, photographed in store" className="h-full w-full object-cover" />
@@ -82,7 +82,7 @@ export function BrandIntro() {
 export function DeliveryBands() {
   return (
     <>
-      <section className="border-y border-clay-700/12 bg-sand-100">
+      <section className="border-y border-clay-700/10 bg-sand-100">
         <div className="mx-auto max-w-[1400px] px-5 py-12 sm:px-8">
           <h2 className="text-3xl sm:text-[2.5rem] sm:leading-[1.1]">
             Getting it to you

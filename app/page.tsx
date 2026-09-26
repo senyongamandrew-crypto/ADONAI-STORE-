@@ -16,7 +16,7 @@ export default async function ShowroomPage() {
       <Showroom initial={{ products, user }} />
       <DeliveryBands />
 
-      <footer className="no-print bg-white">
+      <footer className="no-print bg-sand-50">
         <div className="mx-auto grid max-w-[1400px] gap-8 px-5 py-12 text-ink-700 sm:px-8 md:grid-cols-3">
           <div>
             <p className="font-display text-xl font-bold tracking-editorial text-ink-900">{STORE.name}</p>

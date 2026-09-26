@@ -59,7 +59,7 @@ export function LabelsSheet({ initial }: { initial: Product[] }) {
         <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
           {rows.map((p) => (
             <li key={p.id}>
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-ink-900/10 px-2 py-1.5 text-xs hover:bg-ink-900/5">
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-clay-700/10 px-2 py-1.5 text-xs hover:bg-clay-50">
                 <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} />
                 <span className="min-w-0 flex-1 truncate">{p.title}</span>
                 <span className="font-mono text-[10px] text-ink-600">{p.sku}</span>
@@ -74,7 +74,7 @@ export function LabelsSheet({ initial }: { initial: Product[] }) {
         style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
       >
         {sheet.map((p) => (
-          <div key={p.key} className="rounded-lg border border-dashed border-ink-900/25 bg-white p-2 text-center">
+          <div key={p.key} className="rounded-lg border border-dashed border-clay-700/25 bg-white p-2 text-center">
             <p className="font-display text-[11px] font-bold tracking-wide">{STORE.name}</p>
             <p className="line-clamp-2 text-[11px] font-semibold">{p.title}</p>
             <p className="text-[10px] text-ink-600">Size {p.size} · {p.condition}</p>

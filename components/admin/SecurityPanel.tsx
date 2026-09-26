@@ -172,7 +172,7 @@ export function SecurityPanel({ me }: { me: Profile }) {
         {mine.length === 0 ? (
           <Empty>No passkeys on your account yet. Add one and the login screen will offer it.</Empty>
         ) : (
-          <ul className="divide-y divide-ink-900/5">
+          <ul className="divide-y divide-clay-700/10">
             {mine.map((k) => (
               <li key={k.id} className="flex flex-wrap items-center gap-3 py-2.5">
                 <Fingerprint size={16} className={k.revoked_at ? "text-ink-600/40" : "text-ink-900"} />
@@ -208,7 +208,7 @@ export function SecurityPanel({ me }: { me: Profile }) {
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse">
                 <thead>
-                  <tr className="border-b border-ink-900/10">
+                  <tr className="border-b border-clay-700/10">
                     <th className="th">Staff</th>
                     <th className="th">Role</th>
                     <th className="th">Passkeys</th>
@@ -222,7 +222,7 @@ export function SecurityPanel({ me }: { me: Profile }) {
                     const open = expanded === u.id;
                     return (
                       <Fragment key={u.id}>
-                        <tr className="border-b border-ink-900/5">
+                        <tr className="border-b border-clay-700/5">
                           <td className="td">
                             <div className="font-medium">{u.name || u.email}</div>
                             <div className="text-xs text-ink-600">{u.email}</div>
@@ -255,11 +255,11 @@ export function SecurityPanel({ me }: { me: Profile }) {
                         </tr>
                         {open && (
                           <tr>
-                            <td colSpan={5} className="bg-ink-900/[0.03] px-3 py-2">
+                            <td colSpan={5} className="bg-clay-700/[0.04] px-3 py-2">
                               {keys.length === 0 ? (
                                 <p className="py-1 text-xs text-ink-600">No registrations for this account.</p>
                               ) : (
-                                <ul className="divide-y divide-ink-900/5">
+                                <ul className="divide-y divide-clay-700/10">
                                   {keys.map((k) => (
                                     <li key={k.id} className="flex flex-wrap items-center gap-3 py-2">
                                       <Fingerprint size={14} className={k.revoked_at ? "text-ink-600/40" : "text-ink-900"} />

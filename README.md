@@ -296,6 +296,14 @@ The public page is `app/page.tsx`: brand intro → rail → delivery bands → f
   | `ink` 600→900 | warm espresso text and dense data surfaces |
   | `sand` 50/100/200 | paper tones for page and card backgrounds |
 
+  Every tinted surface in the app sits on that ramp: hairlines are `border-clay-700/*`, subtle
+  fills `bg-clay-700/*`, and modal scrims are warm too. Only two things are still pure white —
+  the thermal receipt and the label sheet, because both are printed on white paper.
+
+  Opacity modifiers stay on Tailwind's 5-step scale on purpose: `/12` and `/8` are *not* in that
+  scale, so they compile to nothing at all. Two such classes had already shipped silently dead
+  (`border-clay-700/12`, `divide-clay-700/8`) and were snapped to `/10`.
+
   Page background `#FBF4ED`, body text `#2E221B`. Token **names** were kept from the previous
   palette on purpose so the ~250 existing `bg-ink-900` / `text-clay-600` usages picked the new
   colours up untouched; only the values moved. `clay-50` had been referenced in 14 places but

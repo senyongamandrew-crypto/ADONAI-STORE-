@@ -103,7 +103,7 @@ export function LoginForm({ mode }: { mode: string }) {
               <li key={u.email}>
                 <button
                   onClick={(e) => submit(e, { email: u.email, password: u.password })}
-                  className="flex w-full items-center justify-between rounded-lg border border-ink-900/10 px-3 py-2 text-left text-xs hover:bg-ink-900/5"
+                  className="flex w-full items-center justify-between rounded-lg border border-clay-700/10 px-3 py-2 text-left text-xs hover:bg-clay-50"
                 >
                   <span>
                     <span className="font-semibold">{u.role}</span> · {u.email}

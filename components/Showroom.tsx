@@ -93,7 +93,7 @@ export function Showroom({ initial }: { initial: { products: Product[]; user: Pr
 
   return (
     <div className="pb-24">
-      <section className="border-b border-ink-900/10 bg-white">
+      <section className="border-b border-clay-700/10 bg-sand-50">
         <div className="mx-auto max-w-[1400px] px-3 py-4 sm:px-5">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[14rem] flex-1">

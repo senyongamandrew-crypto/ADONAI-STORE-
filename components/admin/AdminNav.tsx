@@ -19,7 +19,7 @@ const LINKS: NavItem[] = [
 export function AdminNav({ role }: { role: Role }) {
   const pathname = usePathname();
   return (
-    <nav className="no-print mb-4 flex gap-1.5 overflow-x-auto rounded-xl border border-ink-900/10 bg-white p-1">
+    <nav className="no-print mb-4 flex gap-1.5 overflow-x-auto rounded-xl border border-clay-700/10 bg-sand-50 p-1">
       {LINKS.filter((l) => !l.adminOnly || role === "admin").map((l) => {
         const active = l.href === "/admin" ? pathname === l.href : pathname.startsWith(l.href);
         return (

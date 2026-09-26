@@ -89,7 +89,7 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
       onChange={(e) => setField(p.id, key, e.target.value)}
       onBlur={() => save(p)}
       inputMode="numeric"
-      className={`w-24 rounded-lg border px-2 py-1 text-right text-sm tabular-nums ${draft(p)[key] != null ? "border-brass-500 bg-brass-500/10 font-bold" : "border-ink-900/12 bg-white"}`}
+      className={`w-24 rounded-lg border px-2 py-1 text-right text-sm tabular-nums ${draft(p)[key] != null ? "border-brass-500 bg-brass-500/10 font-bold" : "border-clay-700/10 bg-sand-50"}`}
       aria-label={`${key} for ${p.sku}`}
     />
   );
@@ -122,7 +122,7 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[64rem]">
-          <thead className="border-b border-ink-900/10 bg-sand-50">
+          <thead className="border-b border-clay-700/10 bg-sand-50">
             <tr>
               <th className="th">Item</th>
               <th className="th">Category</th>
@@ -139,7 +139,7 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
               const m = computeMargin(p.cost_price, p.price, p.discount_pct);
               const low = p.stock <= p.min_stock;
               return (
-                <tr key={p.id} className="border-b border-ink-900/5 last:border-0 hover:bg-sand-50/60">
+                <tr key={p.id} className="border-b border-clay-700/5 last:border-0 hover:bg-sand-50/60">
                   <td className="td">
                     <div className="flex items-center gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -162,9 +162,9 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
                   </td>
                   <td className="td">
                     <div className="flex items-center justify-center gap-1">
-                      <button onClick={() => adjust(p, -1)} className="grid h-7 w-7 place-items-center rounded-lg border border-ink-900/15 hover:bg-ink-900/5" aria-label={`Remove one ${p.sku}`}><Minus size={13} /></button>
+                      <button onClick={() => adjust(p, -1)} className="grid h-7 w-7 place-items-center rounded-lg border border-clay-700/15 hover:bg-clay-50" aria-label={`Remove one ${p.sku}`}><Minus size={13} /></button>
                       {cell(p, "stock")}
-                      <button onClick={() => adjust(p, 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-ink-900/15 hover:bg-ink-900/5" aria-label={`Add one ${p.sku}`}><Plus size={13} /></button>
+                      <button onClick={() => adjust(p, 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-clay-700/15 hover:bg-clay-50" aria-label={`Add one ${p.sku}`}><Plus size={13} /></button>
                     </div>
                   </td>
                   <td className="td">
@@ -172,7 +172,7 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
                       {Object.keys(draft(p)).length > 0 && (
                         <button onClick={() => save(p)} disabled={busy === p.id} className="btn-brass px-2.5 py-1.5 text-xs"><Save size={13} /> {busy === p.id ? "Saving" : "Save"}</button>
                       )}
-                      <button onClick={() => setEditing(p)} className="rounded-lg border border-ink-900/15 p-1.5 hover:bg-ink-900/5" aria-label={`Edit ${p.sku}`}><Pencil size={14} /></button>
+                      <button onClick={() => setEditing(p)} className="rounded-lg border border-clay-700/15 p-1.5 hover:bg-clay-50" aria-label={`Edit ${p.sku}`}><Pencil size={14} /></button>
                       <button onClick={() => remove(p)} className="rounded-lg border border-clay-500/30 p-1.5 text-clay-500 hover:bg-clay-50" aria-label={`Delete ${p.sku}`}><Trash2 size={14} /></button>
                     </div>
                   </td>
@@ -241,11 +241,11 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/50 p-3">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-clay-700/50 p-3">
       <form onSubmit={submit} className="card my-6 w-full max-w-2xl space-y-3 p-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-lg font-bold">{product ? `Edit ${product.sku}` : "New product"}</h2>
-          <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-ink-900/5" aria-label="Close editor"><X size={16} /></button>
+          <button type="button" onClick={onClose} className="rounded-lg p-2 hover:bg-clay-50" aria-label="Close editor"><X size={16} /></button>
         </div>
 
         <div className="grid gap-2.5 sm:grid-cols-2">
@@ -295,7 +295,7 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
             <input id="pe-price" type="number" min={0} step={500} className="field" value={form.price} onChange={(e) => set("price", num(e.target.value))} />
             <div className="mt-1 flex flex-wrap gap-1">
               {[40, 55, 70].map((m) => (
-                <button key={m} type="button" onClick={() => set("price", priceForTargetMargin(form.cost_price, m))} className="rounded-md border border-ink-900/15 px-1.5 py-0.5 text-[10px] font-semibold hover:bg-ink-900/5">
+                <button key={m} type="button" onClick={() => set("price", priceForTargetMargin(form.cost_price, m))} className="rounded-md border border-clay-700/15 px-1.5 py-0.5 text-[10px] font-semibold hover:bg-clay-50">
                   price at {m}% margin
                 </button>
               ))}

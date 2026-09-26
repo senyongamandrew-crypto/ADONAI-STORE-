@@ -73,7 +73,7 @@ export function CartDrawer() {
     <>
       <div
         onClick={() => setOpen(false)}
-        className={`fixed inset-0 z-40 bg-ink-900/45 transition-opacity ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`fixed inset-0 z-40 bg-clay-700/45 transition-opacity ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
       />
       <aside
         className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-[26rem] flex-col bg-sand-50 shadow-2xl transition-transform duration-200 ${
@@ -81,12 +81,12 @@ export function CartDrawer() {
         }`}
         aria-hidden={!open}
       >
-        <header className="flex items-center justify-between border-b border-ink-900/10 px-4 py-3">
+        <header className="flex items-center justify-between border-b border-clay-700/10 px-4 py-3">
           <div>
             <h2 className="font-display text-lg font-bold">Your basket</h2>
             <p className="text-xs text-ink-600">{units} item{units === 1 ? "" : "s"} · {fmt(subtotal)}</p>
           </div>
-          <button onClick={() => setOpen(false)} className="rounded-lg p-2 hover:bg-ink-900/5" aria-label="Close cart"><X size={18} /></button>
+          <button onClick={() => setOpen(false)} className="rounded-lg p-2 hover:bg-clay-50" aria-label="Close cart"><X size={18} /></button>
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
@@ -110,9 +110,9 @@ export function CartDrawer() {
                     <p className="text-xs text-ink-600">Size {l.size} · <Money value={l.unit_price} /> each</p>
                     {l.qty > l.stock && <p className="mt-0.5 text-[11px] font-semibold text-clay-600">Only {l.stock} in stock now</p>}
                     <div className="mt-1.5 flex items-center gap-1.5">
-                      <button onClick={() => setQty(l.product_id, l.qty - 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-ink-900/15 hover:bg-ink-900/5" aria-label="Decrease quantity"><Minus size={13} /></button>
+                      <button onClick={() => setQty(l.product_id, l.qty - 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-clay-700/15 hover:bg-clay-50" aria-label="Decrease quantity"><Minus size={13} /></button>
                       <span className="w-8 text-center text-sm font-bold tabular-nums">{l.qty}</span>
-                      <button onClick={() => setQty(l.product_id, l.qty + 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-ink-900/15 hover:bg-ink-900/5" aria-label="Increase quantity"><Plus size={13} /></button>
+                      <button onClick={() => setQty(l.product_id, l.qty + 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-clay-700/15 hover:bg-clay-50" aria-label="Increase quantity"><Plus size={13} /></button>
                       <span className="ml-auto text-sm font-bold tabular-nums"><Money value={l.unit_price * l.qty} /></span>
                       <button onClick={() => remove(l.product_id)} className="rounded-lg p-1.5 text-clay-500 hover:bg-clay-50" aria-label={`Remove ${l.title}`}><Trash2 size={14} /></button>
                     </div>
@@ -124,7 +124,7 @@ export function CartDrawer() {
         </div>
 
         {!!lines.length && (
-          <footer className="space-y-2.5 border-t border-ink-900/10 bg-white px-4 py-3">
+          <footer className="space-y-2.5 border-t border-clay-700/10 bg-sand-50 px-4 py-3">
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="label" htmlFor="cart-name">Name</label>

@@ -156,7 +156,7 @@ export function StockStages({ initial }: { initial: Product[] }) {
                 }`}
               >
                 {t.icon} {t.label}
-                <span className={`rounded-full px-1.5 text-[11px] ${active ? "bg-white/15" : "bg-ink-900/10"}`}>{count}</span>
+                <span className={`rounded-full px-1.5 text-[11px] ${active ? "bg-white/15" : "bg-clay-700/10"}`}>{count}</span>
               </button>
             );
           })}
@@ -179,7 +179,7 @@ export function StockStages({ initial }: { initial: Product[] }) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] border-collapse">
               <thead>
-                <tr className="border-b border-ink-900/10">
+                <tr className="border-b border-clay-700/10">
                   <th className="th">SKU</th>
                   <th className="th">Item</th>
                   <th className="th">Available</th>
@@ -193,7 +193,7 @@ export function StockStages({ initial }: { initial: Product[] }) {
                 {rows.map(({ p, reserved }) => {
                   const low = p.stock <= p.min_stock;
                   return (
-                    <tr key={p.id} className="border-b border-ink-900/5 last:border-0">
+                    <tr key={p.id} className="border-b border-clay-700/5 last:border-0">
                       <td className="td font-mono text-[12px]">{p.sku}</td>
                       <td className="td">
                         <div className="font-medium">{p.title}</div>

@@ -19,17 +19,17 @@ export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void })
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ink-900/50 p-3 no-print-bg">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-clay-700/50 p-3 no-print-bg">
       <div className="print-area card my-6 w-full bg-white p-4" style={{ maxWidth: `${paper}mm` }}>
         <div className="no-print mb-2 flex items-center justify-between">
           <span className="text-xs font-bold uppercase tracking-wide text-ink-600">Receipt</span>
           <div className="flex gap-1.5">
-            <div className="inline-flex rounded-lg border border-ink-900/15 p-0.5">
+            <div className="inline-flex rounded-lg border border-clay-700/15 p-0.5">
               {PAPER.map((w) => (
                 <button
                   key={w}
                   onClick={() => setPaper(w)}
-                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${paper === w ? "bg-ink-900 text-sand-50" : "text-ink-600 hover:bg-ink-900/5"}`}
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${paper === w ? "bg-clay-600 text-sand-50" : "text-ink-600 hover:bg-clay-50"}`}
                   title={`${w}mm thermal roll`}
                 >
                   {w}mm
@@ -42,7 +42,7 @@ export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void })
           </div>
         </div>
 
-        <div className="receipt border-y border-dashed border-ink-900/25 py-3 text-[12px] leading-relaxed">
+        <div className="receipt border-y border-dashed border-clay-700/25 py-3 text-[12px] leading-relaxed">
           <p className="text-center text-sm font-bold tracking-wide">{STORE.name}</p>
           <p className="text-center text-[11px] text-ink-600">{STORE.address} · {STORE.phone}</p>
           <p className="mt-2 flex justify-between"><span>{sale.ref}</span><span>{stamp(sale.created_at)}</span></p>
@@ -51,7 +51,7 @@ export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void })
 
           <table className="mt-2 w-full">
             <thead>
-              <tr className="border-y border-dashed border-ink-900/25 text-[10px] uppercase tracking-wide">
+              <tr className="border-y border-dashed border-clay-700/25 text-[10px] uppercase tracking-wide">
                 <th className="py-1 text-left">Item</th>
                 <th className="py-1 text-right">Qty</th>
                 <th className="py-1 text-right">Total</th>
@@ -71,7 +71,7 @@ export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void })
             </tbody>
           </table>
 
-          <div className="mt-2 space-y-0.5 border-t border-dashed border-ink-900/25 pt-2">
+          <div className="mt-2 space-y-0.5 border-t border-dashed border-clay-700/25 pt-2">
             <p className="flex justify-between"><span>Subtotal</span><span>{fmt(sale.subtotal)}</span></p>
             {sale.discount_total > 0 && <p className="flex justify-between"><span>Discount</span><span>-{fmt(sale.discount_total)}</span></p>}
             <p className="flex justify-between text-sm font-bold"><span>TOTAL</span><span>{fmt(sale.total)}</span></p>

@@ -97,7 +97,7 @@ export function CategoryBars({ rows }: { rows: Analytics["byCategory"] }) {
               <span>{r.category}</span>
               <span className="tabular-nums text-ink-600">{fmtNumber(r.revenue)} · {r.units} sold</span>
             </div>
-            <div className="mt-1 h-2 rounded-full bg-ink-900/10">
+            <div className="mt-1 h-2 rounded-full bg-clay-700/10">
               <div className="h-2 rounded-full bg-clay-500" style={{ width: `${(r.revenue / max) * 100}%` }} />
             </div>
           </li>
@@ -114,7 +114,7 @@ export function TopProducts({ rows }: { rows: Analytics["topProducts"] }) {
       <h3 className="mb-3 font-display text-base font-bold">Best sellers</h3>
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-ink-900/10 text-[11px] uppercase tracking-wide text-ink-600">
+          <tr className="border-b border-clay-700/10 text-[11px] uppercase tracking-wide text-ink-600">
             <th className="th px-0">Item</th>
             <th className="th text-right">Units</th>
             <th className="th text-right">Revenue</th>
@@ -122,7 +122,7 @@ export function TopProducts({ rows }: { rows: Analytics["topProducts"] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.sku} className="border-b border-ink-900/5 last:border-0">
+            <tr key={r.sku} className="border-b border-clay-700/5 last:border-0">
               <td className="td px-0">
                 {r.title}
                 <span className="block font-mono text-[10px] text-ink-600">{r.sku}</span>

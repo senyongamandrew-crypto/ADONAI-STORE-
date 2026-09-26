@@ -151,12 +151,12 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
   return (
     <div className="mx-auto max-w-[1400px] px-3 py-4 sm:px-5">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-xl border border-ink-900/15 bg-white p-1">
+        <div className="inline-flex rounded-xl border border-clay-700/15 bg-sand-50 p-1">
           {(["counter", "catalogue"] as const).map((v) => (
             <button
               key={v}
               onClick={() => setView(v)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold capitalize ${view === v ? "bg-ink-900 text-sand-50" : "text-ink-700 hover:bg-ink-900/5"}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold capitalize ${view === v ? "bg-clay-600 text-sand-50" : "text-ink-700 hover:bg-clay-50"}`}
             >
               {v === "counter" ? <ScanBarcode size={15} /> : <Store size={15} />} {v} mode
             </button>
@@ -213,7 +213,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
           </div>
 
           {filtered.length === 0 ? (
-            <p className="rounded-xl bg-ink-900/5 p-6 text-center text-sm text-ink-600">No in-stock items match.</p>
+            <p className="rounded-xl bg-clay-700/5 p-6 text-center text-sm text-ink-600">No in-stock items match.</p>
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
               {filtered.map((p) => {
@@ -222,7 +222,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
                   <button
                     key={p.id}
                     onClick={() => addToLedger(p)}
-                    className="group relative overflow-hidden rounded-xl border border-ink-900/10 bg-white p-2 text-left transition hover:border-brass-500 hover:shadow-md"
+                    className="group relative overflow-hidden rounded-xl border border-clay-700/10 bg-sand-50 p-2 text-left transition hover:border-brass-500 hover:shadow-md"
                   >
                     <div className="flex items-start gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -248,7 +248,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
 
         {/* --------------------------------------------------- RIGHT: live ledger */}
         <aside className="card flex h-fit flex-col lg:sticky lg:top-20">
-          <header className="flex items-center justify-between border-b border-ink-900/10 px-3 py-2.5">
+          <header className="flex items-center justify-between border-b border-clay-700/10 px-3 py-2.5">
             <div>
               <h2 className="font-display text-base font-bold">Current ticket</h2>
               <p className="text-[11px] text-ink-600">{units} item{units === 1 ? "" : "s"}</p>
@@ -267,7 +267,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
             ) : (
               <ul className="space-y-2">
                 {ledger.lines.map((l) => (
-                  <li key={l.product_id} className="rounded-xl border border-ink-900/10 p-2">
+                  <li key={l.product_id} className="rounded-xl border border-clay-700/10 p-2">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold">{l.title}</p>
@@ -276,9 +276,9 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
                       <button onClick={() => ledger.remove(l.product_id)} className="rounded-md p-1 text-clay-500 hover:bg-clay-50" aria-label={`Remove ${l.title}`}><X size={14} /></button>
                     </div>
                     <div className="mt-1.5 flex items-center gap-1.5">
-                      <button onClick={() => ledger.setQty(l.product_id, l.qty - 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-ink-900/15" aria-label="Decrease"><Minus size={13} /></button>
+                      <button onClick={() => ledger.setQty(l.product_id, l.qty - 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-clay-700/15" aria-label="Decrease"><Minus size={13} /></button>
                       <span className="w-7 text-center text-sm font-bold tabular-nums">{l.qty}</span>
-                      <button onClick={() => ledger.setQty(l.product_id, l.qty + 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-ink-900/15" aria-label="Increase"><Plus size={13} /></button>
+                      <button onClick={() => ledger.setQty(l.product_id, l.qty + 1)} className="grid h-7 w-7 place-items-center rounded-lg border border-clay-700/15" aria-label="Increase"><Plus size={13} /></button>
                       <span className="ml-auto text-sm font-bold tabular-nums"><Money value={l.unit_price * l.qty} /></span>
                     </div>
                   </li>
@@ -287,7 +287,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
             )}
           </div>
 
-          <div className="space-y-2.5 border-t border-ink-900/10 bg-white p-3">
+          <div className="space-y-2.5 border-t border-clay-700/10 bg-sand-50 p-3">
             <div className="space-y-1 text-sm">
               <p className="flex justify-between"><span className="text-ink-600">Subtotal</span><span className="tabular-nums">{fmt(subtotal)}</span></p>
               <div className="flex items-center justify-between gap-2">
@@ -327,12 +327,12 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
                 />
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {quickTenders(total).map((q) => (
-                    <button key={q} onClick={() => setReceived(String(q))} className="rounded-lg border border-ink-900/15 px-2 py-1 text-[11px] font-semibold hover:bg-ink-900/5">
+                    <button key={q} onClick={() => setReceived(String(q))} className="rounded-lg border border-clay-700/15 px-2 py-1 text-[11px] font-semibold hover:bg-clay-50">
                       {fmt(q)}
                     </button>
                   ))}
                 </div>
-                <p className={`mt-1.5 flex items-center justify-between rounded-lg px-2 py-1 text-sm font-bold ${change > 0 ? "bg-olive-50 text-olive-700" : "bg-ink-900/5 text-ink-700"}`}>
+                <p className={`mt-1.5 flex items-center justify-between rounded-lg px-2 py-1 text-sm font-bold ${change > 0 ? "bg-olive-50 text-olive-700" : "bg-clay-700/5 text-ink-700"}`}>
                   <span>Change due</span><span className="tabular-nums">{fmt(change)}</span>
                 </p>
               </div>
