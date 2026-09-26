@@ -76,7 +76,7 @@ export function CartDrawer() {
         className={`fixed inset-0 z-40 bg-ink-900/45 transition-opacity ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
       />
       <aside
-        className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-[26rem] flex-col bg-[#faf7f2] shadow-2xl transition-transform duration-200 ${
+        className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-[26rem] flex-col bg-sand-50 shadow-2xl transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
         aria-hidden={!open}
@@ -145,7 +145,7 @@ export function CartDrawer() {
               <span className="text-xl font-bold tabular-nums"><Money value={subtotal} /></span>
             </div>
 
-            <label className="flex items-start gap-2 rounded-lg bg-[#faf7f2] px-2.5 py-2 text-[11px] leading-snug text-ink-700">
+            <label className="flex items-start gap-2 rounded-lg bg-sand-50 px-2.5 py-2 text-[11px] leading-snug text-ink-700">
               <input type="checkbox" checked={reserve} onChange={(e) => setReserve(e.target.checked)} className="mt-0.5" />
               <span>
                 <strong>Hold these for me.</strong> Puts the order on the shop&rsquo;s till so the pieces are kept aside while you
@@ -158,7 +158,7 @@ export function CartDrawer() {
             </a>
 
             {reserved && (
-              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800">
+              <p className="rounded-lg bg-olive-50 px-3 py-2 text-[11px] font-semibold text-olive-700">
                 Held as {reserved}. We will confirm on WhatsApp before you pay.
               </p>
             )}

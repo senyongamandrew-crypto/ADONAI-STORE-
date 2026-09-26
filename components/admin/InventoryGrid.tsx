@@ -117,12 +117,12 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
       </div>
 
       {notice && (
-        <p className={`rounded-xl border px-3 py-2 text-sm font-semibold ${notice.tone === "ok" ? "border-emerald-600/25 bg-emerald-50 text-emerald-800" : "border-clay-500/30 bg-clay-50 text-clay-600"}`}>{notice.text}</p>
+        <p className={`rounded-xl border px-3 py-2 text-sm font-semibold ${notice.tone === "ok" ? "border-olive-600/30 bg-olive-50 text-olive-700" : "border-clay-500/30 bg-clay-50 text-clay-600"}`}>{notice.text}</p>
       )}
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[64rem]">
-          <thead className="border-b border-ink-900/10 bg-[#faf7f2]">
+          <thead className="border-b border-ink-900/10 bg-sand-50">
             <tr>
               <th className="th">Item</th>
               <th className="th">Category</th>
@@ -139,7 +139,7 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
               const m = computeMargin(p.cost_price, p.price, p.discount_pct);
               const low = p.stock <= p.min_stock;
               return (
-                <tr key={p.id} className="border-b border-ink-900/5 last:border-0 hover:bg-[#faf7f2]/60">
+                <tr key={p.id} className="border-b border-ink-900/5 last:border-0 hover:bg-sand-50/60">
                   <td className="td">
                     <div className="flex items-center gap-2">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -157,7 +157,7 @@ export function InventoryGrid({ initial }: { initial: Product[] }) {
                   <td className="td text-right">{cell(p, "price")}</td>
                   <td className="td text-right">{cell(p, "discount_pct")}</td>
                   <td className="td text-right">
-                    <span className={`tabular-nums font-semibold ${m.marginPct < 30 ? "text-clay-600" : "text-emerald-700"}`}>{m.marginPct}%</span>
+                    <span className={`tabular-nums font-semibold ${m.marginPct < 30 ? "text-clay-600" : "text-olive-600"}`}>{m.marginPct}%</span>
                     <span className="block text-[10px] text-ink-600">{fmtNumber(m.grossProfit)} / unit</span>
                   </td>
                   <td className="td">
@@ -318,10 +318,10 @@ function ProductEditor({ product, onClose, onSaved }: { product: Product | null;
           </label>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#faf7f2] px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-sand-50 px-3 py-2 text-sm">
           <span className="text-ink-600">Sells for <strong className="text-ink-900">{fmt(margin.retail)}</strong></span>
           <span className="text-ink-600">Markup <strong className="text-ink-900">{margin.markupPct}%</strong></span>
-          <span className="text-ink-600">Margin <strong className={margin.marginPct < 30 ? "text-clay-600" : "text-emerald-700"}>{margin.marginPct}%</strong></span>
+          <span className="text-ink-600">Margin <strong className={margin.marginPct < 30 ? "text-clay-600" : "text-olive-600"}>{margin.marginPct}%</strong></span>
           <span className="text-ink-600">Profit/unit <strong className="text-ink-900">{fmt(margin.grossProfit)}</strong></span>
         </div>
 

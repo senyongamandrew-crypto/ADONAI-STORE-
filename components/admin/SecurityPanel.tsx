@@ -141,7 +141,7 @@ export function SecurityPanel({ me }: { me: Profile }) {
       </div>
 
       {error && <p className="rounded-lg bg-clay-50 px-3 py-2 text-sm font-semibold text-clay-600">{error}</p>}
-      {notice && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">{notice}</p>}
+      {notice && <p className="rounded-lg bg-olive-50 px-3 py-2 text-sm font-semibold text-olive-700">{notice}</p>}
 
       <div className="panel">
         <div className="mb-3 flex items-center justify-between gap-3">

@@ -29,7 +29,7 @@ export function Receipt({ sale, onClose }: { sale: Sale; onClose?: () => void })
                 <button
                   key={w}
                   onClick={() => setPaper(w)}
-                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${paper === w ? "bg-ink-900 text-[#faf7f2]" : "text-ink-600 hover:bg-ink-900/5"}`}
+                  className={`rounded-md px-2 py-1 text-[11px] font-semibold ${paper === w ? "bg-ink-900 text-sand-50" : "text-ink-600 hover:bg-ink-900/5"}`}
                   title={`${w}mm thermal roll`}
                 >
                   {w}mm

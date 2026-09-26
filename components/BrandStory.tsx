@@ -25,7 +25,8 @@ export function BrandIntro() {
       <section className="mx-auto max-w-[1400px] px-5 pb-14 pt-10 sm:px-8">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center">
           <div className="max-w-xl">
-            <p className="card-heading mb-4 text-ink-600">
+            <p className="mb-4 inline-flex items-center gap-2 rounded-pill border border-clay-600/20 bg-clay-50 px-3 py-1 text-[11px] font-bold uppercase tracking-card text-clay-600">
+              <span className="h-1.5 w-1.5 rounded-pill bg-olive-500" aria-hidden />
               {STORE.name} · {STORE.address.split(",").slice(-2).join(",").trim()}
             </p>
             <h1 className="text-[2.4rem] leading-[1.08] sm:text-[3.4rem]">
@@ -44,23 +45,26 @@ export function BrandIntro() {
               Sizes are measured, not guessed. Prices are in shillings, and they do not move after
               you have ordered.
             </p>
-            <ul className="mt-7 flex flex-wrap gap-x-6 gap-y-2 text-sm text-ink-600">
-              <li>One of each</li>
-              <li>Washed and pressed in store</li>
-              <li>Priced in UGX</li>
+            <ul className="mt-7 flex flex-wrap gap-2 text-sm">
+              {["One of each", "Washed and pressed in store", "Priced in UGX"].map((t) => (
+                <li key={t} className="inline-flex items-center gap-1.5 rounded-pill border border-olive-500/25 bg-olive-50 px-3 py-1 font-semibold text-olive-700">
+                  {t}
+                </li>
+              ))}
             </ul>
           </div>
 
           {/* Image container — sized and cropped for real inventory photography. */}
           <figure className="m-0">
-            <div className="aspect-[4/5] w-full overflow-hidden rounded-xl border border-ink-900/10 bg-[#EFEAE1]">
+            {/* Arch-topped frame — the signature shape of this design. */}
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-t-[14rem] rounded-b-card border border-clay-700/12 bg-sand-200 shadow-lift">
               {photo ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={photo} alt="A piece from the current rail, photographed in store" className="h-full w-full object-cover" />
               ) : (
                 <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center">
-                  <span className="font-display text-2xl text-ink-900/35">{STORE.name}</span>
-                  <span className="text-xs uppercase tracking-card text-ink-900/30">Photography goes here</span>
+                  <span className="font-display text-2xl text-clay-700/40">{STORE.name}</span>
+                  <span className="text-xs uppercase tracking-card text-clay-700/35">Photography goes here</span>
                 </div>
               )}
             </div>
@@ -78,9 +82,12 @@ export function BrandIntro() {
 export function DeliveryBands() {
   return (
     <>
-      <section className="border-y border-ink-900/10 bg-white">
+      <section className="border-y border-clay-700/12 bg-sand-100">
         <div className="mx-auto max-w-[1400px] px-5 py-12 sm:px-8">
-          <h2 className="text-3xl sm:text-[2.5rem] sm:leading-[1.1]">Getting it to you</h2>
+          <h2 className="text-3xl sm:text-[2.5rem] sm:leading-[1.1]">
+            Getting it to you
+            <span className="mt-2 block h-1.5 w-16 rounded-pill bg-olive-400" aria-hidden />
+          </h2>
           <p className="mt-3 max-w-2xl text-[17px] leading-[1.65] text-ink-800">
             Three regions, three honest timelines. We confirm the piece is still on the rail before
             anything is sent.
@@ -89,7 +96,7 @@ export function DeliveryBands() {
           <div className="mt-8 grid gap-6 md:grid-cols-3">
             {DELIVERY.map((zone, i) => (
               <article key={zone.region} className="panel text-left">
-                <span className="mb-5 inline-flex text-ink-900">
+                <span className="mb-5 inline-flex rounded-pill bg-clay-50 p-2.5 text-clay-600">
                   {i === 0 ? <MapPin size={22} strokeWidth={1.5} aria-hidden /> : <Truck size={22} strokeWidth={1.5} aria-hidden />}
                 </span>
                 <h3 className="card-heading">{zone.region}</h3>

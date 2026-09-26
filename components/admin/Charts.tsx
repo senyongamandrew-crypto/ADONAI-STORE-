@@ -30,7 +30,7 @@ export function DailyBars({ daily }: { daily: Analytics["daily"] }) {
 
 export function ChannelSplit({ rows }: { rows: Analytics["byChannel"] }) {
   const total = rows.reduce((a, r) => a + r.revenue, 0) || 1;
-  const tone = (c: string) => (c === "pos" ? "bg-ink-900" : "bg-brass-500");
+  const tone = (c: string) => (c === "pos" ? "bg-clay-600" : "bg-olive-500");
   return (
     <div className="card p-4">
       <h3 className="mb-3 font-display text-base font-bold">Revenue by channel</h3>
@@ -59,7 +59,7 @@ export function ChannelSplit({ rows }: { rows: Analytics["byChannel"] }) {
 /** Tender mix — cash in the drawer vs Mobile Money, for end-of-day reconciliation. */
 export function TenderMix({ rows }: { rows: Analytics["byTender"] }) {
   const total = rows.reduce((a, r) => a + r.revenue, 0) || 1;
-  const tones = ["bg-ink-900", "bg-brass-500", "bg-clay-500", "bg-emerald-700", "bg-ink-600"];
+  const tones = ["bg-clay-600", "bg-brass-500", "bg-olive-500", "bg-clay-300", "bg-ink-600"];
   return (
     <div className="card p-4">
       <h3 className="mb-3 font-display text-base font-bold">Tender mix</h3>

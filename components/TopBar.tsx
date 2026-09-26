@@ -22,8 +22,8 @@ export function TopBar({ user, mode, showCart = true }: { user: Profile | null; 
     return (
       <Link
         href={href}
-        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-          active ? "bg-[#faf7f2] text-ink-900" : "text-[#faf7f2]/70 hover:bg-[#faf7f2]/10 hover:text-[#faf7f2]"
+        className={`inline-flex items-center gap-1.5 rounded-pill px-3.5 py-2 text-sm font-semibold transition ${
+          active ? "bg-sand-50 text-clay-700" : "text-sand-100/75 hover:bg-sand-50/10 hover:text-sand-50"
         }`}
       >
         {icon}
@@ -33,13 +33,13 @@ export function TopBar({ user, mode, showCart = true }: { user: Profile | null; 
   };
 
   return (
-    <header className="no-print sticky top-0 z-40 border-b border-black/20 bg-ink-900 text-[#faf7f2]">
+    <header className="no-print sticky top-0 z-40 border-b border-clay-700/30 bg-clay-700 text-sand-50 shadow-lift">
       <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-2 px-3 py-2.5 sm:px-5">
         <Link href="/" className="mr-2 flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-brass-500 font-display text-lg font-bold text-ink-900">A</span>
+          <span className="grid h-9 w-9 place-items-center rounded-pill bg-brass-500 font-display text-lg font-bold text-clay-700">A</span>
           <span className="leading-tight">
             <span className="block font-display text-[15px] font-bold tracking-wide">{STORE.name}</span>
-            <span className="block text-[10px] uppercase tracking-[0.18em] text-[#faf7f2]/50">{CURRENCY.code} · Kampala</span>
+            <span className="block text-[10px] uppercase tracking-[0.18em] text-sand-100/60">{CURRENCY.code} · Kampala</span>
           </span>
         </Link>
 
@@ -51,15 +51,15 @@ export function TopBar({ user, mode, showCart = true }: { user: Profile | null; 
 
         <div className="ml-auto flex items-center gap-2">
           {/* The driver name is an internal detail — only show it to signed-in staff. */}
-          <span className="hidden items-center gap-1.5 rounded-full border border-[#faf7f2]/15 px-2.5 py-1 text-[11px] font-semibold text-[#faf7f2]/70 md:inline-flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> {user ? `live stock · ${mode}` : "Stock updated live"}
+          <span className="hidden items-center gap-1.5 rounded-pill border border-sand-50/20 px-2.5 py-1 text-[11px] font-semibold text-sand-100/75 md:inline-flex">
+            <span className="h-1.5 w-1.5 rounded-pill bg-olive-300" /> {user ? `live stock · ${mode}` : "Stock updated live"}
           </span>
           {showCart && (
-            <button onClick={() => setOpen(true)} className="relative inline-flex items-center gap-2 rounded-xl bg-brass-500 px-3 py-2 text-sm font-bold text-ink-900 hover:bg-brass-400">
+            <button onClick={() => setOpen(true)} className="relative inline-flex items-center gap-2 rounded-pill bg-brass-500 px-3.5 py-2 text-sm font-bold text-clay-700 hover:bg-brass-400">
               <ShoppingBag size={16} />
               <span className="hidden sm:inline">Cart</span>
               {units > 0 && (
-                <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-clay-500 px-1 text-[11px] font-bold text-white">{units}</span>
+                <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-pill bg-ink-900 px-1 text-[11px] font-bold text-sand-50">{units}</span>
               )}
               {units > 0 && <span className="hidden tabular-nums sm:inline">· <Money value={subtotal} /></span>}
             </button>
@@ -74,12 +74,12 @@ export function TopBar({ user, mode, showCart = true }: { user: Profile | null; 
                 window.location.href = "/";
               }}
             >
-              <button className="inline-flex items-center gap-1.5 rounded-xl border border-[#faf7f2]/20 px-3 py-2 text-xs font-semibold text-[#faf7f2]/80 hover:bg-[#faf7f2]/10">
+              <button className="inline-flex items-center gap-1.5 rounded-xl border border-sand-50/25 px-3.5 py-2 text-xs font-semibold text-sand-100/85 hover:bg-sand-50/10">
                 <LogOut size={14} /> {user.name.split(" ")[0]}
               </button>
             </form>
           ) : (
-            <Link href="/login" className="inline-flex items-center gap-1.5 rounded-xl border border-[#faf7f2]/20 px-3 py-2 text-xs font-semibold text-[#faf7f2]/80 hover:bg-[#faf7f2]/10">
+            <Link href="/login" className="inline-flex items-center gap-1.5 rounded-xl border border-sand-50/25 px-3.5 py-2 text-xs font-semibold text-sand-100/85 hover:bg-sand-50/10">
               Staff sign in
             </Link>
           )}

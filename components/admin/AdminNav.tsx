@@ -26,7 +26,7 @@ export function AdminNav({ role }: { role: Role }) {
           <Link
             key={l.href}
             href={l.href}
-            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${active ? "bg-ink-900 text-[#faf7f2]" : "text-ink-700 hover:bg-ink-900/5"}`}
+            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold ${active ? "bg-clay-600 text-sand-50" : "text-ink-700 hover:bg-clay-50"}`}
           >
             {l.icon} {l.label}
           </Link>

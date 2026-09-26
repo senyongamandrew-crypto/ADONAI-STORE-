@@ -73,11 +73,11 @@ export function SalesLedger({ initial, initialStatus, products }: { initial: Sal
         </div>
       </div>
 
-      {notice && <p className="rounded-xl border border-emerald-600/25 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">{notice}</p>}
+      {notice && <p className="rounded-xl border border-olive-600/30 bg-olive-50 px-3 py-2 text-sm font-semibold text-olive-700">{notice}</p>}
 
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[54rem]">
-          <thead className="border-b border-ink-900/10 bg-[#faf7f2]">
+          <thead className="border-b border-ink-900/10 bg-sand-50">
             <tr>
               <th className="th">Ref</th>
               <th className="th">When</th>
@@ -91,7 +91,7 @@ export function SalesLedger({ initial, initialStatus, products }: { initial: Sal
           </thead>
           <tbody>
             {rows.map((s) => (
-              <tr key={s.id} className="border-b border-ink-900/5 last:border-0 hover:bg-[#faf7f2]/60">
+              <tr key={s.id} className="border-b border-ink-900/5 last:border-0 hover:bg-sand-50/60">
                 <td className="td font-mono text-xs font-bold">{s.ref}</td>
                 <td className="td text-ink-600">{new Date(s.created_at).toLocaleString("en-GB", { timeZone: "Africa/Kampala", dateStyle: "short", timeStyle: "short" })}</td>
                 <td className="td">{s.channel === "pos" ? "Counter" : "Online"}</td>

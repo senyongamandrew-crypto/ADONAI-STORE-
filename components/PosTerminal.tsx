@@ -156,7 +156,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
             <button
               key={v}
               onClick={() => setView(v)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold capitalize ${view === v ? "bg-ink-900 text-[#faf7f2]" : "text-ink-700 hover:bg-ink-900/5"}`}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold capitalize ${view === v ? "bg-ink-900 text-sand-50" : "text-ink-700 hover:bg-ink-900/5"}`}
             >
               {v === "counter" ? <ScanBarcode size={15} /> : <Store size={15} />} {v} mode
             </button>
@@ -172,7 +172,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
       </div>
 
       {feedback && (
-        <div className={`mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${feedback.tone === "ok" ? "border-emerald-600/25 bg-emerald-50 text-emerald-800" : "border-clay-500/30 bg-clay-50 text-clay-600"}`}>
+        <div className={`mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${feedback.tone === "ok" ? "border-olive-600/30 bg-olive-50 text-olive-700" : "border-clay-500/30 bg-clay-50 text-clay-600"}`}>
           {feedback.tone === "ok" ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />} {feedback.text}
         </div>
       )}
@@ -205,7 +205,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
               <button
                 key={c}
                 onClick={() => setCategory(c)}
-                className={`whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${category === c ? "border-ink-900 bg-ink-900 text-[#faf7f2]" : "border-ink-900/15 bg-white hover:border-ink-900/40"}`}
+                className={`whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${category === c ? "border-clay-600 bg-clay-600 text-sand-50" : "border-clay-700/15 bg-sand-50 text-ink-700 hover:border-clay-600/45"}`}
               >
                 {c}
               </button>
@@ -307,7 +307,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
                       setTender(t);
                       if (t !== "Cash") setReceived("");
                     }}
-                    className={`rounded-lg border px-2 py-1.5 text-xs font-semibold ${tender === t ? "border-ink-900 bg-ink-900 text-[#faf7f2]" : "border-ink-900/15 hover:border-ink-900/40"}`}
+                    className={`rounded-lg border px-2 py-1.5 text-xs font-semibold ${tender === t ? "border-clay-600 bg-clay-600 text-sand-50" : "border-clay-700/15 hover:border-clay-600/45"}`}
                   >
                     {t}
                   </button>
@@ -332,7 +332,7 @@ export function PosTerminal({ initial }: { initial: { products: Product[]; user:
                     </button>
                   ))}
                 </div>
-                <p className={`mt-1.5 flex items-center justify-between rounded-lg px-2 py-1 text-sm font-bold ${change > 0 ? "bg-emerald-50 text-emerald-800" : "bg-ink-900/5 text-ink-700"}`}>
+                <p className={`mt-1.5 flex items-center justify-between rounded-lg px-2 py-1 text-sm font-bold ${change > 0 ? "bg-olive-50 text-olive-700" : "bg-ink-900/5 text-ink-700"}`}>
                   <span>Change due</span><span className="tabular-nums">{fmt(change)}</span>
                 </p>
               </div>

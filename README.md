@@ -281,11 +281,25 @@ The public page is `app/page.tsx`: brand intro → rail → delivery bands → f
 - **Photography**: drop a hero image at `public/brand/intro.jpg` (or `.jpeg`/`.png`/`.webp`).
   `BrandStory` checks for it on each request and renders it; until then it shows an empty frame
   sized for a real shoot rather than a stock placeholder.
-- **Type**: Playfair Display for H1/H2 (700, −0.02em), Inter for body (line-height 1.6, `#1A1A1A`
-  on `#FAF8F4`), loaded from the Google Fonts CDN with Georgia/system fallbacks — the sandbox
-  blocks that CDN, so the preview shows fallbacks while production shows the real faces.
-- **Cards**: `.card` is 12px radius with opt-in padding; `.panel` is a content card at 24px;
-  `.card-heading` is the 13px medium-weight tracked H3.
+- **Type**: Fraunces for H1/H2 (600–700, −0.02em, optical-sizing axis on) and Outfit for body
+  (line-height 1.6), loaded from the Google Fonts CDN with Lora/Georgia and Plus Jakarta
+  Sans/system fallbacks — the sandbox blocks that CDN, so the preview shows fallbacks while
+  production shows the real faces.
+- **Cards**: `.card` is 16px radius with opt-in padding; `.panel` is a content card at 24px;
+  buttons are pills (`rounded-pill`); `.card-heading` is the 13px medium-weight tracked H3.
+- **Palette** (all tokens live in `tailwind.config.ts`, no raw hex in components):
+  | Token | Role |
+  | --- | --- |
+  | `clay` 50→700 | terracotta — primary accent, selected states, header, CTAs |
+  | `olive` 50→700 | secondary — live/success, condition badges, section rules |
+  | `brass` 400/500/600 | ochre — cart, warnings, data-viz |
+  | `ink` 600→900 | warm espresso text and dense data surfaces |
+  | `sand` 50/100/200 | paper tones for page and card backgrounds |
+
+  Page background `#FBF4ED`, body text `#2E221B`. Token **names** were kept from the previous
+  palette on purpose so the ~250 existing `bg-ink-900` / `text-clay-600` usages picked the new
+  colours up untouched; only the values moved. `clay-50` had been referenced in 14 places but
+  never defined, so it was silently rendering nothing — it exists now.
 
 ## Environment
 

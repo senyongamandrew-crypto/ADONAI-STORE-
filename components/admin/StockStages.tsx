@@ -120,7 +120,7 @@ export function StockStages({ initial }: { initial: Product[] }) {
         <div className="flex items-center gap-2 text-xs font-semibold">
           <span
             className={`inline-block size-2 rounded-full ${
-              stream === "live" ? "bg-emerald-500" : stream === "connecting" ? "bg-amber-500" : "bg-clay-500"
+              stream === "live" ? "bg-olive-500" : stream === "connecting" ? "bg-brass-500" : "bg-clay-500"
             }`}
           />
           <span className="text-ink-600">
@@ -152,7 +152,7 @@ export function StockStages({ initial }: { initial: Product[] }) {
                 key={t.id}
                 onClick={() => setTab(t.id)}
                 className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ${
-                  active ? "bg-ink-900 text-[#faf7f2]" : "text-ink-700 hover:bg-ink-900/5"
+                  active ? "bg-clay-600 text-sand-50" : "text-ink-700 hover:bg-clay-50"
                 }`}
               >
                 {t.icon} {t.label}

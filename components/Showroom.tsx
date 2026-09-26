@@ -125,7 +125,7 @@ export function Showroom({ initial }: { initial: { products: Product[]; user: Pr
                     : "Live updates unavailable — refreshing every minute"
               }
             >
-              <span className={`h-1.5 w-1.5 rounded-full ${stream === "live" ? "bg-emerald-500" : stream === "connecting" ? "bg-amber-500" : "bg-ink-600/40"}`} />
+              <span className={`h-1.5 w-1.5 rounded-full ${stream === "live" ? "bg-olive-500" : stream === "connecting" ? "bg-brass-500" : "bg-ink-600/40"}`} />
               {stream === "live" ? "Live stock" : stream === "connecting" ? "Connecting" : "Offline"}
               <RefreshCw size={13} className={syncing ? "animate-spin" : ""} /> {visible.length} shown
             </span>
@@ -140,7 +140,7 @@ export function Showroom({ initial }: { initial: { products: Product[]; user: Pr
                   key={c}
                   onClick={() => setCategory(c)}
                   className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                    active ? "border-ink-900 bg-ink-900 text-[#faf7f2]" : "border-ink-900/15 bg-white text-ink-700 hover:border-ink-900/40"
+                    active ? "border-clay-600 bg-clay-600 text-sand-50" : "border-clay-700/15 bg-sand-50 text-ink-700 hover:border-clay-600/45"
                   }`}
                 >
                   {c} <span className="opacity-50">{n}</span>

@@ -99,7 +99,7 @@ export function OrderForm({
             <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-ink-900/15 bg-white shadow-lg">
               {results.map((p) => (
                 <li key={p.id}>
-                  <button type="button" onClick={() => add(p)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-[#faf7f2]">
+                  <button type="button" onClick={() => add(p)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-sand-50">
                     <span className="min-w-0 truncate">{p.title} <span className="font-mono text-[10px] text-ink-600">{p.sku}</span></span>
                     <span className="shrink-0 tabular-nums"><Money value={unitPrice(p.price, p.discount_pct)} /></span>
                   </button>
