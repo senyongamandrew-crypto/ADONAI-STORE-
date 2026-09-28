@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adonai — Operations Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css?v=3.0" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23C24E2B'/><text x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='Georgia'>T</text></svg>" />
+</head>
+<body>
+<div class="app" id="shell">
+
+  <!-- ============ SIDEBAR (warm dark — matches reference console) ============ -->
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">T</div>
+      <div>
+        <div class="brand-name">Adonai</div>
+        <div class="brand-sub">Thrift Store</div>
+      </div>
+    </div>
+    <div class="brand-meta">
+      <span>Kampala, Uganda</span>
+      <span class="ver-chip">POS v2.1</span>
+    </div>
+
+    <nav class="nav" id="navList">
+      <a class="nav-item" href="pos.html" title="Open the cashier register"><span class="nav-ico">📥</span><span>POS Register</span></a>
+      <button class="nav-item" data-view="sales"><span class="nav-ico">📦</span><span>Fulfillment &amp; Orders</span><span class="badge" id="navWebBadge"></span></button>
+      <button class="nav-item" data-view="inventory"><span class="nav-ico">🔖</span><span>Inventory Rack</span><span class="badge warn" id="navStockBadge"></span></button>
+      <button class="nav-item" data-view="intake"><span class="nav-ico">➕</span><span>Catalog Intake</span></button>
+      <button class="nav-item" data-view="customers"><span class="nav-ico">👥</span><span>Customer Book</span></button>
+      <button class="nav-item" data-view="dispatch"><span class="nav-ico">🛵</span><span>Boda Riders &amp; Dispatch</span></button>
+      <button class="nav-item active" data-view="overview"><span class="nav-ico">📊</span><span>Sales Analytics</span></button>
+      <button class="nav-item" data-view="payments"><span class="nav-ico">📒</span><span>Financial Ledger</span></button>
+      <button class="nav-item" data-view="staff"><span class="nav-ico">🔑</span><span>Staff &amp; Permissions</span></button>
+      <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span><span>Store Settings</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="install-card" id="sidebarInstall">
+        <span class="nav-ico">⬇️</span>
+        <div><strong>Install POS App on Phone</strong><span>Add to home screen</span></div>
+      </div>
+      <div class="me-card">
+        <span class="me-avatar" id="meAvatar">OA</span>
+        <div>
+          <strong id="meName">Open access</strong>
+          <span id="meRole">No PIN set yet</span>
+        </div>
+      </div>
+      <div class="foot-actions">
+        <button class="mini-link" id="btnMasterKey">🔑 Master Key</button>
+        <a class="mini-link" href="index.html">Exit POS</a>
+      </div>
+    </div>
+  </aside>
+  <div class="sb-scrim" id="sbScrim"></div>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <!-- shared console topbar -->
+    <header class="ol-topbar">
+      <button class="pill" id="btnMenu">☰ Menu</button>
+      <div class="ol-topbar-right">
+        <span class="pill live" id="syncPill"><span class="live-dot"></span><span id="syncText">Sync Live · 0s | Auto 5s</span></span>
+        <button class="pill install" id="btnInstallTop">⬇ Install Mobile App</button>
+        <a class="pill store" href="index.html" target="_blank" rel="noopener">Storefront ↗</a>
+      </div>
+    </header>
+
+    <!-- ==================== SALES ANALYTICS ==================== -->
+    <section class="view active" id="view-overview">
+      <div class="page-head">
+        <p class="kicker" id="dateLine">— · KAMPALA, UGANDA</p>
+        <h1 id="greetingH">Good evening, Adonai</h1>
+        <div class="head-actions">
+          <a class="btn primary" href="pos.html">Open POS Register</a>
+          <button class="btn" data-goto="intake">+ New Intake</button>
+        </div>
+      </div>
+      <div class="kpis" id="kpiCards"></div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-head">
+          <div><h3>Hourly Sales Breakdown (UGX)</h3><p class="muted small">Today's real-time transaction volume</p></div>
+          <span class="muted small" id="weekTotal"></span>
+        </div>
+        <canvas id="hourlyChart" height="150"></canvas>
+      </div>
+
+      <div class="dark-card" id="pollCard">
+        <span class="poll-dot" id="pollDot"></span> <span class="poll-tag">Polling</span>
+        <p id="pollText">No pending WhatsApp orders right now. The poller is watching every 5 seconds.</p>
+        <button class="dark-card-btn" data-goto="sales">View All Orders &amp; Deliveries →</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Rack Inventory</h3></div>
+        <div id="rackBars"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Channels (UGX)</h3></div>
+        <div id="channelRows"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Boda Dispatch Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
+        <div id="riderPool"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Recent Transactions</h3><button class="btn ghost sm" data-goto="sales">All Orders &amp; Invoices →</button></div>
+        <p class="muted small" style="margin:-6px 0 10px">Latest in-store and WhatsApp checkouts</p>
+        <div id="recentTx"></div>
+      </div>
+    </section>
+
+    <!-- ==================== FULFILLMENT & ORDERS ==================== -->
+    <section class="view" id="view-sales">
+      <div class="page-head">
+        <p class="kicker">REAL-TIME ORDER &amp; DISPATCH PIPELINE</p>
+        <h1>Order Fulfillment</h1>
+        <p class="muted" id="pendingLine"></p>
+      </div>
+      <input class="search-wide" id="orderSearch" type="search" placeholder="Search order ref, customer, phone" />
+      <div class="lane-tabs" id="laneTabs"></div>
+      <div id="lanePanel"></div>
+    </section>
+
+    <!-- ==================== INVENTORY RACK ==================== -->
+    <section class="view" id="view-inventory">
+      <div class="page-head">
+        <p class="kicker">INVENTORY &amp; STOCK MANAGEMENT</p>
+        <h1>The Rack &amp; Stock Room (UGX)</h1>
+        <p class="muted">Full management of all existing thrift apparel, pricing, stock statuses, editing, and deletion.</p>
+        <div class="head-actions">
+          <button class="btn primary" data-goto="intake">+ Tag New Intake</button>
+        </div>
+      </div>
+
+      <div class="access-card">
+        <span class="live-dot"></span>
+        <div>
+          <strong>Stock Management Access: <span class="rust">OWNER / ADMINISTRATOR</span></strong>
+          <p class="small muted">✓ Authorized to edit or permanently delete existing products</p>
+        </div>
+      </div>
+
+      <div class="inv-filters">
+        <div class="dpills" id="invPills"></div>
+        <div class="inv-filter-row">
+          <input class="search-wide" id="invSearch" type="search" placeholder="Filter by brand, size, color, keyword…" />
+          <select class="sel" id="invStatusSel"></select>
+          <button class="btn black" id="btnInvFilter">Filter</button>
+        </div>
+      </div>
+
+      <div class="stock-list" id="invList"></div>
+    </section>
+
+    <!-- ==================== CATALOG INTAKE ==================== -->
+    <section class="view" id="view-intake">
+      <div class="page-head">
+        <p class="kicker">POS INTAKE &amp; BARCODE MANAGEMENT</p>
+        <h1>Catalog Intake</h1>
+        <p class="muted">Register new one-of-one thrift pieces with demographic categorization, multi-angle photos, and UGX pricing.</p>
+      </div>
+
+      <div class="card intake-card">
+        <div class="flip" id="flipDemo" hidden></div>
+        <h4 class="sec">1. Target Audience &amp; Category</h4>
+        <div class="fgrid">
+          <div class="field"><label>Primary demographic</label><select id="inDemo" class="sel-full"></select></div>
+          <div class="field"><label>Item type / category</label><select id="inCat" class="sel-full"></select></div>
+          <div class="field"><label>Category group</label><select id="inGroup" class="sel-full"></select></div>
+        </div>
+
+        <h4 class="sec">2. Item Details &amp; Barcode</h4>
+        <div class="field"><label>Item title / name</label><input class="sel-full" id="inTitle" placeholder="e.g. 1990s Washed Denim Trucker Jacket" /></div>
+        <div class="fgrid third">
+          <div class="field"><label>Barcode / SKU</label>
+            <div class="sku-row"><input class="sel-full" id="inSku" /><button class="btn sm ghost" id="btnRollSku" type="button">Roll</button></div>
+          </div>
+          <div class="field"><label>Condition grade</label><select id="inCond" class="sel-full"></select></div>
+        </div>
+        <div class="fgrid">
+          <div class="field"><label>Size</label>
+            <div class="sku-row"><input class="sel-full" id="inSize" placeholder="L / 42 / -" /><select id="inSizePreset" class="sel-mini"><option value="">Preset</option></select></div>
+          </div>
+          <div class="field"><label>Brand / label</label><input class="sel-full" id="inBrand" placeholder="e.g. Levi's, Zara, Vintage Boutique" /></div>
+          <div class="field"><label>Color / wash</label><input class="sel-full" id="inColor" placeholder="e.g. Indigo, Olive, Terracotta" /></div>
+        </div>
+        <div class="fgrid">
+          <div class="field"><label>Stock status</label>
+            <select id="inStatus" class="sel-full"><option value="1">Available</option><option value="0">Sold</option></select></div>
+          <div class="field full"><label>Channel visibility</label>
+            <select id="inVis" class="sel-full">
+              <option>Online WhatsApp &amp; In-Store POS</option><option>In-Store POS Only</option><option>Online Only</option>
+            </select></div>
+        </div>
+
+        <h4 class="sec">3. Pricing Structure (UGX)</h4>
+        <div class="fgrid">
+          <div class="field"><label>Cost price (UGX)</label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
+          <div class="field"><label>Sell price (UGX)<span class="fhint">Active Price</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
+          <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
+        </div>
+
+        <h4 class="sec">4. Item Photos (4 Angles)</h4>
+        <div class="photos-head">
+          <div><label class="flab">Multi-angle item photography (dual media capture)</label>
+            <p class="muted small">Choose Take Photo with Camera or Upload from Gallery</p></div>
+          <span class="muted small" id="angleCount">0 / 4 angles</span>
+        </div>
+        <div class="photo-row" id="photoRow"></div>
+
+        <div class="field"><label>Item story / description (visible on catalog)</label><textarea class="sel-full" id="inStory" placeholder="Describe fit, fabric feel, vintage era, and standout features…"></textarea></div>
+        <div class="field"><label>Notes for shoppers / floor staff (intake notes)</label><textarea class="sel-full" id="inNotes" placeholder="Any minor wear details, dry clean status, or special handling notes…"></textarea></div>
+
+        <div class="intake-actions">
+          <button class="btn primary big" id="btnIntakeSave">Tag &amp; Save (UGX 0)</button>
+          <button class="btn big" id="btnIntakeMore">Save &amp; Tag Another Piece</button>
+        </div>
+      </div>
+
+      <!-- print-style tag preview -->
+      <div class="card tag-card">
+        <div class="card-head"><span class="flab">Print tag preview</span><span class="chip-gold">1-OF-1 THRIFT</span></div>
+        <p class="kicker" id="tagKicker">MEN · TOPS &amp; SHIRTS</p>
+        <h3 class="tag-title" id="tagTitle">Item Title</h3>
+        <p class="muted small" id="tagMeta">Brand: Unbranded | Size: L | Color: Standard</p>
+        <p class="tag-price"><span id="tagPrice">UGX 0</span> <s id="tagStrike"></s></p>
+        <div class="tag-bars" id="tagBars"></div>
+        <p class="tag-code" id="tagCode">ADN-XXX-0000</p>
+        <p class="tag-store">ADONAI THRIFT STORE · KAMPALA, UGANDA</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Recently Tagged Pieces</h3></div>
+        <div id="recentTagged"></div>
+      </div>
+    </section>
+
+    <!-- ==================== CUSTOMER BOOK ==================== -->
+    <section class="view" id="view-customers">
+      <div class="page-head row">
+        <div>
+          <p class="kicker">CUSTOMERS</p>
+          <h1>Guest book</h1>
+        </div>
+        <button class="btn primary" id="btnAddGuest">Add guest</button>
+      </div>
+      <input class="search-wide" id="guestSearch" type="search" placeholder="Search name, phone, neighborhood" />
+      <div class="guest-list" id="guestList"></div>
+    </section>
+
+    <!-- ==================== BODA RIDERS & DISPATCH ==================== -->
+    <section class="view" id="view-dispatch">
+      <div class="page-head">
+        <p class="kicker">DISPATCH</p>
+        <h1>Riders</h1>
+        <p class="muted">Available riders can be assigned from an order. Duty flips to on delivery the moment a route is confirmed.</p>
+      </div>
+      <div class="rider-list" id="riderList"></div>
+    </section>
+
+    <!-- ==================== FINANCIAL LEDGER ==================== -->
+    <section class="view" id="view-payments">
+      <div class="page-head">
+        <p class="kicker">FINANCIAL LEDGER &amp; CASH BOOK</p>
+        <h1>Store Ledger (UGX)</h1>
+        <p class="muted">Track daily sales, boda rider payouts, operational expenses, and cash drawer reconciliations.</p>
+        <div class="head-actions">
+          <button class="btn primary" id="btnNewEntry">+ Record New Entry</button>
+        </div>
+      </div>
+      <div class="kpis" id="ledgerKpis"></div>
+      <div class="kpills" id="ledgerPills"></div>
+      <div class="ledger-list" id="ledgerRows"></div>
+    </section>
+
+    <!-- ==================== STAFF & PERMISSIONS ==================== -->
+    <section class="view" id="view-staff">
+      <div class="page-head row">
+        <div>
+          <p class="kicker">SECURITY &amp; ROLE PERMISSIONS</p>
+          <h1>Floor Team &amp; Keys</h1>
+          <p class="muted">Manage cashier accounts, manager authority, and boda dispatch personnel.</p>
+        </div>
+        <button class="btn primary" id="btnAddStaff">+ Add Staff Member</button>
+      </div>
+
+      <div class="access-card" style="margin-bottom:16px">
+        <span class="live-dot"></span>
+        <div class="grow">
+          <strong id="lockState">Open access mode — stores &amp; terminals are unlocked</strong>
+          <p class="small muted">Flip the lock after setting passkeys on each staff account (via Edit Key).</p>
+        </div>
+        <label class="switch"><input type="checkbox" id="lockToggle" /><span class="slider"></span></label>
+      </div>
+
+      <div class="staff-list" id="staffRows"></div>
+    </section>
+
+    <!-- ==================== STORE SETTINGS ==================== -->
+    <section class="view" id="view-settings">
+      <div class="page-head row">
+        <div>
+          <p class="kicker">STORE &amp; SECURITY CONFIGURATION</p>
+          <h1>System Parameters</h1>
+          <p class="muted">Global delivery fee benchmarks, official WhatsApp numbers, and Admin Master Key controls.</p>
+        </div>
+        <button class="chip-gold big" id="unlockChip">🔒 Unlock Master Key</button>
+      </div>
+
+      <div class="card" style="max-width:860px">
+        <div class="fgrid">
+          <div class="field full"><label>Store name</label><input class="sel-full" id="setName" /></div>
+          <div class="field"><label>WhatsApp order line (raw digits)<span class="fhint">e.g. 256758873398</span></label><input class="sel-full" id="setWaRaw" /></div>
+          <div class="field"><label>WhatsApp display format<span class="fhint">e.g. +256 7588 73398</span></label><input class="sel-full" id="setWaDisp" /></div>
+          <div class="field"><label>Call / toll line<span class="fhint">e.g. +256 7656 52403</span></label><input class="sel-full" id="setHotline" /></div>
+          <div class="field"><label>Official email address<span class="fhint">e.g. adonaithriftstore@gmail.com</span></label><input class="sel-full" id="setEmail" /></div>
+          <div class="field"><label>TikTok official handle<span class="fhint">e.g. @adonai.thrift256</span></label><input class="sel-full" id="setTiktok" /></div>
+          <div class="field"><label>Instagram official handle<span class="fhint">e.g. @adonaithrift256</span></label><input class="sel-full" id="setInstagram" /></div>
+          <div class="field full"><label>Physical store address</label><input class="sel-full" id="setAddress" /></div>
+          <div class="field full"><label>Delivery area scope</label><input class="sel-full" id="setScope" /></div>
+          <div class="field full"><label>Opening hours</label><input class="sel-full" id="setHours" /></div>
+          <div class="field"><label>Base delivery fee (UGX)<span class="fhint">Formula starts at this base for &lt;= 3 items</span></label><input class="sel-full" id="setFee" type="number" min="0" /></div>
+          <div class="field"><label>Update Admin Master Key<span class="fhint">Minimum 6 characters — leave blank to keep current key</span></label><input class="sel-full" id="setKey" placeholder="Leave blank to keep current key" /></div>
+        </div>
+        <div class="settings-foot">
+          <span class="muted small">Changes apply instantly across public storefront &amp; cashier terminals.</span>
+          <button class="btn primary" id="btnSaveCfg">Save Configuration</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modalBox"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/intake.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
