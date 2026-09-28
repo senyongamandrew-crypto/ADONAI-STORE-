@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adonai Store — OPS</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div>
+        <div class="brand-name">ADONAI</div>
+        <div class="brand-sub">Store OPS</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-view="overview">📊 <span>Overview</span></button>
+      <button class="nav-item" data-view="orders">🧾 <span>Orders</span> <span class="badge" id="navOrdersBadge"></span></button>
+      <button class="nav-item" data-view="inventory">📦 <span>Inventory</span> <span class="badge warn" id="navStockBadge"></span></button>
+      <button class="nav-item" data-view="customers">👥 <span>Customers</span></button>
+      <button class="nav-item" data-view="payments">💳 <span>Payments</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="op-pill"><span class="dot live"></span> Operations live</div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">Overview</h1>
+        <p class="muted" id="todayLine"></p>
+      </div>
+      <div class="top-actions">
+        <div class="search">
+          <input id="globalSearch" type="search" placeholder="Search orders, products, customers…" />
+        </div>
+        <button class="btn primary" id="btnNewOrder">+ New order</button>
+      </div>
+    </header>
+
+    <!-- ---- OVERVIEW ---- -->
+    <section class="view active" id="view-overview">
+      <div class="kpis" id="kpis"></div>
+
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <h3>Revenue — last 14 days</h3>
+            <span class="muted small" id="chartTotal"></span>
+          </div>
+          <canvas id="revenueChart" height="220"></canvas>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Order pipeline</h3></div>
+          <div id="pipeline"></div>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <h3>Latest orders</h3>
+            <button class="btn ghost sm" data-goto="orders">View all →</button>
+          </div>
+          <table class="tbl" id="latestOrdersTbl"></table>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Low stock alerts</h3>
+            <button class="btn ghost sm" data-goto="inventory">Manage →</button>
+          </div>
+          <div id="lowStockList" class="stock-alerts"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- ORDERS ---- -->
+    <section class="view" id="view-orders">
+      <div class="filterbar" id="orderFilters">
+        <button class="chip active" data-status="all">All</button>
+        <button class="chip" data-status="pending">Pending</button>
+        <button class="chip" data-status="paid">Paid</button>
+        <button class="chip" data-status="shipped">Shipped</button>
+        <button class="chip" data-status="delivered">Delivered</button>
+        <button class="chip" data-status="cancelled">Cancelled</button>
+      </div>
+      <div class="card">
+        <table class="tbl" id="ordersTbl"></table>
+      </div>
+    </section>
+
+    <!-- ---- INVENTORY ---- -->
+    <section class="view" id="view-inventory">
+      <div class="filterbar">
+        <button class="btn primary sm" id="btnAddProduct">+ Add product</button>
+      </div>
+      <div class="card">
+        <table class="tbl" id="inventoryTbl"></table>
+      </div>
+    </section>
+
+    <!-- ---- CUSTOMERS ---- -->
+    <section class="view" id="view-customers">
+      <div class="card">
+        <table class="tbl" id="customersTbl"></table>
+      </div>
+    </section>
+
+    <!-- ---- PAYMENTS ---- -->
+    <section class="view" id="view-payments">
+      <div class="kpis small" id="payKpis"></div>
+      <div class="card">
+        <div class="card-head"><h3>Payment log</h3></div>
+        <table class="tbl" id="paymentsTbl"></table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ MODAL ============ -->
+<div class="modal-backdrop" id="modalBackdrop">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
