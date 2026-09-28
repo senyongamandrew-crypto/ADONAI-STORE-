@@ -235,3 +235,46 @@ button { font: inherit; }
   .cart { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
   body { overflow: auto; }
 }
+
+/* ---- v2: product images on tiles + inventory intake ---- */
+.tile { display: flex; flex-direction: row; align-items: stretch; gap: 10px; }
+.tile .tile-img {
+  width: 56px; height: 56px; flex-shrink: 0; border-radius: 10px; overflow: hidden;
+  background: #141a2b; display: grid; place-items: center; font-size: 24px; position: relative;
+}
+.tile .tile-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.tile .tile-body { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+
+.intake-modal { max-width: 520px; }
+.intake-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.intake-list { max-height: 46vh; overflow-y: auto; margin: 12px 0; }
+.in-row {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 8px 12px; margin-bottom: 8px;
+}
+.in-row .in-thumb {
+  width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: #141a2b;
+  display: grid; place-items: center; font-size: 19px; flex-shrink: 0; position: relative;
+}
+.in-row .in-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.in-row .grow { flex: 1; min-width: 0; }
+.in-row .in-name { font-weight: 700; font-size: 13.5px; }
+.in-row .in-meta { font-size: 11.5px; color: var(--muted); }
+
+.form2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+.intake-ed-note { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.intake-ed-note code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; color: #aab4e8; }
+
+/* shared image editor (js/intake.js) */
+.imgfield { margin: 12px 0; }
+.imgfield .fld-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.imgfield .fld-hint { opacity: .75; font-weight: 400; }
+.imgfield-row { display: flex; gap: 12px; align-items: center; }
+.imgfield-preview {
+  width: 88px; height: 88px; border-radius: 12px; overflow: hidden; flex-shrink: 0;
+  background: #141a2b; border: 1px solid var(--line);
+  display: grid; place-items: center; font-size: 11px; color: var(--muted); position: relative;
+}
+.imgfield-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.imgfield-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }

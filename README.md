@@ -87,3 +87,7 @@ Every sale — whether scanned at the counter (`process_pos_sale`) or placed via
 ## Configuration
 
 Store metadata (name, address, **WhatsApp number**) lives in `js/db.js → seedState().settings.whatsapp` and can be updated in the browser console via `DB.updateSettings({ whatsapp: "2567XXXXXXXX" })`. To reseed demo data: `DB.resetToSeed()`.
+
+## Product photography
+
+Seeds ship with placeholder images from the web (locked to each product). Staff replace them with the **real item photo** during intake — either in the POS terminal (**📥 Intake** → Edit · photo → 📷 Upload) or the admin product editor. On-device shots are compressed to a compact JPEG and saved into the shared DB, so the storefront, POS tiles and dashboard update **live, with no refresh**. Products without a photo gracefully fall back to a clean category icon.

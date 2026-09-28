@@ -211,11 +211,12 @@
     const out = DB.listProducts().filter(p => p.in_stock_count <= 0).length;
     $("#navStockBadge").textContent = out || "";
     $("#inventoryTbl").innerHTML = `
-      <thead><tr><th>SKU</th><th>Barcode</th><th>Item</th><th>Category</th><th class="num">Cost</th><th class="num">Selling</th><th class="num">Margin</th><th class="num">Stock</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Photo</th><th>SKU</th><th>Barcode</th><th>Item</th><th>Category</th><th class="num">Cost</th><th class="num">Selling</th><th class="num">Margin</th><th class="num">Stock</th><th>Status</th><th></th></tr></thead>
       <tbody>${list.length ? list.map(p => {
         const st = p.in_stock_count <= 0 ? "out" : "ok";
         const margin = p.cost_price > 0 ? Math.round(((p.selling_price - p.cost_price) / p.cost_price) * 100) : null;
         return `<tr>
+          <td><span class="pthumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span></td>
           <td class="rowdim">${esc(p.id)}</td>
           <td><code>${esc(p.barcode_id)}</code></td>
           <td><strong>${esc(p.name)}</strong><div class="rowdim small">Size ${esc(p.size)} · ${esc(p.condition)}</div></td>
@@ -230,7 +231,7 @@
             <button class="btn sm" data-editprod="${esc(p.id)}">Edit</button>
           </td>
         </tr>`;
-      }).join("") : `<tr><td colspan="10" class="rowdim" style="padding:24px">No products match.</td></tr>`}</tbody>`;
+      }).join("") : `<tr><td colspan="11" class="rowdim" style="padding:24px">No products match.</td></tr>`}</tbody>`;
   }
 
   /* ---------- CUSTOMERS ---------- */
@@ -311,8 +312,11 @@
   const closeModal = () => backdrop.classList.remove("open");
   backdrop.addEventListener("click", e => { if (e.target === backdrop) closeModal(); });
 
+  let prodImageState = { image_url: "" };
+
   function productModal(editId) {
     const p = editId ? DB.getProduct(editId) : null;
+    prodImageState = { image_url: p ? (p.image_url || "") : "" };
     openModal(`
       <h3>${p ? "Edit — " + esc(p.name) : "Add thrift item"}</h3>
       ${p ? `<p class="muted small" style="margin-bottom:10px">Barcode: <code>${esc(p.barcode_id)}</code> (scannable by the POS)</p>`
@@ -332,10 +336,12 @@
         <div class="field"><label>Cost price (UGX)</label><input id="mpCost" type="number" min="0" value="${p ? p.cost_price : ""}" /></div>
         <div class="field"><label>Selling price (UGX)</label><input id="mpSell" type="number" min="0" value="${p ? p.selling_price : ""}" /></div>
       </div>
+      ${Intake.imageFieldHTML(prodImageState.image_url)}
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
+    Intake.bindImageEditor(modalBox, prodImageState);
   }
 
   function restockModal(id) {
@@ -429,7 +435,8 @@
       const vals = {
         name: $("#mpName").value.trim(), category: $("#mpCat").value, size: $("#mpSize").value.trim() || "-",
         condition: $("#mpCond").value, cost_price: Number($("#mpCost").value) || 0,
-        selling_price: Number($("#mpSell").value) || 0, in_stock_count: Number($("#mpStock").value) || 0
+        selling_price: Number($("#mpSell").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
+        image_url: prodImageState.image_url
       };
       if (!vals.name) return toast("Item name is required");
       try {

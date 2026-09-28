@@ -4,9 +4,22 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const EMOJI = { Jackets: "🧥", Shirts: "👕", Shoes: "👟", Dresses: "👗", Trousers: "👖", Accessories: "👜" };
-  const HUES = { Jackets: "#5b7f9e", Shirts: "#7d9e5b", Shoes: "#9e7c5b", Dresses: "#a05b9e", Trousers: "#5b8e9e", Accessories: "#9e5b6b" };
   const CART_KEY = "adonai-cart-v1";
+
+  /* ---------- stroke icon set (24×24, 1.5px — Lucide style) ---------- */
+  const svg = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+  const ICONS = {
+    Jackets: svg(`<path d="M6 4l3-2c0 1.7 1.3 3 3 3s3-1.3 3-3l3 2 1.7 4.6c.2.7-.2 1.3-.9 1.4L17 10.4V20a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9.6l-1.8-.4a1 1 0 0 1-.9-1.4L6 4Z"/><path d="M12 6.5V22"/>`),
+    Shirts: svg(`<path d="M20.38 3.46 16 2a4 4 0 0 1-8 0L3.62 3.46a2 2 0 0 0-1.34 2.23l.58 3.47a1 1 0 0 0 .99.84H6v10c0 1.1.9 2 2 2h8a2 2 0 0 0 2-2V10h2.15a1 1 0 0 0 .99-.84l.58-3.47a2 2 0 0 0-1.34-2.23Z"/>`),
+    Shoes: svg(`<path d="M2 16.2V9.4c0-.8.6-1.4 1.4-1.4h1.9c.6 0 1.1.2 1.5.7l2.4 2.9c.5.6 1.2.9 1.9 1l8.9 1.4c1 .2 1.7 1 1.7 2v.8c0 .6-.4 1-1 1H2.9c-.5 0-.9-.3-.9-.6Z"/><path d="M6.8 8.3l1.8 1.9M4.7 8.2l1.5 1.7"/>`),
+    Dresses: svg(`<path d="M9 2c0 1.4 1.3 2.5 3 2.5S15 3.4 15 2l1.5 4-1.2 3 3.7 10.6a1 1 0 0 1-1 1.4H6a1 1 0 0 1-1-1.4L8.7 9l-1.2-3L9 2Z"/><path d="M8.7 9h6.6"/>`),
+    Trousers: svg(`<path d="M6.5 2h11l1.2 19.2a.8.8 0 0 1-.8.8h-4.6l-1.3-11-1.3 11H6.1a.8.8 0 0 1-.8-.9L6.5 2Z"/><path d="M6.5 6h11"/>`),
+    Accessories: svg(`<path d="M4 8h16l-1.2 12.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 8Z"/><path d="M8.5 10.5V6.5a3.5 3.5 0 0 1 7 0v4"/>`),
+    tag: svg(`<path d="M12.6 2.6 21 11a1.4 1.4 0 0 1 0 2l-8 8a1.4 1.4 0 0 1-2 0L2.6 12.6A2 2 0 0 1 2 11.2V4a2 2 0 0 1 2-2h7.2a2 2 0 0 1 1.4.6Z"/><circle cx="7" cy="7" r="1.4"/>`),
+    check: svg(`<path d="M20 6 9 17l-5-5"/>`),
+    message: svg(`<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.6 8.6 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 1 1 21 11.5Z"/>`)
+  };
+  const catIcon = c => ICONS[c] || ICONS.tag;
 
   /* ---------- toast ---------- */
   let toastT;
@@ -17,7 +30,10 @@
 
   /* ---------- settings / staff gateway ---------- */
   const settings = DB.getSettings();
-  $("#footContact").innerHTML = `WhatsApp <a href="https://wa.me/${esc(settings.whatsapp)}" target="_blank" rel="noopener">+${esc(settings.whatsapp)}</a>`;
+  $("#footContact").innerHTML = `
+    <a class="foot-link" href="https://wa.me/${esc(settings.whatsapp)}" target="_blank" rel="noopener">
+      ${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} WhatsApp +${esc(settings.whatsapp)}
+    </a>`;
   const staffHref = (!Auth.locked() || Auth.me()) ? "pos.html" : "login.html"; // open access → straight to POS
   $("#staffLink").href = staffHref;
   $("#staffLinkFoot").href = staffHref;
@@ -26,7 +42,7 @@
   let cart = [];
   try { cart = JSON.parse(localStorage.getItem(CART_KEY)) || []; } catch (e) { cart = []; }
   const saveCart = () => localStorage.setItem(CART_KEY, JSON.stringify(cart));
-  let orderResult = null; // shown instead of cart after successful checkout
+  let orderResult = null;
 
   /* ---------- shop state ---------- */
   let products = [];
@@ -35,11 +51,10 @@
 
   function refreshProducts() {
     products = DB.listProducts();
-    // clamp cart against latest stock (real-time safety)
     let changed = false;
     cart = cart.reduce((acc, l) => {
       const p = products.find(x => x.id === l.product_id);
-      if (!p || p.in_stock_count <= 0) { changed = true; if (p) toast(`"${p.name}" was just sold in store`); return acc; }
+      if (!p || p.in_stock_count <= 0) { changed = true; if (p) toast(`"${p.name}" was just sold in the shop`); return acc; }
       if (l.qty > p.in_stock_count) { l.qty = p.in_stock_count; changed = true; }
       acc.push(l); return acc;
     }, []);
@@ -53,7 +68,7 @@
     $("#catTabs").innerHTML = cats.map(c => {
       const n = c === "All" ? products.filter(p => p.in_stock_count > 0).length
                             : products.filter(p => p.category === c && p.in_stock_count > 0).length;
-      return `<button class="tab ${c === activeCat ? "active" : ""}" data-cat="${esc(c)}">${esc(c)} <span style="opacity:.6">(${n})</span></button>`;
+      return `<button class="tab ${c === activeCat ? "active" : ""}" data-cat="${esc(c)}">${esc(c)} <span style="opacity:.55">${n}</span></button>`;
     }).join("");
   }
   $("#catTabs").addEventListener("click", e => {
@@ -63,10 +78,15 @@
   $("#shopSearch").addEventListener("input", e => { term = e.target.value.trim().toLowerCase(); renderGrid(); });
 
   /* ---------- product grid ---------- */
-  function stockBadge(p) {
-    return p.in_stock_count > 0
-      ? `<span class="stock-badge">In stock${p.in_stock_count > 1 ? " ×" + p.in_stock_count : ""}</span>`
-      : `<span class="stock-badge sold">Sold</span>`;
+  const pill = p => p.in_stock_count > 0
+    ? `<span class="pill"><span class="dot"></span>In stock</span>`
+    : `<span class="pill sold"><span class="dot"></span>Sold</span>`;
+
+  function thumbHTML(p, iconSize) {
+    const img = p.image_url
+      ? `<img src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()" />`
+      : "";
+    return `<div class="thumb"><span class="thumb-icon">${catIcon(p.category)}</span>${img}${pill(p)}</div>`;
   }
 
   function renderGrid() {
@@ -79,24 +99,16 @@
     $("#gridEmpty").hidden = list.length > 0;
     grid.innerHTML = list.map(p => {
       const sold = p.in_stock_count <= 0;
-      const hue = HUES[p.category] || "#7a7466";
       return `
       <article class="card ${sold ? "sold" : ""}" data-card="${esc(p.id)}">
-        <div class="thumb" style="background:linear-gradient(150deg, ${hue}22, ${hue}4d)">
-          ${stockBadge(p)}
-          <span>${EMOJI[p.category] || "🏷️"}</span>
-          ${sold ? `<div class="sold-overlay">SOLD</div>` : ""}
-        </div>
+        ${thumbHTML(p)}
         <div class="card-body">
-          <div class="card-title">${esc(p.name)}</div>
-          <div class="chips">
-            <span class="chiplet">${esc(p.category)}</span>
-            <span class="chiplet">Size ${esc(p.size)}</span>
-            <span class="chiplet">${esc(p.condition)}</span>
-          </div>
+          <p class="micro">${esc(p.category)}</p>
+          <h3 class="card-name">${esc(p.name)}</h3>
+          <p class="card-meta">Size ${esc(p.size)} · ${esc(p.condition)}</p>
           <div class="card-foot">
             <span class="price">${DB.ugx(p.selling_price)}</span>
-            <button class="add-btn" data-add="${esc(p.id)}" ${sold ? "disabled" : ""}>${sold ? "Sold" : "Add to cart"}</button>
+            <button class="add-btn" data-add="${esc(p.id)}" ${sold ? "disabled" : ""}>${sold ? "Sold" : "Add to bag"}</button>
           </div>
         </div>
       </article>`;
@@ -110,13 +122,12 @@
 
   function addToCart(id) {
     const p = products.find(x => x.id === id);
-    if (!p || p.in_stock_count <= 0) return toast("Sorry — that piece is sold");
+    if (!p || p.in_stock_count <= 0) return toast("That piece has already sold");
     const line = cart.find(l => l.product_id === id);
-    const inCart = line ? line.qty : 0;
-    if (inCart + 1 > p.in_stock_count) return toast(`Only ${p.in_stock_count} in stock`);
+    if ((line ? line.qty : 0) + 1 > p.in_stock_count) return toast(`Only ${p.in_stock_count} in stock`);
     if (line) line.qty++; else cart.push({ product_id: id, qty: 1 });
     saveCart(); renderCart();
-    toast(`${p.name} added to cart`);
+    toast(`${p.name} added to your bag`);
     openCart();
   }
 
@@ -134,6 +145,11 @@
     }).filter(Boolean);
   }
 
+  function lineThumb(p) {
+    const img = p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "";
+    return `<span class="line-thumb">${catIcon(p.category)}${img}</span>`;
+  }
+
   function renderCart() {
     const lines = cartLines();
     const total = lines.reduce((s, x) => s + x.sub, 0);
@@ -142,49 +158,50 @@
     if (orderResult) {
       $("#cartBody").innerHTML = `
         <div class="order-done">
-          <div class="big">🎉</div>
-          <h3>Order reserved!</h3>
+          <svg class="done-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>
+          <h4>Your pieces are reserved</h4>
           <p><strong>${esc(orderResult.id)}</strong> · ${DB.ugx(orderResult.total)}</p>
-          <p class="note">We've set your items aside. Complete payment on WhatsApp to confirm — items are held for 24 hours.</p>
+          <p class="note">We've set these aside for 24 hours. Send the WhatsApp message to confirm payment — MoMo, Airtel or cash all work.</p>
         </div>`;
       $("#cartFoot").innerHTML = `
-        <button class="wa-btn" id="openWa">💬 Open WhatsApp chat</button>
-        <p class="note">Order id <strong>${esc(orderResult.id)}</strong> is included in the message.</p>
-        <button class="tab" id="keepShopping" style="width:100%;margin-top:10px">Keep shopping</button>`;
+        <button class="wa-btn" id="openWa">${ICONS.message} Open WhatsApp</button>
+        <button class="btn ghost keep-shopping" id="keepShopping">Keep browsing</button>`;
       $("#openWa").addEventListener("click", () => window.open(orderResult.waUrl, "_blank"));
       $("#keepShopping").addEventListener("click", () => { orderResult = null; renderCart(); });
       return;
     }
 
     if (!lines.length) {
-      $("#cartBody").innerHTML = `<p class="empty">Your cart is empty.<br/>Beautiful pieces are waiting 🛍️</p>`;
+      $("#cartBody").innerHTML = `<p class="empty">Your bag is empty.<br/>Have a look at what's on the rail today.</p>`;
       $("#cartFoot").innerHTML = "";
       return;
     }
 
     $("#cartBody").innerHTML = lines.map(({ line, p, sub }) => `
       <div class="cart-line">
-        <span class="emoji">${EMOJI[p.category] || "🏷️"}</span>
+        ${lineThumb(p)}
         <div class="grow">
           <div class="name">${esc(p.name)}</div>
-          <div class="meta">${DB.ugx(p.selling_price)} · Size ${esc(p.size)} · ${esc(p.condition)}</div>
+          <div class="meta">${DB.ugx(p.selling_price)} · Size ${esc(p.size)}</div>
+          <div class="line-foot">
+            <span class="qty">
+              <button data-dec="${esc(p.id)}" ${line.qty <= 1 ? "disabled" : ""}>−</button>
+              <span>${line.qty}</span>
+              <button data-inc="${esc(p.id)}" ${line.qty >= p.in_stock_count ? "disabled" : ""}>+</button>
+            </span>
+            <span class="amt">${DB.ugx(sub)}</span>
+          </div>
+          <button class="rmlink" data-rm="${esc(p.id)}">Remove</button>
         </div>
-        <div class="qty">
-          <button data-dec="${esc(p.id)}" ${line.qty <= 1 ? "disabled" : ""}>−</button>
-          <span>${line.qty}</span>
-          <button data-inc="${esc(p.id)}" ${line.qty >= p.in_stock_count ? "disabled" : ""}>+</button>
-        </div>
-        <strong>${DB.ugx(sub)}</strong>
-        <button class="rm" data-rm="${esc(p.id)}" title="Remove">✕</button>
       </div>`).join("");
 
     $("#cartFoot").innerHTML = `
-      <div class="tot-row"><span>Total</span><span>${DB.ugx(total)}</span></div>
+      <div class="tot-row"><span class="lbl">Total</span><span class="val">${DB.ugx(total)}</span></div>
       <div class="check-form">
         <input id="coName" placeholder="Your name" autocomplete="name" />
-        <input id="coPhone" placeholder="Phone (e.g. 0772 000 000)" autocomplete="tel" />
-        <button class="wa-btn" id="waCheckout">💬 Place order via WhatsApp</button>
-        <p class="note">Reserves your items instantly, then opens WhatsApp to confirm payment (MTN MoMo / Airtel / cash on pickup).</p>
+        <input id="coPhone" placeholder="Phone number (07XX 000 000)" autocomplete="tel" />
+        <button class="wa-btn" id="waCheckout">${ICONS.message} Reserve on WhatsApp</button>
+        <p class="note">Reserving sets the pieces aside instantly, then WhatsApp opens so we can confirm payment and delivery.</p>
       </div>`;
     $("#waCheckout").addEventListener("click", checkout);
   }
@@ -202,27 +219,26 @@
     const btn = $("#waCheckout");
     const name = $("#coName").value.trim();
     const phone = $("#coPhone").value.trim();
-    if (!name) return toast("Please enter your name");
+    if (!name) return toast("Please tell us your name first");
     if (cart.length === 0) return;
-    btn.disabled = true; btn.textContent = "Reserving your items…";
+    btn.disabled = true; btn.textContent = "Reserving your pieces…";
     try {
       const order = await DB.createWebOrder({
         customer_name: name, customer_phone: phone,
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
-      // build the WhatsApp payload (staff sees this verbatim)
-      const lines = order.items.map(l => `• ${l.qty}× ${l.name} — ${DB.ugx(l.line_total)}`).join("\n");
-      const msg = `Hello Adonai Thrift Store! 🛍️\nI would like to order:\n${lines}\n\nTotal: ${DB.ugx(order.total)}\nOrder: ${order.id}\nName: ${order.customer_name}\nPhone: ${order.customer_phone}`;
+      const lines = order.items.map(l => `- ${l.qty}x ${l.name} (${DB.ugx(l.line_total)})`).join("\n");
+      const msg = `Hello Adonai Thrift Store. I'd like to reserve:\n${lines}\n\nTotal: ${DB.ugx(order.total)}\nOrder: ${order.id}\nName: ${order.customer_name}\nPhone: ${order.customer_phone}`;
       const waUrl = `https://wa.me/${DB.getSettings().whatsapp}?text=${encodeURIComponent(msg)}`;
       orderResult = { id: order.id, total: order.total, waUrl };
       cart = []; saveCart();
-      renderCart(); refreshProducts();          // items now show Sold live
+      renderCart(); refreshProducts();
       window.open(waUrl, "_blank");
     } catch (err) {
-      toast(err.message || "Could not place the order — please try again");
-      refreshProducts();                        // pull truthful stock, fix cart
+      toast(err.message || "Something went wrong — please try again");
+      refreshProducts();
     } finally {
-      const b = $("#waCheckout"); if (b) { b.disabled = false; b.textContent = "💬 Place order via WhatsApp"; }
+      const b = $("#waCheckout"); if (b) { b.disabled = false; b.innerHTML = `${ICONS.message} Reserve on WhatsApp`; }
     }
   }
 
@@ -235,7 +251,7 @@
       if (was !== undefined && was > 0 && p.in_stock_count === 0) {
         const card = document.querySelector(`[data-card="${p.id}"]`);
         if (card) { card.classList.add("flip"); setTimeout(() => card.classList.remove("flip"), 900); }
-        toast(`"${p.name}" was just sold in store — going fast!`);
+        toast(`"${p.name}" just sold in the shop — pieces move fast`);
       }
     }
   });

@@ -13,8 +13,8 @@
 (function (global) {
   "use strict";
 
-  const LS_KEY   = "adonai-db-v2";
-  const CHANNEL  = "adonai-db-v2-sync";
+  const LS_KEY   = "adonai-db-v3";   // v3: products gain image_url (web image → real photo at intake)
+  const CHANNEL  = "adonai-db-v3-sync";
   const LOCK     = "adonai-thrift-db-tx";
   const TAB_ID   = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -34,35 +34,37 @@
   /* ---------- seed data ---------- */
   function seedProducts() {
     const raw = [
-      // [name, category, size, condition, cost, selling, stock]
-      ["Vintage Denim Jacket",   "Jackets",     "M",  "Like New",  30000, 45000, 1],
-      ["Leather Biker Jacket",   "Jackets",     "L",  "Excellent", 55000, 85000, 1],
-      ["Olive Bomber Jacket",    "Jackets",     "M",  "Good",      35000, 55000, 1],
-      ["Flannel Check Shirt",    "Shirts",      "M",  "Good",      10000, 18000, 2],
-      ["White Oxford Shirt",     "Shirts",      "L",  "Excellent", 12000, 20000, 1],
-      ["Graphic Band Tee",       "Shirts",      "M",  "Good",       8000, 15000, 3],
-      ["Floral Summer Shirt",    "Shirts",      "S",  "Like New",   9000, 16000, 1],
-      ["Classic White Sneakers", "Shoes",       "42", "Excellent", 18000, 30000, 1],
-      ["Chelsea Boots",          "Shoes",       "43", "Good",      35000, 55000, 1],
-      ["Running Trainers",       "Shoes",       "44", "Good",      16000, 28000, 1],
-      ["Ankara Print Dress",     "Dresses",     "M",  "Like New",  22000, 35000, 1],
-      ["Little Black Dress",     "Dresses",     "S",  "Excellent", 25000, 40000, 0],
-      ["High-Waist Jeans",       "Trousers",    "30", "Excellent", 15000, 25000, 2],
-      ["Khaki Chinos",           "Trousers",    "32", "Good",      12000, 22000, 1],
-      ["Corduroy Pants",         "Trousers",    "34", "Good",      11000, 20000, 0],
-      ["Leather Belt",           "Accessories", "-",  "Good",       5000, 12000, 2],
-      ["Canvas Tote Bag",        "Accessories", "-",  "Like New",   4000, 10000, 2],
-      ["Baseball Cap",           "Accessories", "-",  "Good",       3000,  8000, 1],
-      ["Silk Scarf",             "Accessories", "-",  "Excellent",  4000,  9000, 1],
-      ["Brown Leather Handbag",  "Accessories", "-",  "Excellent", 12000, 22000, 1],
-      ["Denim Jacket (Kid)",     "Jackets",     "8y", "Good",      12000, 22000, 1],
-      ["Polo Ralph Shirt",       "Shirts",      "XL", "Like New",  14000, 24000, 1]
+      // [name, category, size, condition, cost, selling, stock, image keywords]
+      ["Vintage Denim Jacket",   "Jackets",     "M",  "Like New",  30000, 45000, 1, "denim,jacket"],
+      ["Leather Biker Jacket",   "Jackets",     "L",  "Excellent", 55000, 85000, 1, "leather,jacket"],
+      ["Olive Bomber Jacket",    "Jackets",     "M",  "Good",      35000, 55000, 1, "bomber,jacket"],
+      ["Flannel Check Shirt",    "Shirts",      "M",  "Good",      10000, 18000, 2, "flannel,shirt"],
+      ["White Oxford Shirt",     "Shirts",      "L",  "Excellent", 12000, 20000, 1, "shirt,white"],
+      ["Graphic Band Tee",       "Shirts",      "M",  "Good",       8000, 15000, 3, "tshirt"],
+      ["Floral Summer Shirt",    "Shirts",      "S",  "Like New",   9000, 16000, 1, "floral,shirt"],
+      ["Classic White Sneakers", "Shoes",       "42", "Excellent", 18000, 30000, 1, "sneakers,white"],
+      ["Chelsea Boots",          "Shoes",       "43", "Good",      35000, 55000, 1, "chelsea,boots"],
+      ["Running Trainers",       "Shoes",       "44", "Good",      16000, 28000, 1, "running,shoes"],
+      ["Ankara Print Dress",     "Dresses",     "M",  "Like New",  22000, 35000, 1, "african,dress"],
+      ["Little Black Dress",     "Dresses",     "S",  "Excellent", 25000, 40000, 0, "black,dress"],
+      ["High-Waist Jeans",       "Trousers",    "30", "Excellent", 15000, 25000, 2, "jeans"],
+      ["Khaki Chinos",           "Trousers",    "32", "Good",      12000, 22000, 1, "chinos"],
+      ["Corduroy Pants",         "Trousers",    "34", "Good",      11000, 20000, 0, "corduroy,trousers"],
+      ["Leather Belt",           "Accessories", "-",  "Good",       5000, 12000, 2, "leather,belt"],
+      ["Canvas Tote Bag",        "Accessories", "-",  "Like New",   4000, 10000, 2, "tote,bag"],
+      ["Baseball Cap",           "Accessories", "-",  "Good",       3000,  8000, 1, "baseball,cap"],
+      ["Silk Scarf",             "Accessories", "-",  "Excellent",  4000,  9000, 1, "silk,scarf"],
+      ["Brown Leather Handbag",  "Accessories", "-",  "Excellent", 12000, 22000, 1, "leather,handbag"],
+      ["Denim Jacket (Kid)",     "Jackets",     "8y", "Good",      12000, 22000, 1, "kids,jacket"],
+      ["Polo Ralph Shirt",       "Shirts",      "XL", "Like New",  14000, 24000, 1, "polo,shirt"]
     ];
     return raw.map((r, i) => ({
       id: "PRD-" + String(1001 + i),
       barcode_id: "ADT-" + String(10001 + i),
       name: r[0], category: r[1], size: r[2], condition: r[3],
       cost_price: r[4], selling_price: r[5], in_stock_count: r[6],
+      // Web placeholder imagery — staff replace with real photos during POS/admin intake.
+      image_url: `https://loremflickr.com/640/480/${r[7]}?lock=${100 + i}`,
       created_at: new Date(Date.now() - (30 - i) * 86400000).toISOString()
     }));
   }
@@ -264,6 +266,7 @@
           category: CATEGORIES.includes(input.category) ? input.category : (input.category || "Accessories"),
           size: String(input.size || "-"), condition: CONDITIONS.includes(input.condition) ? input.condition : "Good",
           cost_price: money(input.cost_price), selling_price: money(input.selling_price),
+          image_url: String(input.image_url || "").trim(),
           in_stock_count: Math.max(0, money(input.in_stock_count)),
           created_at: new Date().toISOString()
         };
@@ -278,9 +281,17 @@
           const clash = st.products.find(x => x.id !== id && x.barcode_id.toUpperCase() === String(patch.barcode_id).toUpperCase());
           if (clash) throw new Error("Barcode already assigned to " + clash.name);
         }
-        ["name", "category", "size", "condition", "barcode_id"].forEach(k => { if (patch[k] !== undefined) p[k] = String(patch[k]); });
+        ["name", "category", "size", "condition", "barcode_id", "image_url"].forEach(k => { if (patch[k] !== undefined) p[k] = String(patch[k]); });
         ["cost_price", "selling_price"].forEach(k => { if (patch[k] !== undefined) p[k] = money(patch[k]); });
         if (patch.in_stock_count !== undefined) p.in_stock_count = Math.max(0, money(patch.in_stock_count));
+        return Object.assign({}, p);
+      });
+    },
+    /** Swap a product's photo — used by POS/admin intake (real-time to every interface). */
+    setProductImage(id, imageUrl) {
+      return tx("products", st => {
+        const p = byId(st.products, id); if (!p) throw new Error("Product not found: " + id);
+        p.image_url = String(imageUrl || "");
         return Object.assign({}, p);
       });
     },
