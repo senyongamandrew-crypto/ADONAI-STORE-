@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Staff Login — Adonai</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/login.css?v=2.1" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23C24E2B'/><text x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='Georgia'>T</text></svg>" />
+</head>
+<body>
+  <div class="card">
+    <div class="mark">A</div>
+    <h1>Staff Terminal</h1>
+    <p class="sub">Adonai Thrift Store · Kampala, Uganda</p>
+
+    <!-- Open access notice (lock is OFF) -->
+    <div id="openPane" hidden>
+      <div class="notice">🔓 The system is currently in <strong>open access mode</strong>.<br />
+        Staff PINs aren't required yet — the admin will create accounts and enable the lock after publishing.
+      </div>
+      <a class="btn primary" id="goPos">🧾 Enter POS terminal</a>
+      <a class="btn" id="goAdmin">📊 Open OPS dashboard</a>
+    </div>
+
+    <!-- PIN pane (lock is ON) -->
+    <div id="pinPane" hidden>
+      <div class="pin-display" id="pinDisplay"><span class="ph">Enter PIN</span></div>
+      <div class="keypad" id="keypad"></div>
+      <p class="hint" id="pinHint">Ask the store admin for your staff PIN</p>
+    </div>
+
+    <a class="back" href="index.html">← Back to the public storefront</a>
+  </div>
+
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/login.js"></script>
+</body>
+</html>
