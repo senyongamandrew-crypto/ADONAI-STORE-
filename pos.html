@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adonai POS — Cashier Terminal</title>
+<link rel="stylesheet" href="css/pos.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>" />
+</head>
+<body data-authed="false">
+
+<div id="appShell" class="pos-app">
+
+  <!-- ============ POS CONTEXTUAL HEADER ============ -->
+  <header class="pos-head">
+    <div class="brand">
+      <span class="mark">A</span>
+      <div>
+        <strong>ADONAI POS</strong>
+        <span class="sub">Cashier Terminal</span>
+      </div>
+    </div>
+
+    <a class="btn ghost" href="index.html" target="_blank" rel="noopener">🛍️ View Live Storefront ↗</a>
+
+    <div class="head-right">
+      <span class="net-pill" id="netPill"><span class="dot"></span>Online</span>
+      <span class="me-pill" id="mePill"><span class="avatar">S</span><span id="meName">Staff</span><span class="role" id="meRole">open access</span></span>
+      <button class="btn exit" id="btnExit">⏻ Exit POS</button>
+    </div>
+  </header>
+
+  <!-- scan feedback banner -->
+  <div class="scan-flash" id="scanFlash"></div>
+
+  <main class="pos-main">
+
+    <!-- ============ LEFT: lookup + manual grid ============ -->
+    <section class="left">
+      <div class="lookup-row">
+        <input id="barcodeInput" class="barcode-in" type="text" inputmode="text"
+               placeholder="🔫 Scan barcode or type it here, then Enter…" autocomplete="off" />
+        <input id="gridSearch" class="grid-search" type="search" placeholder="Search name / size…" />
+      </div>
+
+      <div class="cat-tabs" id="posCats"></div>
+      <div class="tiles" id="tileGrid"></div>
+    </section>
+
+    <!-- ============ RIGHT: live cart register ============ -->
+    <aside class="cart">
+      <div class="cart-head">
+        <h3>Current Sale</h3>
+        <div class="cart-head-actions">
+          <button class="btn sm ghost" id="btnReprint" title="Reprint last receipt">🖨 Last</button>
+          <button class="btn sm ghost" id="btnClear">Clear</button>
+        </div>
+      </div>
+
+      <div class="cart-lines" id="cartLines">
+        <p class="cart-empty">Cart is empty.<br />Scan a barcode or tap an item. 🧾</p>
+      </div>
+
+      <div class="cart-summary">
+        <div class="sum-row">
+          <span>Items</span><span id="sumItems">0</span>
+        </div>
+        <div class="sum-row total">
+          <span>Total due</span><span id="sumTotal">UGX 0</span>
+        </div>
+        <button class="charge-btn" id="btnCharge" disabled>Charge · UGX 0</button>
+      </div>
+    </aside>
+  </main>
+
+  <!-- ============ TENDER MODAL ============ -->
+  <div class="modal-backdrop" id="tenderBackdrop">
+    <div class="tender-modal">
+      <div class="tender-head">
+        <h3>Settle payment</h3>
+        <div class="due">Due: <strong id="dueAmount">UGX 0</strong></div>
+      </div>
+
+      <div class="tender-tabs">
+        <button class="ttab active" data-tender="cash">💵 Cash</button>
+        <button class="ttab mtn" data-tender="mtn">📱 MTN MoMo</button>
+        <button class="ttab airtel" data-tender="airtel">📱 Airtel Money</button>
+      </div>
+
+      <!-- Cash pane -->
+      <div class="tpane active" id="pane-cash">
+        <label class="fld-label">Cash tendered</label>
+        <input id="cashTendered" class="big-in" type="number" min="0" step="500" placeholder="0" />
+        <div class="quick">
+          <button class="qchip" data-q="exact">Exact</button>
+          <button class="qchip" data-q="5000">+5,000</button>
+          <button class="qchip" data-q="10000">+10,000</button>
+          <button class="qchip" data-q="20000">+20,000</button>
+          <button class="qchip" data-q="50000">+50,000</button>
+          <button class="qchip" data-q="100000">+100,000</button>
+        </div>
+        <div class="change-box">
+          <span>Change to return</span>
+          <strong id="changeDue">UGX 0</strong>
+        </div>
+      </div>
+
+      <!-- MoMo pane (shared MTN / Airtel) -->
+      <div class="tpane" id="pane-momo">
+        <div class="grid2">
+          <div><label class="fld-label">Sender name</label><input id="momoName" class="in" type="text" placeholder="e.g. Nakato Sarah" /></div>
+          <div><label class="fld-label">Sender phone</label><input id="momoPhone" class="in" type="tel" placeholder="07XX 000 000" /></div>
+        </div>
+        <label class="fld-label">Transaction reference *</label>
+        <input id="momoRef" class="in" type="text" placeholder="MoMo / Airtel transaction ID" />
+        <label class="verify">
+          <input id="momoVerified" type="checkbox" />
+          <span>✅ I confirm the exact amount has been received on the store phone</span>
+        </label>
+      </div>
+
+      <div class="tender-actions">
+        <button class="btn ghost" id="tenderCancel">Cancel (Esc)</button>
+        <button class="btn primary big" id="tenderConfirm" disabled>Complete sale</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RECEIPT MODAL (on-screen) ============ -->
+  <div class="modal-backdrop" id="receiptBackdrop">
+    <div class="receipt-modal">
+      <div class="receipt-preview" id="receiptPreview"></div>
+      <div class="tender-actions">
+        <button class="btn ghost" id="btnReceiptPrint">🖨 Print again</button>
+        <button class="btn primary big" id="btnNewSale">New sale ⏎</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="beepOk" preload="auto"></audio>
+  <audio id="beepErr" preload="auto"></audio>
+</div>
+
+<!-- ============ THERMAL RECEIPT (print-only, 80mm) ============ -->
+<div id="receiptSheet"></div>
+
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/pos.js"></script>
+</body>
+</html>

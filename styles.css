@@ -225,3 +225,49 @@ h1 { font-size: 24px; letter-spacing: .3px; }
   .main { max-width: calc(100vw - 64px); padding: 16px; }
   .search input { width: 160px; }
 }
+
+/* ============ v2 additions: channels, staff, misc ============ */
+.tag {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; letter-spacing: .5px; white-space: nowrap;
+}
+.tag-pos { background: rgba(108,123,255,.18); color: #9aa5ff; }
+.tag-web { background: rgba(77,214,165,.15); color: #4dd6a5; }
+
+.chip-sep { width: 1px; height: 22px; background: var(--line); align-self: center; }
+
+.legend { display: flex; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--muted); }
+.legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; }
+.legend .sw.pos { background: #6c7bff; }
+.legend .sw.web { background: #4dd6a5; }
+
+.two-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.tot-strip {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--panel-2); border-radius: 10px; padding: 10px 14px;
+  margin-top: 12px; font-size: 15px;
+}
+.tot-strip strong { font-size: 19px; color: var(--accent-2); }
+
+code {
+  background: var(--panel-2); padding: 2px 7px; border-radius: 6px;
+  font-size: 12px; color: #aab4e8;
+}
+
+/* access-control switch */
+.lock-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; }
+.switch { position: relative; width: 56px; height: 30px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute; inset: 0; cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; transition: .2s;
+}
+.switch .slider::before {
+  content: ""; position: absolute; width: 22px; height: 22px; left: 3px; top: 3px;
+  background: var(--muted); border-radius: 50%; transition: .2s;
+}
+.switch input:checked + .slider { background: rgba(77,214,165,.25); border-color: var(--accent-2); }
+.switch input:checked + .slider::before { transform: translateX(26px); background: var(--accent-2); }
+
+a.btn { text-decoration: none; display: inline-block; }

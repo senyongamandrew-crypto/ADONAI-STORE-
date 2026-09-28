@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adonai OPS Dashboard</title>
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">A</div>
+      <div>
+        <div class="brand-name">ADONAI</div>
+        <div class="brand-sub">OPS Dashboard</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-view="overview">📊 <span>Overview</span></button>
+      <button class="nav-item" data-view="sales">🧾 <span>Sales</span> <span class="badge" id="navWebBadge"></span></button>
+      <button class="nav-item" data-view="inventory">📦 <span>Inventory</span> <span class="badge warn" id="navStockBadge"></span></button>
+      <button class="nav-item" data-view="customers">👥 <span>Customers</span></button>
+      <button class="nav-item" data-view="payments">💳 <span>Payments</span></button>
+      <button class="nav-item" data-view="staff">🔐 <span>Staff &amp; Access</span></button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="op-pill"><span class="dot live"></span> Live sync with POS &amp; store</div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="pageTitle">Overview</h1>
+        <p class="muted" id="todayLine"></p>
+      </div>
+      <div class="top-actions">
+        <div class="search"><input id="globalSearch" type="search" placeholder="Search…" /></div>
+        <a class="btn ghost" href="index.html" target="_blank" rel="noopener">🛍️ Storefront ↗</a>
+        <a class="btn primary" href="pos.html">🧾 Open POS</a>
+      </div>
+    </header>
+
+    <!-- ---- OVERVIEW ---- -->
+    <section class="view active" id="view-overview">
+      <div class="kpis" id="kpis"></div>
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head">
+            <h3>Revenue — last 14 days</h3>
+            <span class="muted small" id="chartTotal"></span>
+          </div>
+          <canvas id="revenueChart" height="220"></canvas>
+          <div class="legend">
+            <span><i class="sw pos"></i> In-store (POS)</span>
+            <span><i class="sw web"></i> Online (WhatsApp)</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Channel split — today</h3></div>
+          <div id="channelSplit"></div>
+        </div>
+      </div>
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head"><h3>Latest sales</h3><button class="btn ghost sm" data-goto="sales">All sales →</button></div>
+          <table class="tbl" id="latestSalesTbl"></table>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Out of stock (sold pieces)</h3><button class="btn ghost sm" data-goto="inventory">Manage →</button></div>
+          <div id="lowStockList" class="stock-alerts"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- SALES ---- -->
+    <section class="view" id="view-sales">
+      <div class="filterbar" id="salesFilters">
+        <button class="chip active" data-scope="all">All</button>
+        <button class="chip" data-scope="pos">🖥 POS counter</button>
+        <button class="chip" data-scope="web">💬 WhatsApp web</button>
+        <span class="chip-sep"></span>
+        <button class="chip" data-scope="pending">⏳ Pending</button>
+        <button class="chip" data-scope="completed">✅ Completed</button>
+        <button class="chip" data-scope="cancelled">✖ Cancelled</button>
+      </div>
+      <div class="card"><table class="tbl" id="salesTbl"></table></div>
+    </section>
+
+    <!-- ---- INVENTORY ---- -->
+    <section class="view" id="view-inventory">
+      <div class="filterbar"><button class="btn primary sm" id="btnAddProduct">+ Add product</button></div>
+      <div class="card"><table class="tbl" id="inventoryTbl"></table></div>
+    </section>
+
+    <!-- ---- CUSTOMERS ---- -->
+    <section class="view" id="view-customers">
+      <div class="card"><table class="tbl" id="customersTbl"></table></div>
+    </section>
+
+    <!-- ---- PAYMENTS ---- -->
+    <section class="view" id="view-payments">
+      <div class="kpis" id="payKpis"></div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-head"><h3>Payment log</h3></div>
+        <table class="tbl" id="paymentsTbl"></table>
+      </div>
+    </section>
+
+    <!-- ---- STAFF & ACCESS ---- -->
+    <section class="view" id="view-staff">
+      <div class="grid two">
+        <div class="card">
+          <div class="card-head"><h3>Access control</h3></div>
+          <div class="lock-row">
+            <div>
+              <strong id="lockState">Open access mode</strong>
+              <p class="muted small" style="margin-top:4px">
+                While unlocked, anyone with the links can open the POS and this dashboard.
+                Add staff accounts below, then enable the lock before publishing.
+              </p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="lockToggle" />
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>How it works</h3></div>
+          <p class="muted small" style="line-height:1.7">
+            1️⃣ Add each cashier/admin with a 4–8 digit PIN.<br />
+            2️⃣ Switch the lock ON — POS &amp; dashboard will then require a PIN.<br />
+            3️⃣ Staff log in at <strong>/login</strong>; the public storefront stays open to everyone.
+          </p>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-head">
+          <h3>Staff accounts</h3>
+          <button class="btn primary sm" id="btnAddStaff">+ Add staff</button>
+        </div>
+        <table class="tbl" id="staffTbl"></table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ MODAL ============ -->
+<div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modalBox"></div></div>
+<div class="toast" id="toast"></div>
+
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

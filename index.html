@@ -3,140 +3,89 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Adonai Store — OPS</title>
-<link rel="stylesheet" href="styles.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>" />
+<title>Adonai Thrift Store — Unique finds, honest prices</title>
+<meta name="description" content="Adonai Thrift Store, Kampala. Curated second-hand fashion — jackets, shirts, shoes, dresses & more. Pay with MTN MoMo, Airtel Money or cash." />
+<link rel="stylesheet" href="css/storefront.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛍️</text></svg>" />
 </head>
 <body>
-<div class="app">
 
-  <!-- ============ SIDEBAR ============ -->
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-mark">A</div>
-      <div>
-        <div class="brand-name">ADONAI</div>
-        <div class="brand-sub">Store OPS</div>
-      </div>
-    </div>
-
-    <nav class="nav">
-      <button class="nav-item active" data-view="overview">📊 <span>Overview</span></button>
-      <button class="nav-item" data-view="orders">🧾 <span>Orders</span> <span class="badge" id="navOrdersBadge"></span></button>
-      <button class="nav-item" data-view="inventory">📦 <span>Inventory</span> <span class="badge warn" id="navStockBadge"></span></button>
-      <button class="nav-item" data-view="customers">👥 <span>Customers</span></button>
-      <button class="nav-item" data-view="payments">💳 <span>Payments</span></button>
+<!-- ============ HEADER ============ -->
+<header class="site-head">
+  <div class="wrap head-row">
+    <a class="brand" href="./">
+      <span class="brand-mark">A</span>
+      <span class="brand-text">Adonai <em>Thrift Store</em></span>
+    </a>
+    <nav class="site-nav">
+      <a href="#shop">Shop</a>
+      <a href="#perks">Why us</a>
+      <a href="#contact">Contact</a>
     </nav>
-
-    <div class="sidebar-foot">
-      <div class="op-pill"><span class="dot live"></span> Operations live</div>
+    <div class="head-actions">
+      <!-- discreet staff gateway (required by OPS spec) -->
+      <a class="staff-link" id="staffLink" href="login.html" title="Staff / POS Login">🔒 Staff</a>
+      <button class="cart-btn" id="cartBtn">🛒 Cart <span class="cart-count" id="cartCount">0</span></button>
     </div>
-  </aside>
+  </div>
+</header>
 
-  <!-- ============ MAIN ============ -->
-  <main class="main">
-    <header class="topbar">
-      <div>
-        <h1 id="pageTitle">Overview</h1>
-        <p class="muted" id="todayLine"></p>
-      </div>
-      <div class="top-actions">
-        <div class="search">
-          <input id="globalSearch" type="search" placeholder="Search orders, products, customers…" />
-        </div>
-        <button class="btn primary" id="btnNewOrder">+ New order</button>
-      </div>
-    </header>
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="wrap">
+    <h1>Unique finds. <span>Honest prices.</span></h1>
+    <p>Hand-picked thrift fashion in Kampala — every piece is one of a kind. When it's gone, it's gone.</p>
+    <a class="cta" href="#shop">Browse new arrivals ↓</a>
+  </div>
+</section>
 
-    <!-- ---- OVERVIEW ---- -->
-    <section class="view active" id="view-overview">
-      <div class="kpis" id="kpis"></div>
+<!-- ============ PERKS ============ -->
+<section class="perks wrap" id="perks">
+  <div class="perk">🚚 <div><strong>Kampala delivery</strong><span>or free pick-up in store</span></div></div>
+  <div class="perk">📱 <div><strong>MTN MoMo / Airtel</strong><span>pay how you like, cash too</span></div></div>
+  <div class="perk">♻️ <div><strong>One-of-one pieces</strong><span>new stock every week</span></div></div>
+  <div class="perk">⚡ <div><strong>Live stock</strong><span>what you see is what's on the shelf</span></div></div>
+</section>
 
-      <div class="grid two">
-        <div class="card">
-          <div class="card-head">
-            <h3>Revenue — last 14 days</h3>
-            <span class="muted small" id="chartTotal"></span>
-          </div>
-          <canvas id="revenueChart" height="220"></canvas>
-        </div>
+<!-- ============ SHOP ============ -->
+<main class="wrap" id="shop">
+  <div class="shop-head">
+    <h2>New arrivals</h2>
+    <input class="shop-search" id="shopSearch" type="search" placeholder="Search jackets, shoes, sizes…" />
+  </div>
+  <div class="cat-tabs" id="catTabs"></div>
+  <div class="grid" id="productGrid"></div>
+  <p class="empty" id="gridEmpty" hidden>Nothing matches right now — check back soon, stock changes fast! 🔄</p>
+</main>
 
-        <div class="card">
-          <div class="card-head"><h3>Order pipeline</h3></div>
-          <div id="pipeline"></div>
-        </div>
-      </div>
+<!-- ============ FOOTER ============ -->
+<footer class="site-foot" id="contact">
+  <div class="wrap foot-row">
+    <div>
+      <strong>Adonai Thrift Store</strong><br />
+      <span class="dim">Kampala, Uganda · Open Mon–Sat, 9:00–18:00</span>
+    </div>
+    <div class="dim" id="footContact"></div>
+    <a class="staff-link" id="staffLinkFoot" href="login.html">Staff / POS Login →</a>
+  </div>
+  <div class="wrap tiny dim">© 2026 Adonai Thrift Store · All prices in UGX</div>
+</footer>
 
-      <div class="grid two">
-        <div class="card">
-          <div class="card-head">
-            <h3>Latest orders</h3>
-            <button class="btn ghost sm" data-goto="orders">View all →</button>
-          </div>
-          <table class="tbl" id="latestOrdersTbl"></table>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h3>Low stock alerts</h3>
-            <button class="btn ghost sm" data-goto="inventory">Manage →</button>
-          </div>
-          <div id="lowStockList" class="stock-alerts"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ---- ORDERS ---- -->
-    <section class="view" id="view-orders">
-      <div class="filterbar" id="orderFilters">
-        <button class="chip active" data-status="all">All</button>
-        <button class="chip" data-status="pending">Pending</button>
-        <button class="chip" data-status="paid">Paid</button>
-        <button class="chip" data-status="shipped">Shipped</button>
-        <button class="chip" data-status="delivered">Delivered</button>
-        <button class="chip" data-status="cancelled">Cancelled</button>
-      </div>
-      <div class="card">
-        <table class="tbl" id="ordersTbl"></table>
-      </div>
-    </section>
-
-    <!-- ---- INVENTORY ---- -->
-    <section class="view" id="view-inventory">
-      <div class="filterbar">
-        <button class="btn primary sm" id="btnAddProduct">+ Add product</button>
-      </div>
-      <div class="card">
-        <table class="tbl" id="inventoryTbl"></table>
-      </div>
-    </section>
-
-    <!-- ---- CUSTOMERS ---- -->
-    <section class="view" id="view-customers">
-      <div class="card">
-        <table class="tbl" id="customersTbl"></table>
-      </div>
-    </section>
-
-    <!-- ---- PAYMENTS ---- -->
-    <section class="view" id="view-payments">
-      <div class="kpis small" id="payKpis"></div>
-      <div class="card">
-        <div class="card-head"><h3>Payment log</h3></div>
-        <table class="tbl" id="paymentsTbl"></table>
-      </div>
-    </section>
-  </main>
-</div>
-
-<!-- ============ MODAL ============ -->
-<div class="modal-backdrop" id="modalBackdrop">
-  <div class="modal" id="modalBox"></div>
-</div>
+<!-- ============ CART DRAWER ============ -->
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="cartDrawer" aria-label="Shopping cart">
+  <div class="drawer-head">
+    <h3>Your cart</h3>
+    <button class="x" id="closeCart" aria-label="Close">✕</button>
+  </div>
+  <div class="drawer-body" id="cartBody"></div>
+  <div class="drawer-foot" id="cartFoot"></div>
+</aside>
 
 <div class="toast" id="toast"></div>
 
-<script src="data.js"></script>
-<script src="app.js"></script>
+<script src="js/db.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/storefront.js"></script>
 </body>
 </html>
