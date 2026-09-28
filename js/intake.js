@@ -96,11 +96,16 @@
     const v = sel => { const el = rootEl.querySelector(sel); return el ? el.value.trim() : ""; };
     return {
       name: v("[data-f-name]"),
+      brand: v("[data-f-brand]") || "Unbranded",
+      color: v("[data-f-color]"),
+      demographic: v("[data-f-demo]") || "General",
       category: v("[data-f-cat]") || "Accessories",
       size: v("[data-f-size]") || "-",
       condition: v("[data-f-cond]") || "Good",
       cost_price: Number(v("[data-f-cost]")) || 0,
       selling_price: Number(v("[data-f-sell]")) || 0,
+      compare_price: Number(v("[data-f-compare]")) || 0,
+      desc: v("[data-f-desc]"),
       in_stock_count: Math.max(0, Number(v("[data-f-stock]")) || 0)
     };
   }

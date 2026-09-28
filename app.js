@@ -5,6 +5,12 @@
   const me = Auth.guard({ role: "admin" });      // open access until the lock is enabled
   if (Auth.locked() && !me) return;
 
+  // staff identity card in the sidebar
+  const whoName = me ? me.name : "Open access";
+  $("#meName").textContent = whoName;
+  $("#meRole").textContent = me ? "Role: " + me.role.toUpperCase() : "No PIN set yet";
+  $("#meAvatar").textContent = whoName.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -24,19 +30,27 @@
   }
 
   /* ---------- navigation ---------- */
-  const TITLES = { overview: "Overview", sales: "Sales", inventory: "Inventory", customers: "Customers", payments: "Payments", staff: "Staff & Access" };
+  const TITLES = {
+    overview: "Sales Analytics", sales: "Fulfillment & Orders", inventory: "Inventory Rack",
+    customers: "Customer Book", payments: "Financial Ledger", staff: "Staff & Permissions",
+    dispatch: "Boda Riders & Dispatch", settings: "Store Settings"
+  };
   let currentView = "overview";
   let salesScope = "all";
   let term = "";
 
   function setView(v) {
+    if (!TITLES[v]) return;
     currentView = v;
-    $$(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === v));
+    $$(".nav-item[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     $$(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
     $("#pageTitle").textContent = TITLES[v];
     render();
   }
-  $$(".nav-item").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+  $$(".nav-item").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.intake) { setView("inventory"); setTimeout(() => productModal(null), 60); return; }
+    if (b.dataset.view) setView(b.dataset.view);   // plain links (POS Register) just navigate
+  }));
   document.body.addEventListener("click", e => {
     const g = e.target.closest("[data-goto]"); if (g) setView(g.dataset.goto);
   });
@@ -211,18 +225,19 @@
     const out = DB.listProducts().filter(p => p.in_stock_count <= 0).length;
     $("#navStockBadge").textContent = out || "";
     $("#inventoryTbl").innerHTML = `
-      <thead><tr><th>Photo</th><th>SKU</th><th>Barcode</th><th>Item</th><th>Category</th><th class="num">Cost</th><th class="num">Selling</th><th class="num">Margin</th><th class="num">Stock</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Photo</th><th>SKU</th><th>Barcode</th><th>Item</th><th>Category</th><th class="num">Cost</th><th class="num">Selling</th><th class="num">Compare</th><th class="num">Margin</th><th class="num">Stock</th><th>Status</th><th></th></tr></thead>
       <tbody>${list.length ? list.map(p => {
         const st = p.in_stock_count <= 0 ? "out" : "ok";
         const margin = p.cost_price > 0 ? Math.round(((p.selling_price - p.cost_price) / p.cost_price) * 100) : null;
         return `<tr>
           <td><span class="pthumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span></td>
-          <td class="rowdim">${esc(p.id)}</td>
+          <td><code>${esc(p.sku || p.id)}</code></td>
           <td><code>${esc(p.barcode_id)}</code></td>
-          <td><strong>${esc(p.name)}</strong><div class="rowdim small">Size ${esc(p.size)} · ${esc(p.condition)}</div></td>
+          <td><strong>${esc(p.name)}</strong><div class="rowdim small">${esc(p.brand || "")} · ${esc(p.demographic || "")} · Size ${esc(p.size)} · ${esc(p.condition)}</div></td>
           <td>${esc(p.category)}</td>
           <td class="num">${DB.ugx(p.cost_price)}</td>
           <td class="num">${DB.ugx(p.selling_price)}</td>
+          <td class="num">${p.compare_price ? DB.ugx(p.compare_price) : "—"}</td>
           <td class="num">${margin === null ? "—" : margin + "%"}</td>
           <td class="num">${p.in_stock_count}</td>
           <td><span class="status ${st}">${st === "ok" ? "in stock" : "sold"}</span></td>
@@ -231,7 +246,51 @@
             <button class="btn sm" data-editprod="${esc(p.id)}">Edit</button>
           </td>
         </tr>`;
-      }).join("") : `<tr><td colspan="11" class="rowdim" style="padding:24px">No products match.</td></tr>`}</tbody>`;
+      }).join("") : `<tr><td colspan="12" class="rowdim" style="padding:24px">No products match.</td></tr>`}</tbody>`;
+  }
+
+  /* ---------- BODA RIDERS & DISPATCH ---------- */
+  function renderDispatch() {
+    const orders = allSales().filter(s => s.channel === "web" && s.status !== "cancelled");
+    $("#dispatchTbl").innerHTML = `
+      <thead><tr><th>Order</th><th>Customer</th><th>Items</th><th class="num">Total</th><th>Payment</th><th>Placed</th><th>Dispatch stage</th></tr></thead>
+      <tbody>${orders.length ? orders.map(s => {
+        const stage = s.dispatch_status || "Pending";
+        return `<tr>
+          <td><strong>${esc(s.id)}</strong></td>
+          <td>${esc(s.customer_name)}<div class="rowdim small">${esc(s.customer_phone || "")}</div></td>
+          <td class="rowdim">${esc(itemsSummary(s))}</td>
+          <td class="num">${DB.ugx(s.total)}</td>
+          <td>${statusBadge(s.status)}</td>
+          <td class="rowdim">${dstr(s.created_at)}</td>
+          <td>
+            <select class="dispatch-sel" data-dispatch="${esc(s.id)}" ${s.status !== "completed" ? "disabled title='Confirm payment first'" : ""}>
+              ${DB.DISPATCH_STATUSES.map(d => `<option value="${d}" ${stage === d ? "selected" : ""}>${d}</option>`).join("")}
+            </select>
+          </td>
+        </tr>`;
+      }).join("") : `<tr><td colspan="7" class="rowdim" style="padding:24px">No web orders to dispatch yet — WhatsApp orders will appear here.</td></tr>`}</tbody>`;
+  }
+
+  /* ---------- STORE SETTINGS ---------- */
+  function renderSettings() {
+    const s = DB.getSettings();
+    const f = (id, label, val, full) => `<div class="field ${full ? "full" : ""}"><label>${label}</label><input id="${id}" value="${esc(val || "")}" /></div>`;
+    $("#settingsForm").innerHTML = `
+      <div class="settings-grid">
+        ${f("setName", "Store name", s.store_name, true)}
+        ${f("setTagline", "Footer tagline", s.tagline, true)}
+        ${f("setAddress", "Address", s.address, true)}
+        ${f("setWhatsapp", "WhatsApp digits (no +)", s.whatsapp)}
+        ${f("setHotline", "Hotline", s.hotline)}
+        ${f("setEmail", "Email", s.email)}
+        ${f("setHours", "Opening hours", s.hours)}
+        ${f("setTiktok", "TikTok handle", s.tiktok)}
+        ${f("setInstagram", "Instagram handle", s.instagram)}
+      </div>
+      <div class="modal-actions" style="justify-content:flex-start">
+        <button class="btn primary" data-save-settings>Save store profile</button>
+      </div>`;
   }
 
   /* ---------- CUSTOMERS ---------- */
@@ -321,21 +380,31 @@
       <h3>${p ? "Edit — " + esc(p.name) : "Add thrift item"}</h3>
       ${p ? `<p class="muted small" style="margin-bottom:10px">Barcode: <code>${esc(p.barcode_id)}</code> (scannable by the POS)</p>`
           : `<p class="muted small" style="margin-bottom:10px">A scannable barcode is generated automatically and the item goes live on the POS AND the storefront instantly.</p>`}
-      <div class="field"><label>Name</label><input id="mpName" value="${p ? esc(p.name) : ""}" placeholder="e.g. Vintage Denim Jacket" /></div>
+      <div class="field"><label>Name</label><input id="mpName" value="${p ? esc(p.name) : ""}" placeholder="e.g. Indigo Type III Trucker Jacket" /></div>
+      <div class="grid two-fields">
+        <div class="field"><label>Brand / label</label><input id="mpBrand" value="${p ? esc(p.brand || "") : ""}" placeholder="Levi's, Hand-made…" /></div>
+        <div class="field"><label>Colour</label><input id="mpColor" value="${p ? esc(p.color || "") : ""}" placeholder="Indigo, Olive…" /></div>
+      </div>
       <div class="grid two-fields">
         <div class="field"><label>Category</label>
           <select id="mpCat">${DB.CATEGORIES.map(c => `<option ${p && p.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
-        <div class="field"><label>Size</label><input id="mpSize" value="${p ? esc(p.size) : ""}" placeholder="M / 42 / -" /></div>
+        <div class="field"><label>Demographic</label>
+          <select id="mpDemo">${DB.DEMOGRAPHICS.map(d => `<option ${p && p.demographic === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
       </div>
       <div class="grid two-fields">
-        <div class="field"><label>Condition</label>
+        <div class="field"><label>Size</label><input id="mpSize" value="${p ? esc(p.size) : ""}" placeholder="M / 42 / -" /></div>
+        <div class="field"><label>Condition / grade</label>
           <select id="mpCond">${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
-        <div class="field"><label>Stock count</label><input id="mpStock" type="number" min="0" value="${p ? p.in_stock_count : 1}" /></div>
       </div>
       <div class="grid two-fields">
         <div class="field"><label>Cost price (UGX)</label><input id="mpCost" type="number" min="0" value="${p ? p.cost_price : ""}" /></div>
         <div class="field"><label>Selling price (UGX)</label><input id="mpSell" type="number" min="0" value="${p ? p.selling_price : ""}" /></div>
       </div>
+      <div class="grid two-fields">
+        <div class="field"><label>Compare-at price (UGX)</label><input id="mpCompare" type="number" min="0" value="${p ? p.compare_price : ""}" /></div>
+        <div class="field"><label>Stock count</label><input id="mpStock" type="number" min="0" value="${p ? p.in_stock_count : 1}" /></div>
+      </div>
+      <div class="field"><label>Description (storefront card)</label><textarea id="mpDesc">${p ? esc(p.desc || "") : ""}</textarea></div>
       ${Intake.imageFieldHTML(prodImageState.image_url)}
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
@@ -433,9 +502,11 @@
     const dsp = t.closest("[data-save-prod]");
     if (dsp) {
       const vals = {
-        name: $("#mpName").value.trim(), category: $("#mpCat").value, size: $("#mpSize").value.trim() || "-",
+        name: $("#mpName").value.trim(), brand: $("#mpBrand").value.trim() || "Unbranded", color: $("#mpColor").value.trim(),
+        demographic: $("#mpDemo").value, category: $("#mpCat").value, size: $("#mpSize").value.trim() || "-",
         condition: $("#mpCond").value, cost_price: Number($("#mpCost").value) || 0,
-        selling_price: Number($("#mpSell").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
+        selling_price: Number($("#mpSell").value) || 0, compare_price: Number($("#mpCompare").value) || 0,
+        desc: $("#mpDesc").value.trim(), in_stock_count: Number($("#mpStock").value) || 0,
         image_url: prodImageState.image_url
       };
       if (!vals.name) return toast("Item name is required");
@@ -477,7 +548,33 @@
       if (pin === null) return;
       try { await DB.resetStaffPin(rp.dataset.resetpin, pin); toast("PIN updated"); }
       catch (err) { toast(err.message); }
+      return;
     }
+
+    const sset = t.closest("[data-save-settings]");
+    if (sset) {
+      DB.updateSettings({
+        store_name: $("#setName").value.trim() || DB.getSettings().store_name,
+        tagline: $("#setTagline").value.trim(),
+        address: $("#setAddress").value.trim(),
+        whatsapp: $("#setWhatsapp").value.trim(),
+        hotline: $("#setHotline").value.trim(),
+        email: $("#setEmail").value.trim(),
+        hours: $("#setHours").value.trim(),
+        tiktok: $("#setTiktok").value.trim(),
+        instagram: $("#setInstagram").value.trim()
+      });
+      toast("Store profile saved — storefront footer updated everywhere");
+      return;
+    }
+  });
+
+  // dispatch stage selects fire change, not click
+  document.body.addEventListener("change", e => {
+    const sel = e.target && e.target.closest ? e.target.closest("select[data-dispatch]") : null;
+    if (!sel) return;
+    DB.setDispatchStatus(sel.dataset.dispatch, sel.value);
+    toast(`Order ${sel.dataset.dispatch} → ${sel.value}`);
   });
 
   $("#btnAddProduct").addEventListener("click", () => productModal(null));
@@ -495,6 +592,8 @@
     if (currentView === "customers") renderCustomers();
     if (currentView === "payments") renderPayments();
     if (currentView === "staff") renderStaff();
+    if (currentView === "dispatch") renderDispatch();
+    if (currentView === "settings") renderSettings();
     // keep sidebar badges live on every view
     $("#navWebBadge").textContent = allSales().filter(s => s.channel === "web" && s.status === "pending").length || "";
     $("#navStockBadge").textContent = DB.listProducts().filter(p => p.in_stock_count <= 0).length || "";

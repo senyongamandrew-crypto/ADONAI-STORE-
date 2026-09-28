@@ -9,7 +9,10 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const EMOJI = { Jackets: "🧥", Shirts: "👕", Shoes: "👟", Dresses: "👗", Trousers: "👖", Accessories: "👜" };
+  const EMOJI = {
+    "Outerwear & Jackets": "🧥", "Tops & Shirts": "👕", "Dresses & Skirts": "👗",
+    "Pants & Jeans": "👖", "Shoes": "👟", "Accessories": "👜", "Children Wear": "🧒"
+  };
 
   /* ---------- header: cashier pill + network status ---------- */
   const cashier = me || { name: "Staff", role: Auth.locked() ? "staff" : "open access" };
@@ -443,13 +446,18 @@
           : `<p class="intake-ed-note">A barcode is generated automatically on save — print &amp; stick it, and the scanner finds this item.</p>`}
       ${Intake.imageFieldHTML(intakeImageState.image_url)}
       <div class="form2">
-        <div><label class="fld-label">Name</label><input class="in" data-f-name value="${p ? esc(p.name) : ""}" placeholder="e.g. Vintage Denim Jacket" /></div>
+        <div><label class="fld-label">Name</label><input class="in" data-f-name value="${p ? esc(p.name) : ""}" placeholder="e.g. Indigo Type III Trucker Jacket" /></div>
+        <div><label class="fld-label">Brand / label</label><input class="in" data-f-brand value="${p ? esc(p.brand || "") : ""}" placeholder="Levi's, Hand-made…" /></div>
+        <div><label class="fld-label">Colour</label><input class="in" data-f-color value="${p ? esc(p.color || "") : ""}" placeholder="Indigo, Olive…" /></div>
         <div><label class="fld-label">Category</label><select class="in" data-f-cat>${DB.CATEGORIES.map(c => `<option ${p && p.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+        <div><label class="fld-label">Demographic</label><select class="in" data-f-demo>${DB.DEMOGRAPHICS.map(d => `<option ${p && p.demographic === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
         <div><label class="fld-label">Size</label><input class="in" data-f-size value="${p ? esc(p.size) : ""}" placeholder="M / 42 / -" /></div>
-        <div><label class="fld-label">Condition</label><select class="in" data-f-cond>${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+        <div><label class="fld-label">Condition / grade</label><select class="in" data-f-cond>${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
         <div><label class="fld-label">Cost (UGX)</label><input class="in" type="number" min="0" data-f-cost value="${p ? p.cost_price : ""}" /></div>
         <div><label class="fld-label">Selling (UGX)</label><input class="in" type="number" min="0" data-f-sell value="${p ? p.selling_price : ""}" /></div>
+        <div><label class="fld-label">Compare-at (UGX)</label><input class="in" type="number" min="0" data-f-compare value="${p ? p.compare_price : ""}" /></div>
         <div><label class="fld-label">Stock count</label><input class="in" type="number" min="0" data-f-stock value="${p ? p.in_stock_count : 1}" /></div>
+        <div style="grid-column:1/-1"><label class="fld-label">Description (storefront card)</label><textarea class="in" data-f-desc rows="2" style="resize:vertical">${p ? esc(p.desc || "") : ""}</textarea></div>
       </div>
       <div class="tender-actions">
         <button class="btn ghost" data-intake-back>${p ? "← Back to list" : "Cancel"}</button>

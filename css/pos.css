@@ -1,13 +1,13 @@
 /* ============ Adonai POS — cashier terminal ============ */
 :root {
-  --bg: #101421;
-  --panel: #181e30;
+  --bg: #171210;
+  --panel: #221A16;
   --panel-2: #20284200;
-  --panel-2: #202842;
-  --line: #2c3656;
-  --text: #edf1fc;
-  --muted: #8d97ba;
-  --accent: #6c7bff;
+  --panel-2: #2B211B;
+  --line: #382A22;
+  --text: #EFE7DE;
+  --muted: #A08F83;
+  --accent: #C24E2B;
   --green: #43d68e;
   --amber: #ffb454;
   --red: #ff6b7a;
@@ -33,7 +33,7 @@ button { font: inherit; }
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand .mark {
   width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
-  background: linear-gradient(135deg, var(--accent), #9c6cff); font-weight: 800; font-size: 19px;
+  background: var(--accent); font-weight: 800; font-size: 19px;
 }
 .brand strong { display: block; letter-spacing: 1px; font-size: 15px; }
 .brand .sub { font-size: 11px; color: var(--muted); }

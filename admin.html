@@ -3,34 +3,89 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Adonai OPS Dashboard</title>
+<title>Adonai — Ops Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23C24E2B'/><text x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='Georgia'>T</text></svg>" />
 </head>
 <body>
 <div class="app">
 
-  <!-- ============ SIDEBAR ============ -->
+  <!-- ============ SIDEBAR (screenshot-matched) ============ -->
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-mark">A</div>
+      <div class="brand-mark">T</div>
       <div>
-        <div class="brand-name">ADONAI</div>
-        <div class="brand-sub">OPS Dashboard</div>
+        <div class="brand-name">Adonai</div>
+        <div class="brand-sub">Thrift Store</div>
       </div>
+    </div>
+    <div class="brand-meta">
+      <span>Kampala, Uganda</span>
+      <span class="ver-chip">POS v2.1</span>
     </div>
 
     <nav class="nav">
-      <button class="nav-item active" data-view="overview">📊 <span>Overview</span></button>
-      <button class="nav-item" data-view="sales">🧾 <span>Sales</span> <span class="badge" id="navWebBadge"></span></button>
-      <button class="nav-item" data-view="inventory">📦 <span>Inventory</span> <span class="badge warn" id="navStockBadge"></span></button>
-      <button class="nav-item" data-view="customers">👥 <span>Customers</span></button>
-      <button class="nav-item" data-view="payments">💳 <span>Payments</span></button>
-      <button class="nav-item" data-view="staff">🔐 <span>Staff &amp; Access</span></button>
+      <a class="nav-item" href="pos.html" title="Open the cashier terminal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18"/><path d="M8 21h8"/></svg>
+        <span>POS Register</span>
+      </a>
+      <button class="nav-item" data-view="sales">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2.5"/><path d="M16 12h6v4h-6a2 2 0 0 1 0-4Z"/></svg>
+        <span>Fulfillment &amp; Orders</span> <span class="badge" id="navWebBadge"></span>
+      </button>
+      <button class="nav-item" data-view="inventory">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/></svg>
+        <span>Inventory Rack</span> <span class="badge warn" id="navStockBadge"></span>
+      </button>
+      <button class="nav-item" data-intake="1">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+        <span>Catalog Intake</span>
+      </button>
+      <button class="nav-item" data-view="customers">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+        <span>Customer Book</span>
+      </button>
+      <button class="nav-item" data-view="dispatch">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="17.5" r="3"/><circle cx="18.5" cy="17.5" r="3"/><path d="M8.5 17.5h6.5M14 6h3.5l1 4.5M11.5 10.5h4M9 6h2.5v4.5"/></svg>
+        <span>Boda Riders &amp; Dispatch</span>
+      </button>
+      <button class="nav-item active" data-view="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+        <span>Sales Analytics</span>
+      </button>
+      <button class="nav-item" data-view="payments">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
+        <span>Financial Ledger</span>
+      </button>
+      <button class="nav-item" data-view="staff">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2 19 4l-8.5 8.5a5.5 5.5 0 1 0 1.5 1.5L14 12l2-2-1-1 2-2 1 1 2-2-1-1 2-2-2-2Z"/><circle cx="7.5" cy="15.5" r="2.5"/></svg>
+        <span>Staff &amp; Permissions</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.23.6.9 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
+        <span>Store Settings</span>
+      </button>
     </nav>
 
     <div class="sidebar-foot">
-      <div class="op-pill"><span class="dot live"></span> Live sync with POS &amp; store</div>
+      <div class="install-card">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>
+        <div><strong>Install POS App on Phone</strong><span>Add to home screen</span></div>
+      </div>
+      <div class="me-card">
+        <span class="me-avatar" id="meAvatar">OA</span>
+        <div>
+          <strong id="meName">Open access</strong>
+          <span id="meRole">No PIN set yet</span>
+        </div>
+      </div>
+      <div class="foot-actions">
+        <button class="mini-link" data-goto="staff">🔑 Master Key</button>
+        <a class="mini-link" href="index.html">Exit POS</a>
+      </div>
     </div>
   </aside>
 
@@ -38,30 +93,24 @@
   <main class="main">
     <header class="topbar">
       <div>
-        <h1 id="pageTitle">Overview</h1>
+        <h1 id="pageTitle">Sales Analytics</h1>
         <p class="muted" id="todayLine"></p>
       </div>
       <div class="top-actions">
         <div class="search"><input id="globalSearch" type="search" placeholder="Search…" /></div>
-        <a class="btn ghost" href="index.html" target="_blank" rel="noopener">🛍️ Storefront ↗</a>
-        <a class="btn primary" href="pos.html">🧾 Open POS</a>
+        <a class="btn ghost" href="index.html" target="_blank" rel="noopener">🛍️ Live storefront ↗</a>
+        <a class="btn primary" href="pos.html">🧾 POS Register</a>
       </div>
     </header>
 
-    <!-- ---- OVERVIEW ---- -->
+    <!-- ---- SALES ANALYTICS (overview) ---- -->
     <section class="view active" id="view-overview">
       <div class="kpis" id="kpis"></div>
       <div class="grid two">
         <div class="card">
-          <div class="card-head">
-            <h3>Revenue — last 14 days</h3>
-            <span class="muted small" id="chartTotal"></span>
-          </div>
+          <div class="card-head"><h3>Revenue — last 14 days</h3><span class="muted small" id="chartTotal"></span></div>
           <canvas id="revenueChart" height="220"></canvas>
-          <div class="legend">
-            <span><i class="sw pos"></i> In-store (POS)</span>
-            <span><i class="sw web"></i> Online (WhatsApp)</span>
-          </div>
+          <div class="legend"><span><i class="sw pos"></i> In-store (POS)</span><span><i class="sw web"></i> Online (WhatsApp)</span></div>
         </div>
         <div class="card">
           <div class="card-head"><h3>Channel split — today</h3></div>
@@ -80,7 +129,7 @@
       </div>
     </section>
 
-    <!-- ---- SALES ---- -->
+    <!-- ---- FULFILLMENT & ORDERS ---- -->
     <section class="view" id="view-sales">
       <div class="filterbar" id="salesFilters">
         <button class="chip active" data-scope="all">All</button>
@@ -94,18 +143,26 @@
       <div class="card"><table class="tbl" id="salesTbl"></table></div>
     </section>
 
-    <!-- ---- INVENTORY ---- -->
+    <!-- ---- INVENTORY RACK ---- -->
     <section class="view" id="view-inventory">
       <div class="filterbar"><button class="btn primary sm" id="btnAddProduct">+ Add product</button></div>
       <div class="card"><table class="tbl" id="inventoryTbl"></table></div>
     </section>
 
-    <!-- ---- CUSTOMERS ---- -->
+    <!-- ---- CUSTOMER BOOK ---- -->
     <section class="view" id="view-customers">
       <div class="card"><table class="tbl" id="customersTbl"></table></div>
     </section>
 
-    <!-- ---- PAYMENTS ---- -->
+    <!-- ---- BODA RIDERS & DISPATCH ---- -->
+    <section class="view" id="view-dispatch">
+      <div class="card">
+        <div class="card-head"><h3>Delivery dispatch board</h3><span class="muted small">WhatsApp orders move: Pending → Packed → With rider → Delivered</span></div>
+        <table class="tbl" id="dispatchTbl"></table>
+      </div>
+    </section>
+
+    <!-- ---- FINANCIAL LEDGER ---- -->
     <section class="view" id="view-payments">
       <div class="kpis" id="payKpis"></div>
       <div class="card" style="margin-top:16px">
@@ -114,7 +171,7 @@
       </div>
     </section>
 
-    <!-- ---- STAFF & ACCESS ---- -->
+    <!-- ---- STAFF & PERMISSIONS ---- -->
     <section class="view" id="view-staff">
       <div class="grid two">
         <div class="card">
@@ -122,38 +179,36 @@
           <div class="lock-row">
             <div>
               <strong id="lockState">Open access mode</strong>
-              <p class="muted small" style="margin-top:4px">
-                While unlocked, anyone with the links can open the POS and this dashboard.
-                Add staff accounts below, then enable the lock before publishing.
-              </p>
+              <p class="muted small" style="margin-top:4px">While unlocked, anyone with the links can open the POS and this console. Add staff accounts, then enable the lock before publishing.</p>
             </div>
-            <label class="switch">
-              <input type="checkbox" id="lockToggle" />
-              <span class="slider"></span>
-            </label>
+            <label class="switch"><input type="checkbox" id="lockToggle" /><span class="slider"></span></label>
           </div>
         </div>
         <div class="card">
           <div class="card-head"><h3>How it works</h3></div>
           <p class="muted small" style="line-height:1.7">
             1️⃣ Add each cashier/admin with a 4–8 digit PIN.<br />
-            2️⃣ Switch the lock ON — POS &amp; dashboard will then require a PIN.<br />
-            3️⃣ Staff log in at <strong>/login</strong>; the public storefront stays open to everyone.
+            2️⃣ Switch the lock ON — POS &amp; console will require a PIN.<br />
+            3️⃣ Staff sign in at <strong>/login</strong>; the public storefront stays open to everyone.
           </p>
         </div>
       </div>
       <div class="card" style="margin-top:16px">
-        <div class="card-head">
-          <h3>Staff accounts</h3>
-          <button class="btn primary sm" id="btnAddStaff">+ Add staff</button>
-        </div>
+        <div class="card-head"><h3>Staff accounts</h3><button class="btn primary sm" id="btnAddStaff">+ Add staff</button></div>
         <table class="tbl" id="staffTbl"></table>
+      </div>
+    </section>
+
+    <!-- ---- STORE SETTINGS ---- -->
+    <section class="view" id="view-settings">
+      <div class="card" style="max-width:720px">
+        <div class="card-head"><h3>Store profile</h3><span class="muted small">Feeds the storefront footer, receipts and WhatsApp links</span></div>
+        <div id="settingsForm"></div>
       </div>
     </section>
   </main>
 </div>
 
-<!-- ============ MODAL ============ -->
 <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modalBox"></div></div>
 <div class="toast" id="toast"></div>
 

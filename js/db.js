@@ -13,8 +13,8 @@
 (function (global) {
   "use strict";
 
-  const LS_KEY   = "adonai-db-v3";   // v3: products gain image_url (web image → real photo at intake)
-  const CHANNEL  = "adonai-db-v3-sync";
+  const LS_KEY   = "adonai-db-v5";   // v5: local curated product photography + full store profile
+  const CHANNEL  = "adonai-db-v5-sync";
   const LOCK     = "adonai-thrift-db-tx";
   const TAB_ID   = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
@@ -27,44 +27,47 @@
   };
 
   /* ---------- domain constants ---------- */
-  const CATEGORIES = ["Jackets", "Shirts", "Shoes", "Dresses", "Trousers", "Accessories"];
-  const CONDITIONS = ["Like New", "Excellent", "Good"];
+  const CATEGORIES  = ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear"];
+  const CONDITIONS  = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector"];
+  const DEMOGRAPHICS = ["Men", "Women", "Children"];
+  const CAT_CODES   = { "Outerwear & Jackets": "JKT", "Tops & Shirts": "TOP", "Dresses & Skirts": "DRS", "Pants & Jeans": "PNT", "Shoes": "SHO", "Accessories": "ACC", "Children Wear": "CHD" };
   const TENDER_TYPES = ["cash", "mtn", "airtel"];
+  const DISPATCH_STATUSES = ["Pending", "Packed", "With rider", "Delivered"];
 
   /* ---------- seed data ---------- */
   function seedProducts() {
+    // [name, brand, color, demographic, category, size, condition, cost, selling, compare, stock, description, image keywords]
+    const A = "Grade A — Excellent", B = "Grade B — Good", V = "Vintage / Collector";
     const raw = [
-      // [name, category, size, condition, cost, selling, stock, image keywords]
-      ["Vintage Denim Jacket",   "Jackets",     "M",  "Like New",  30000, 45000, 1, "denim,jacket"],
-      ["Leather Biker Jacket",   "Jackets",     "L",  "Excellent", 55000, 85000, 1, "leather,jacket"],
-      ["Olive Bomber Jacket",    "Jackets",     "M",  "Good",      35000, 55000, 1, "bomber,jacket"],
-      ["Flannel Check Shirt",    "Shirts",      "M",  "Good",      10000, 18000, 2, "flannel,shirt"],
-      ["White Oxford Shirt",     "Shirts",      "L",  "Excellent", 12000, 20000, 1, "shirt,white"],
-      ["Graphic Band Tee",       "Shirts",      "M",  "Good",       8000, 15000, 3, "tshirt"],
-      ["Floral Summer Shirt",    "Shirts",      "S",  "Like New",   9000, 16000, 1, "floral,shirt"],
-      ["Classic White Sneakers", "Shoes",       "42", "Excellent", 18000, 30000, 1, "sneakers,white"],
-      ["Chelsea Boots",          "Shoes",       "43", "Good",      35000, 55000, 1, "chelsea,boots"],
-      ["Running Trainers",       "Shoes",       "44", "Good",      16000, 28000, 1, "running,shoes"],
-      ["Ankara Print Dress",     "Dresses",     "M",  "Like New",  22000, 35000, 1, "african,dress"],
-      ["Little Black Dress",     "Dresses",     "S",  "Excellent", 25000, 40000, 0, "black,dress"],
-      ["High-Waist Jeans",       "Trousers",    "30", "Excellent", 15000, 25000, 2, "jeans"],
-      ["Khaki Chinos",           "Trousers",    "32", "Good",      12000, 22000, 1, "chinos"],
-      ["Corduroy Pants",         "Trousers",    "34", "Good",      11000, 20000, 0, "corduroy,trousers"],
-      ["Leather Belt",           "Accessories", "-",  "Good",       5000, 12000, 2, "leather,belt"],
-      ["Canvas Tote Bag",        "Accessories", "-",  "Like New",   4000, 10000, 2, "tote,bag"],
-      ["Baseball Cap",           "Accessories", "-",  "Good",       3000,  8000, 1, "baseball,cap"],
-      ["Silk Scarf",             "Accessories", "-",  "Excellent",  4000,  9000, 1, "silk,scarf"],
-      ["Brown Leather Handbag",  "Accessories", "-",  "Excellent", 12000, 22000, 1, "leather,handbag"],
-      ["Denim Jacket (Kid)",     "Jackets",     "8y", "Good",      12000, 22000, 1, "kids,jacket"],
-      ["Polo Ralph Shirt",       "Shirts",      "XL", "Like New",  14000, 24000, 1, "polo,shirt"]
+      ["Indigo Type III Trucker Jacket", "Levi's", "Indigo", "Men", "Outerwear & Jackets", "L", A, 40000, 68000, 120000, 1, "1980s trucker jacket. Authentic vintage wash with whiskers and brass buttons intact.", "denim,jacket"],
+      ["Olive Waxed Field Jacket", "Barbour Style", "Olive", "Men", "Outerwear & Jackets", "XL", B, 55000, 85000, 150000, 1, "Matte waxed cotton with a corduroy collar. Windproof and rain-resistant.", "field,jacket"],
+      ["Cream Silk Slip Dress", "Unbranded", "Cream", "Women", "Dresses & Skirts", "S", V, 45000, 78000, 130000, 1, "Bias-cut silk slip from the 90s — fluid drape, adjustable straps.", "silk,dress"],
+      ["Black Leather Chelsea Boots", "Clarks", "Black", "Men", "Shoes", "43", B, 60000, 95000, 170000, 1, "Polished leather uppers with elastic gussets. Resoled once — plenty of life left.", "chelsea,boots"],
+      ["White Oxford Button-Down", "Ralph Lauren", "White", "Men", "Tops & Shirts", "L", A, 20000, 38000, 75000, 2, "Crisp cotton oxford with single-needle stitching. Lightly worn.", "oxford,shirt"],
+      ["Band Graphic Tee", "Vintage Anvil", "Black", "Men", "Tops & Shirts", "M", V, 22000, 42000, 70000, 1, "Single-stitch 90s tour tee with the original chest print and a soft fade.", "band,tshirt"],
+      ["Pleated Midi Skirt", "Unbranded", "Rust", "Women", "Dresses & Skirts", "M", A, 18000, 35000, 65000, 1, "Satin pleats with a comfortable elastic waist — moves beautifully.", "pleated,skirt"],
+      ["Ankara Print Wrap Dress", "Hand-made", "Multi", "Women", "Dresses & Skirts", "M", A, 32000, 55000, 95000, 1, "Kitenge wax-print wrap tailored in Kampala. Wears like new.", "ankara,dress"],
+      ["High-Waist 501 Jeans", "Levi's", "Mid-wash", "Women", "Pants & Jeans", "30", B, 26000, 48000, 85000, 2, "Classic straight leg with button fly. Honest fade at the knees.", "levis,jeans"],
+      ["Khaki Pleated Chinos", "Dockers", "Khaki", "Men", "Pants & Jeans", "32", B, 15000, 30000, 55000, 1, "Relaxed pleat-front, freshly hemmed. Office-ready.", "chinos"],
+      ["Canvas Field Tote", "Unbranded", "Natural", "Women", "Accessories", "-", A, 10000, 22000, 40000, 1, "Heavy canvas tote with leather handles and a spotless interior.", "tote,bag"],
+      ["Tan Leather Belt", "Unbranded", "Tan", "Men", "Accessories", "34", B, 9000, 18000, 32000, 2, "Full-grain leather with a brass buckle — broken in just right.", "leather,belt"],
+      ["Kids' Denim Jacket", "OshKosh", "Light wash", "Children", "Children Wear", "8y", B, 13000, 25000, 45000, 1, "Sturdy kids' denim with room to grow. All snaps working.", "kids,denim"],
+      ["Silk Printed Scarf", "Unbranded", "Paisley", "Women", "Accessories", "-", V, 13000, 26000, 48000, 1, "Hand-rolled 70s silk square. No pulls, no stains.", "silk,scarf"],
+      ["Retro Running Trainers", "Nike", "White / Gum", "Men", "Shoes", "44", B, 30000, 55000, 98000, 1, "Retro runner on a gum sole. Cleaned and disinfected.", "nike,sneakers"],
+      ["Floral Summer Blouse", "Unbranded", "Floral", "Women", "Tops & Shirts", "S", A, 14000, 28000, 50000, 1, "Airy rayon blouse with covered buttons. Zero pilling.", "floral,blouse"]
     ];
+    const IMGS = Array.from({ length: 16 }, (_, i) => `assets/products/p${1001 + i}.jpg`);
     return raw.map((r, i) => ({
       id: "PRD-" + String(1001 + i),
+      sku: "ADN-" + (CAT_CODES[r[4]] || "GEN") + "-" + String(1001 + i),
       barcode_id: "ADT-" + String(10001 + i),
-      name: r[0], category: r[1], size: r[2], condition: r[3],
-      cost_price: r[4], selling_price: r[5], in_stock_count: r[6],
-      // Web placeholder imagery — staff replace with real photos during POS/admin intake.
-      image_url: `https://loremflickr.com/640/480/${r[7]}?lock=${100 + i}`,
+      name: r[0], brand: r[1], color: r[2], demographic: r[3],
+      category: r[4], size: r[5], condition: r[6],
+      cost_price: r[7], selling_price: r[8], compare_price: r[9],
+      in_stock_count: r[10],
+      desc: r[11],
+      // Curated local photography (daylight, hanger) — staff replace with the real photo at intake.
+      image_url: IMGS[i],
       created_at: new Date(Date.now() - (30 - i) * 86400000).toISOString()
     }));
   }
@@ -122,16 +125,21 @@
       version: 2,
       settings: {
         store_name: "Adonai Thrift Store",
-        tagline: "Unique finds. Honest prices.",
-        address: "Kampala, Uganda",
-        whatsapp: "256700000000",           // admin: set the real store WhatsApp digits here
+        tagline: "An independent Kampala boutique curating pre-loved vintage garments. Every piece is laundered, photographed in daylight, and sold once.",
+        address: "Plot 14 Kampala Road / Mercer Hub, Kampala, Uganda",
+        whatsapp: "256758873398",
+        hotline: "+256 7656 52403",
+        email: "adonaithriftstore@gmail.com",
+        hours: "Mon–Sat 8:30 AM – 7:30 PM · Sun 10:00 AM – 6:00 PM",
+        tiktok: "@adonai.thrift256",
+        instagram: "@adonaithrift256",
         currency: "UGX",
         access_locked: false                // OPEN ACCESS MODE until admin adds staff & enables lock
       },
       products,
       sales,
       staff: [],                            // EMPTY by design — admin creates accounts & passkeys
-      counters: { product: 1022, sale_pos: posN, sale_web: webN }
+      counters: { product: 1016, sale_pos: posN, sale_web: webN }
     };
   }
 
@@ -204,7 +212,7 @@
      PUBLIC API
      ============================================================ */
   const DB = {
-    CATEGORIES, CONDITIONS, TENDER_TYPES,
+    CATEGORIES, CONDITIONS, DEMOGRAPHICS, TENDER_TYPES, DISPATCH_STATUSES,
 
     on(table, cb) { const s = { table, cb }; subs.push(s); return () => { const i = subs.indexOf(s); if (i >= 0) subs.splice(i, 1); }; },
     reloadNow() { reload(); },
@@ -260,12 +268,19 @@
         let barcode = String(input.barcode_id || "").trim() || ("ADT-" + (10000 + n - 1000));
         if (st.products.some(p => p.barcode_id.toUpperCase() === barcode.toUpperCase()))
           barcode = "ADT-" + n + "-" + String(Date.now()).slice(-4); // guaranteed unique fallback
+        const cat = CATEGORIES.includes(input.category) ? input.category : "Accessories";
         const p = {
           id, barcode_id: barcode,
+          sku: "ADN-" + (CAT_CODES[cat] || "GEN") + "-" + n,
           name: String(input.name || "Untitled item").trim(),
-          category: CATEGORIES.includes(input.category) ? input.category : (input.category || "Accessories"),
-          size: String(input.size || "-"), condition: CONDITIONS.includes(input.condition) ? input.condition : "Good",
+          brand: String(input.brand || "Unbranded").trim(),
+          color: String(input.color || "").trim(),
+          demographic: DEMOGRAPHICS.includes(input.demographic) ? input.demographic : "Men",
+          category: cat,
+          size: String(input.size || "-"), condition: CONDITIONS.includes(input.condition) ? input.condition : CONDITIONS[1],
           cost_price: money(input.cost_price), selling_price: money(input.selling_price),
+          compare_price: money(input.compare_price),
+          desc: String(input.desc || "").trim(),
           image_url: String(input.image_url || "").trim(),
           in_stock_count: Math.max(0, money(input.in_stock_count)),
           created_at: new Date().toISOString()
@@ -281,8 +296,8 @@
           const clash = st.products.find(x => x.id !== id && x.barcode_id.toUpperCase() === String(patch.barcode_id).toUpperCase());
           if (clash) throw new Error("Barcode already assigned to " + clash.name);
         }
-        ["name", "category", "size", "condition", "barcode_id", "image_url"].forEach(k => { if (patch[k] !== undefined) p[k] = String(patch[k]); });
-        ["cost_price", "selling_price"].forEach(k => { if (patch[k] !== undefined) p[k] = money(patch[k]); });
+        ["name", "category", "size", "condition", "barcode_id", "image_url", "brand", "color", "demographic", "desc", "sku"].forEach(k => { if (patch[k] !== undefined) p[k] = String(patch[k]); });
+        ["cost_price", "selling_price", "compare_price"].forEach(k => { if (patch[k] !== undefined) p[k] = money(patch[k]); });
         if (patch.in_stock_count !== undefined) p.in_stock_count = Math.max(0, money(patch.in_stock_count));
         return Object.assign({}, p);
       });
@@ -372,6 +387,14 @@
     /* ----- sales read ----- */
     listSales() { reload(); return state.sales.map(s => JSON.parse(JSON.stringify(s))).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     getSale(id) { reload(); const s = byId(state.sales, id); return s ? JSON.parse(JSON.stringify(s)) : null; },
+    /** Track fulfilment of an order through dispatch (boda riders etc.). */
+    setDispatchStatus(id, dispatchStatus) {
+      return tx("sales", st => {
+        const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
+        s.dispatch_status = DISPATCH_STATUSES.includes(dispatchStatus) ? dispatchStatus : "Pending";
+        return JSON.parse(JSON.stringify(s));
+      });
+    },
 
     /* ----- dev ----- */
     resetToSeed() {
