@@ -107,7 +107,7 @@
   });
   $("#btnCamera").addEventListener("click", () => {
     openIntake();
-    flash("📷 Camera opens your device photo capture — snap the piece, tag it, save.", true);
+    flash("📁 Choose an item to update its photo or add a new piece from gallery/files.", true);
     setTimeout(() => openIntakeEditor(null), 350);
   });
   let installPromptEvt = null;
@@ -506,12 +506,14 @@
       try {
         if (sv.dataset.intakeSave) {
           await DB.updateProduct(sv.dataset.intakeSave, v);
-          flash("✓ Item updated — live on the storefront now", true);
+          flash("✓ Item and photo updated — live across POS and storefront now", true);
         } else {
           const np = await DB.addProduct(v);
-          flash(`✓ ${np.name} added · barcode ${np.barcode_id}`, true);
+          flash(`✓ ${np.name} added with photo · barcode ${np.barcode_id}`, true);
         }
-        beep(true); closeIntake();
+        beep(true);
+        closeIntake();
+        refreshProducts();
       } catch (err) { flash("✗ " + err.message, false); beep(false); }
     }
   });

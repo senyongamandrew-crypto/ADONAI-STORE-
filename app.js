@@ -413,6 +413,7 @@
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
+    const modalImageState = { image_url: p ? (p.image_url || "") : "" };
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>${p ? "Edit item" : "New item"}</h3>
@@ -437,11 +438,13 @@
         <div class="field"><label>Compare-at (UGX)</label><input id="mpCompare" type="number" class="sel-full" value="${p ? p.compare_price : ""}" /></div>
         <div class="field"><label>Stock</label><input id="mpStock" type="number" class="sel-full" value="${p ? p.in_stock_count : 1}" /></div>
       </div>
-      <div class="field"><label>Photo</label><input id="mpImg" class="sel-full" value="${v("image_url")}" placeholder="assets/products/… or image URL" /></div>
+      ${Intake.imageFieldHTML(modalImageState.image_url)}
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
+    Intake.bindImageEditor(modalBox, modalImageState);
+    modalBox._imageState = modalImageState;
   }
 
   /* ============================================================
@@ -489,10 +492,10 @@
     ];
     $("#photoRow").innerHTML = SLOTS.map((s, i) => `
       <div class="ph-slot" data-slot="${i}">
-        <div class="ph-prev ${i === 0 ? "hero" : ""}">${intakePhotos[i] ? `<img src="${intakePhotos[i]}" alt="" />` : ""}<span class="ph-lbl">${s[0]}</span>${s[1] ? `<span class="ph-sub">${s[1]}</span>` : ""}</div>
+        <div class="ph-prev ${i === 0 ? "hero" : ""}">${intakePhotos[i] ? `<img src="${esc(intakePhotos[i])}" alt="" />` : ""}<span class="ph-lbl">${s[0]}</span>${s[1] ? `<span class="ph-sub">${s[1]}</span>` : ""}</div>
         <div class="ph-btns">
-          <button class="btn sm" data-phcam="${i}" type="button">📷 Camera</button>
-          <button class="btn sm gold" data-phgal="${i}" type="button">🖼 Gallery</button>
+          <button class="btn sm" data-phgal="${i}" type="button">📁 Gallery / File</button>
+          ${intakePhotos[i] ? `<button class="btn sm ghost" data-phrem="${i}" type="button">Remove</button>` : ""}
         </div>
       </div>`).join("");
     paintAngles();
@@ -502,18 +505,23 @@
     $("#angleCount").textContent = `${n} / 4 angles`;
     $$(".ph-slot").forEach((el, i) => {
       const prev = $(".ph-prev", el);
-      prev.innerHTML = (intakePhotos[i] ? `<img src="${intakePhotos[i]}" alt="" />` : "")
+      prev.innerHTML = (intakePhotos[i] ? `<img src="${esc(intakePhotos[i])}" alt="" />` : "")
         + `<span class="ph-lbl">${["1. Front View", "2. Back View", "3. Fabric / Texture", "4. Brand & Size Tag"][i]}</span>`;
       if (i > 0) { const sub = ["", "Reverse cut & seams", "Close-up weave & material", "Authenticity & care tag", ""][i]; if (sub) prev.insertAdjacentHTML("beforeend", `<span class="ph-sub">${sub}</span>`); }
     });
   }
-  function pickPhoto(slot, useCamera) {
+  function pickPhoto(slot) {
     const fi = document.createElement("input");
-    fi.type = "file"; fi.accept = "image/*";
-    if (useCamera) fi.setAttribute("capture", "environment");
-    fi.onchange = () => {
+    fi.type = "file"; fi.accept = "image/png, image/jpeg, image/jpg, image/webp, image/*";
+    fi.onchange = async () => {
       const f = fi.files && fi.files[0]; if (!f) return;
-      Intake.compressImage(f, url => { intakePhotos[slot] = url; paintAngles(); });
+      try {
+        const url = await Intake.compressImage(f);
+        intakePhotos[slot] = url;
+        buildPhotoRow();
+      } catch (err) {
+        toast(err.message || "Failed to load photo", false);
+      }
     };
     fi.click();
   }
@@ -816,7 +824,7 @@
         size: $("#mpSize").value.trim() || "-", condition: $("#mpCond").value,
         cost_price: Number($("#mpCost").value) || 0, selling_price: Number($("#mpSell").value) || 0,
         compare_price: Number($("#mpCompare").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
-        image_url: $("#mpImg").value.trim()
+        image_url: modalBox._imageState ? modalBox._imageState.image_url : ""
       };
       if (!vals.name) return toast("Name required", false);
       try {
@@ -828,8 +836,8 @@
     }
 
     /* intake photo slots */
-    const pc = t.closest("[data-phcam]"); if (pc) return pickPhoto(Number(pc.dataset.phcam), true);
-    const pg = t.closest("[data-phgal]"); if (pg) return pickPhoto(Number(pg.dataset.phgal), false);
+    const pg = t.closest("[data-phgal]"); if (pg) return pickPhoto(Number(pg.dataset.phgal));
+    const pr = t.closest("[data-phrem]"); if (pr) { intakePhotos[Number(pr.dataset.phrem)] = ""; buildPhotoRow(); return; }
 
     /* guests */
     const ag = t.closest("#btnAddGuest"); if (ag) return guestModal(null);

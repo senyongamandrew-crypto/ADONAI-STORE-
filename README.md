@@ -90,4 +90,4 @@ Store metadata (name, address, **WhatsApp number**) lives in `js/db.js → seedS
 
 ## Product photography
 
-Seeds ship with placeholder images from the web (locked to each product). Staff replace them with the **real item photo** during intake — either in the POS terminal (**📥 Intake** → Edit · photo → 📷 Upload) or the admin product editor. On-device shots are compressed to a compact JPEG and saved into the shared DB, so the storefront, POS tiles and dashboard update **live, with no refresh**. Products without a photo gracefully fall back to a clean category icon.
+Seeds ship with placeholder images (locked to each product). Staff replace them with the **real item photo** during intake — either in the POS terminal (**📥 Intake** → Edit · photo → 📁 Upload from Gallery / Files) or the admin product editor. Photos from local files or device gallery are compressed to a compact JPEG and saved into the shared DB, so the storefront, POS tiles and dashboard update **live, with no refresh**. Products without a photo gracefully fall back to a clean category icon.
