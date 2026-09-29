@@ -92,8 +92,29 @@
 
   /* =============== console chrome =============== */
   const shell = $("#shell");
-  $("#btnMenu").addEventListener("click", () => shell.classList.toggle("sb-open"));
-  $("#sbScrim").addEventListener("click", () => shell.classList.remove("sb-open"));
+  const toggleSidebar = () => {
+    if (window.innerWidth <= 1024) {
+      shell.classList.toggle("sb-open");
+    } else {
+      shell.classList.toggle("sb-collapsed");
+    }
+  };
+  const closeSidebar = () => {
+    shell.classList.remove("sb-open");
+  };
+
+  const btnMenu = $("#btnMenu");
+  if (btnMenu) btnMenu.addEventListener("click", toggleSidebar);
+  const btnCloseSidebar = $("#closeSidebar");
+  if (btnCloseSidebar) btnCloseSidebar.addEventListener("click", closeSidebar);
+  const sbScrim = $("#sbScrim");
+  if (sbScrim) sbScrim.addEventListener("click", closeSidebar);
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && shell.classList.contains("sb-open")) {
+      closeSidebar();
+    }
+  });
 
   // sync live ticker — Ns since last DB touch, `Auto 5s` cadence label
   let lastTouch = Date.now();
@@ -1128,26 +1149,26 @@
     const t = e.target;
 
     /* order pipeline */
-    const sp = t.closest("[data-set-paid]");
-    if (sp) {
+    const btnSetPaid = t.closest("[data-set-paid]");
+    if (btnSetPaid) {
       try {
-        const method = sp.dataset.method || "cash";
-        await DB.setPaymentStatus(sp.dataset.setPaid, true, method, whoName);
-        toast(`${sp.dataset.setPaid} marked as PAID (${method.toUpperCase()})`);
+        const method = btnSetPaid.dataset.method || "cash";
+        await DB.setPaymentStatus(btnSetPaid.dataset.setPaid, true, method, whoName);
+        toast(`${btnSetPaid.dataset.setPaid} marked as PAID (${method.toUpperCase()})`);
         if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
-          orderDetailModal(sp.dataset.setPaid);
+          orderDetailModal(btnSetPaid.dataset.setPaid);
         }
         renderSales();
       } catch (err) { toast(err.message, false); }
       return;
     }
-    const su = t.closest("[data-set-unpaid]");
-    if (su) {
+    const btnSetUnpaid = t.closest("[data-set-unpaid]");
+    if (btnSetUnpaid) {
       try {
-        await DB.setPaymentStatus(su.dataset.setUnpaid, false, "whatsapp", whoName);
-        toast(`${su.dataset.setUnpaid} marked as UNPAID`);
+        await DB.setPaymentStatus(btnSetUnpaid.dataset.setUnpaid, false, "whatsapp", whoName);
+        toast(`${btnSetUnpaid.dataset.setUnpaid} marked as UNPAID`);
         if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
-          orderDetailModal(su.dataset.setUnpaid);
+          orderDetailModal(btnSetUnpaid.dataset.setUnpaid);
         }
         renderSales();
       } catch (err) { toast(err.message, false); }
@@ -1180,8 +1201,8 @@
       });
       return;
     }
-    const sp = t.closest("[data-save-prod]");
-    if (sp) {
+    const btnSaveProd = t.closest("[data-save-prod]");
+    if (btnSaveProd) {
       const vals = {
         name: $("#mpName").value.trim(), brand: $("#mpBrand").value.trim() || "Unbranded",
         color: $("#mpColor").value.trim(), demographic: $("#mpDemo").value, category: $("#mpCat").value,
@@ -1192,7 +1213,7 @@
       };
       if (!vals.name) return toast("Name required", false);
       try {
-        if (sp.dataset.saveProd) { await DB.updateProduct(sp.dataset.saveProd, vals); toast("Item updated — live everywhere"); }
+        if (btnSaveProd.dataset.saveProd) { await DB.updateProduct(btnSaveProd.dataset.saveProd, vals); toast("Item updated — live everywhere"); }
         else { const p = await DB.addProduct(vals); toast(`Added ${p.name} · ${p.sku}`); }
         closeModal();
       } catch (err) { toast(err.message, false); }

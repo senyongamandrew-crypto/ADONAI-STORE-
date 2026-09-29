@@ -21,6 +21,40 @@
   $("#meRole").className = "role";
   $(".avatar", $("#mePill")).textContent = (cashier.name || "S").charAt(0).toUpperCase();
 
+  const posMeName = $("#posMeName");
+  if (posMeName) posMeName.textContent = cashier.name;
+  const posMeRole = $("#posMeRole");
+  if (posMeRole) posMeRole.textContent = Auth.locked() ? ("Role: " + cashier.role.toUpperCase()) : "Open access · Staff";
+  const posMeAvatar = $("#posMeAvatar");
+  if (posMeAvatar) posMeAvatar.textContent = (cashier.name || "S").charAt(0).toUpperCase();
+
+  function updatePosNavBadge() {
+    const webPend = DB.listSales().filter(s => s.channel === "web" && s.status === "pending").length;
+    const badge = $("#posNavWebBadge");
+    if (badge) badge.textContent = webPend || "";
+  }
+
+  const openPosMenu = () => {
+    document.body.classList.add("sb-open");
+    updatePosNavBadge();
+  };
+  const closePosMenu = () => {
+    document.body.classList.remove("sb-open");
+  };
+
+  const btnPosMenu = $("#btnPosMenu");
+  if (btnPosMenu) btnPosMenu.addEventListener("click", openPosMenu);
+  const closePosSidebar = $("#closePosSidebar");
+  if (closePosSidebar) closePosSidebar.addEventListener("click", closePosMenu);
+  const posSbScrim = $("#posSbScrim");
+  if (posSbScrim) posSbScrim.addEventListener("click", closePosMenu);
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && document.body.classList.contains("sb-open")) {
+      closePosMenu();
+    }
+  });
+
   function setNet() {
     const online = navigator.onLine;
     const pill = $("#netPill");
@@ -31,10 +65,13 @@
   window.addEventListener("offline", setNet);
   setNet();
 
-  $("#btnExit").addEventListener("click", () => {
+  const doExitPos = () => {
     Auth.signOut();                       // revoke staff privileges
     location.href = "index.html";         // back to public storefront
-  });
+  };
+  $("#btnExit").addEventListener("click", doExitPos);
+  const btnPosSbExit = $("#btnPosSbExit");
+  if (btnPosSbExit) btnPosSbExit.addEventListener("click", doExitPos);
 
   /* ---------- sound feedback ---------- */
   let actx = null;
@@ -112,10 +149,13 @@
   });
   let installPromptEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPromptEvt = e; });
-  $("#btnInstall").addEventListener("click", () => {
+  const triggerInstall = () => {
     if (installPromptEvt) { installPromptEvt.prompt(); installPromptEvt = null; }
     else flash("Use browser menu → “Add to Home screen” to install the POS app.", true);
-  });
+  };
+  $("#btnInstall").addEventListener("click", triggerInstall);
+  const posSidebarInstall = $("#posSidebarInstall");
+  if (posSidebarInstall) posSidebarInstall.addEventListener("click", triggerInstall);
 
   function handleScan(code) {
     const p = DB.findByBarcode(code);
