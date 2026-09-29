@@ -433,7 +433,90 @@ textarea.sel-full { resize: vertical; min-height: 78px; line-height: 1.5; }
 /* ---- master key modal bits ---- */
 .sec-box { background: #FDF6E3; border: 1px solid #F0E0BC; color: #8A6D1F; border-radius: 12px; padding: 13px 14px; font-size: 13px; line-height: 1.55; }
 .modal-x { position: absolute; top: 14px; right: 16px; background: none; border: 0; font-size: 22px; color: var(--muted); cursor: pointer; }
-.modal { position: relative; }
+.modal { position: relative; width: min(560px, 94vw); max-height: 90vh; overflow-y: auto; }
+
+/* ---- ORDER DETAIL & DISPATCH MODAL (Screenshot 3) ---- */
+.odm-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.odm-title { font: 800 24px var(--font-display); color: var(--ink); margin: 0; }
+.odm-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.odm-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+
+.odm-section { background: var(--page); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 12px 0; }
+.odm-section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; margin-bottom: 10px; }
+.odm-item-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.odm-item-name { font-weight: 700; font-size: 13.5px; color: var(--ink); }
+.odm-item-sku { font-size: 11.5px; color: var(--rust); font-weight: 700; margin-top: 1px; }
+.odm-item-price { font-weight: 700; font-size: 13.5px; color: var(--ink); }
+.odm-divider { border-top: 1px dashed var(--line); margin: 8px 0; }
+.odm-sum-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.odm-sum-row strong { color: var(--ink); }
+.odm-total-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14.5px; margin-top: 6px; }
+.odm-total-row .rust { color: var(--rust); font-size: 17.5px; font-weight: 800; }
+
+.odm-info-block { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--body); margin: 12px 0; }
+.odm-info-block div strong { color: var(--ink); }
+
+.wa-chat-full-btn {
+  background: #25D366; color: #FFF; font: 700 13px var(--font-text);
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: 10px; padding: 11px 14px; text-decoration: none; margin: 12px 0 14px;
+  transition: background .15s; width: 100%; border: 0; cursor: pointer; text-align: center;
+}
+.wa-chat-full-btn:hover { background: #1EBE5D; }
+
+.odm-dispatch-box {
+  background: var(--page); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px; margin-top: 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.odm-dispatch-title { font-weight: 700; font-size: 13.5px; color: var(--ink); }
+.btn-full { width: 100%; text-align: center; justify-content: center; display: flex; align-items: center; gap: 6px; padding: 11px 14px; font-size: 13px; font-weight: 700; }
+
+/* ---- PRINTABLE RECEIPT / INVOICE (Screenshot 4) ---- */
+.receipt-paper {
+  background: #FFFFFF; color: #1A1410; width: 100%; max-width: 380px; margin: 0 auto;
+  padding: 20px 16px; font-family: var(--font-text); font-size: 12px; border-radius: 10px;
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+.rc-brand { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; margin-bottom: 6px; }
+.rc-t-mark {
+  width: 32px; height: 32px; background: var(--rust); color: #FFF; border-radius: 8px;
+  display: grid; place-items: center; font: 800 18px var(--font-display); margin-bottom: 3px;
+}
+.rc-title { font-family: var(--font-display); font-size: 22px; font-weight: 800; color: #1A1410; margin: 0; line-height: 1.1; }
+.rc-sub { font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; color: #7A6F66; font-weight: 700; }
+.rc-meta-top { text-align: center; font-size: 11px; color: #4A4038; margin-top: 6px; line-height: 1.45; }
+.rc-tiktok { color: var(--rust); font-weight: 600; }
+.rc-dashed { border-top: 1px dashed #C5BCAF; margin: 10px 0; }
+.rc-ref-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; font-weight: 700; color: #1A1410; }
+.rc-datetime-row { display: flex; justify-content: space-between; font-size: 11px; color: #5A5048; margin-top: 2px; }
+.rc-cust-box { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.rc-cust-row { display: flex; gap: 6px; }
+.rc-cust-k { color: #7A6F66; min-width: 90px; }
+.rc-cust-v { color: #1A1410; font-weight: 600; }
+.rc-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.rc-table th { font-size: 10px; font-weight: 700; color: #7A6F66; padding-bottom: 5px; border-bottom: 1px solid #ECE5DC; letter-spacing: .04em; }
+.rc-table td { padding: 5px 0; vertical-align: top; }
+.rc-it-name { font-weight: 700; color: #1A1410; line-height: 1.25; }
+.rc-it-sku { font-size: 10.5px; color: var(--rust); font-weight: 700; margin-top: 1px; }
+.rc-sum-section { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: #4A4038; }
+.rc-sum-row { display: flex; justify-content: space-between; }
+.rc-grand-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: #1A1410; margin-bottom: 3px; }
+.rc-grand-total { font-size: 16px; font-weight: 800; color: var(--rust); font-family: var(--font-display); }
+.rc-pay-method { font-size: 10.5px; font-weight: 800; color: #20623A; letter-spacing: .04em; margin-top: 3px; }
+.rc-notice { font-size: 10px; color: #6A5F56; line-height: 1.4; text-align: center; background: #FAF7F3; border: 1px solid #ECE5DC; border-radius: 6px; padding: 7px 9px; margin: 6px 0; }
+.rc-barcode-area { text-align: center; margin-top: 8px; }
+.rc-barcode-lines { font-family: monospace; font-size: 18px; font-weight: 900; letter-spacing: 2px; color: #1A1410; transform: scaleY(1.3); margin: 4px 0; }
+.rc-barcode-code { font-size: 10.5px; font-weight: 700; letter-spacing: .15em; color: #1A1410; }
+
+@media print {
+  body * { visibility: hidden !important; }
+  #receiptSheet, #receiptSheet * { visibility: visible !important; }
+  #receiptSheet {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 78mm !important; max-width: 80mm !important; margin: 0 !important;
+    padding: 2mm !important; background: #FFF !important; color: #000 !important;
+  }
+}
 
 /* ---- misc ---- */
 .settings-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }

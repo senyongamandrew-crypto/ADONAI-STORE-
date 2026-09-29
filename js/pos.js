@@ -370,37 +370,106 @@
   });
 
   /* ---------- receipt (80mm thermal + on-screen preview) ---------- */
+  function receiptDateFormat(dateStr) {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    const dayName = d.toLocaleDateString("en-GB", { weekday: "long" });
+    const dayNum = d.toLocaleDateString("en-GB", { day: "numeric" });
+    const monthName = d.toLocaleDateString("en-GB", { month: "long" });
+    return `${dayName}, ${dayNum} ${monthName}`;
+  }
+  function receiptTimeFormat(dateStr) {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
   function receiptHTML(sale) {
-    const s = DB.getSettings();
-    const when = new Date(sale.created_at);
-    const dt = when.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) + " " +
-               when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-    let tenderBlock = "";
-    if (sale.tender.type === "cash") {
-      tenderBlock = `<tr><td>CASH</td><td class="r">${DB.ugx(sale.tender.tendered)}</td></tr>
-                     <tr><td>CHANGE</td><td class="r">${DB.ugx(sale.tender.change || 0)}</td></tr>`;
-    } else if (sale.tender.type === "mtn" || sale.tender.type === "airtel") {
-      const label = sale.tender.type === "mtn" ? "MTN MoMo" : "Airtel Money";
-      tenderBlock = `<tr><td>${label.toUpperCase()}</td><td class="r">${DB.ugx(sale.total)}</td></tr>
-                     <tr><td colspan="2">Ref: ${esc(sale.tender.ref || "-")}${sale.tender.sender_name ? " · " + esc(sale.tender.sender_name) : ""}</td></tr>`;
-    }
-    const rows = sale.items.map(l => `
-      <tr><td>${esc(l.name)}<br/><small>${l.qty} × ${DB.ugx(l.unit_price)}</small></td><td class="r">${DB.ugx(l.line_total)}</td></tr>`).join("");
+    const S = DB.getSettings();
+    const totalQty = sale.items.reduce((a, b) => a + b.qty, 0);
+    const subtotal = sale.subtotal || (sale.total - (sale.delivery_fee || 0));
     return `
-      <div class="rc">
-        <div class="store">${esc(s.store_name).toUpperCase()}</div>
-        <div class="meta">${esc(s.tagline)}<br/>${esc(s.address)} · WhatsApp +${esc(s.whatsapp)}</div>
-        <hr/>
-        <div class="meta">${dt}<br/>Served by: ${esc(sale.cashier ? sale.cashier.name : "Staff")}</div>
-        <hr/>
-        <table>${rows}
-          <tr class="tot"><td>TOTAL</td><td class="r">${DB.ugx(sale.total)}</td></tr>
-          ${tenderBlock}
+      <div class="receipt-paper">
+        <div class="rc-brand">
+          <div class="rc-t-mark">T</div>
+          <h2 class="rc-title">Adonai</h2>
+          <div class="rc-sub">THRIFT STORE</div>
+        </div>
+        <div class="rc-meta-top">
+          <strong>${esc(S.store_name || "Adonai Thrift Store")}</strong><br/>
+          ${esc(S.address || "Plot 45 Salama Road / kibuli Kampala, Uganda")}<br/>
+          Phone: ${esc(S.hotline || "+256 7656 52403")} | WhatsApp: ${esc(S.whatsapp_display || "+256 7588 73398")}<br/>
+          <span class="rc-tiktok">TikTok: ${esc(S.tiktok || "@adonai.thrift256")}</span>
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-ref-row">
+          <span>RECEIPT / INVOICE REF:</span>
+          <strong>${esc(sale.id)}</strong>
+        </div>
+        <div class="rc-datetime-row">
+          <span>Date: ${receiptDateFormat(sale.created_at)}</span>
+          <span>Time: ${receiptTimeFormat(sale.created_at)}</span>
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-cust-box">
+          <div class="rc-cust-row"><span class="rc-cust-k">Customer:</span> <strong class="rc-cust-v">${esc(sale.customer_name || "Walk-in customer")}</strong></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Phone:</span> <span class="rc-cust-v">${esc(sale.customer_phone || "—")}</span></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.delivery_area ? `${sale.delivery_area}${sale.delivery_address ? " - " + sale.delivery_address : ""}` : sale.delivery_address || "In-Store POS (Walk-in)")}</span></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${sale.channel === "web" ? "WhatsApp" : "In-Store POS"}</span></div>
+        </div>
+        <div class="rc-dashed"></div>
+        <table class="rc-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">ITEM / SIZE</th>
+              <th style="text-align:center">QTY</th>
+              <th style="text-align:right">PRICE</th>
+              <th style="text-align:right">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sale.items.map(it => `
+              <tr>
+                <td style="text-align:left">
+                  <div class="rc-it-name">${esc(it.name)}</div>
+                  <div class="rc-it-sku">${esc(it.sku || it.barcode_id || "")}</div>
+                </td>
+                <td style="text-align:center">${it.qty}</td>
+                <td style="text-align:right">${DB.ugx(it.unit_price)}</td>
+                <td style="text-align:right">${DB.ugx(it.line_total)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
         </table>
-        <hr/>
-        <div class="order-id">${esc(sale.id)}</div>
-        <div class="foot">Items sold are unique thrift pieces.<br/>Thank you for shopping at ${esc(s.store_name)}! 🙏</div>
-      </div>`;
+        <div class="rc-dashed"></div>
+        <div class="rc-sum-section">
+          <div class="rc-sum-row">
+            <span>Item Subtotal (${totalQty} items)</span>
+            <span>${DB.ugx(subtotal)}</span>
+          </div>
+          ${sale.delivery_fee > 0 ? `
+            <div class="rc-sum-row">
+              <span>Rider Delivery Fee</span>
+              <span>${DB.ugx(sale.delivery_fee)}</span>
+            </div>
+          ` : ""}
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-grand-row">
+          <strong>TOTAL PAID (UGX)</strong>
+          <strong class="rc-grand-total">${DB.ugx(sale.total)}</strong>
+        </div>
+        <div class="rc-pay-method">
+          PAYMENT METHOD: ${(sale.tender && sale.tender.paid && sale.tender.type === "cash") ? "CASH · COMPLETED" : (sale.tender && sale.tender.paid && sale.tender.type === "mtn") ? "MTN MOMO · VERIFIED" : (sale.tender && sale.tender.paid && sale.tender.type === "airtel") ? "AIRTEL MONEY · VERIFIED" : (sale.tender && sale.tender.paid) ? `${sale.tender.type.toUpperCase()} · PAID` : "UNPAID · UNPAID"}
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-notice">
+          Notice: Returns or exchanges are strictly accepted within 2 days of purchase upon presentation of a valid receipt.
+        </div>
+        <div class="rc-barcode-area">
+          <div class="rc-barcode-lines">||| | |||| || | |||| ||| |||| || | ||| |||| | ||</div>
+          <div class="rc-barcode-code">* ${esc(sale.id)} *</div>
+        </div>
+      </div>
+    `;
   }
 
   function showReceipt(sale) {

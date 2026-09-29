@@ -27,6 +27,7 @@
 
   /* ---------- domain constants ---------- */
   const CATEGORIES    = ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear"];
+  const DEMO_CODES    = { "Men": "MEN", "Women": "WOM", "Children": "KID" };
   const CONDITIONS    = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector"];
   const DEMOGRAPHICS  = ["Men", "Women", "Children"];
   const CAT_CODES     = { "Outerwear & Jackets": "JKT", "Tops & Shirts": "TOP", "Dresses & Skirts": "DRS", "Pants & Jeans": "PNT", "Shoes": "SHO", "Accessories": "ACC", "Children Wear": "CHD" };
@@ -48,13 +49,13 @@
     adjustment: "Adjustment (Drawer Recount / Correction)"
   };
   const orderLanes = s => {
-    if (s.channel === "web" && s.status === "pending") return "incoming";
-    if (s.status === "completed" && s.channel === "pos") return "completed";
     if (s.status === "cancelled") return "completed";
+    if (s.status === "completed" && s.channel === "pos") return "completed";
     const d = s.dispatch_status || "Pending";
     if (d === "With rider") return "rider";
     if (d === "Handed over") return "handed";
     if (d === "Delivered") return "completed";
+    if (d === "Incoming") return "incoming";
     return "fulfillment";
   };
   const DEFAULT_MASTER_KEY = "ADONAI-MASTER-2026";  // sandbox default per onboarding sheet — rotate in System Parameters
@@ -68,7 +69,7 @@
       ["Cream Silk Slip Dress", "Unbranded", "Cream", "Women", "Dresses & Skirts", "S", V, 45000, 78000, 130000, 1, "Bias-cut silk slip from the 90s — fluid drape, adjustable straps."],
       ["Black Leather Chelsea Boots", "Clarks", "Black", "Men", "Shoes", "43", B, 60000, 95000, 170000, 1, "Polished leather uppers with elastic gussets. Resoled once — plenty of life left."],
       ["White Oxford Button-Down", "Ralph Lauren", "White", "Men", "Tops & Shirts", "L", A, 20000, 38000, 75000, 2, "Crisp cotton oxford with single-needle stitching. Lightly worn."],
-      ["Band Graphic Tee", "Vintage Anvil", "Black", "Men", "Tops & Shirts", "M", V, 22000, 42000, 70000, 1, "Single-stitch 90s tour tee with the original chest print and a soft fade."],
+      ["Emerald Velvet Tailored Blazer", "Vintage Boutique", "Emerald Green", "Women", "Outerwear & Jackets", "M", A, 35000, 60000, 110000, 1, "Plush cotton-velvet tailored blazer in deep emerald with satin lapels and structured shoulders."],
       ["Pleated Midi Skirt", "Unbranded", "Rust", "Women", "Dresses & Skirts", "M", A, 18000, 35000, 65000, 1, "Satin pleats with a comfortable elastic waist — moves beautifully."],
       ["Ankara Print Wrap Dress", "Hand-made", "Multi", "Women", "Dresses & Skirts", "M", A, 32000, 55000, 95000, 1, "Kitenge wax-print wrap tailored in Kampala. Wears like new."],
       ["High-Waist 501 Jeans", "Levi's", "Mid-wash", "Women", "Pants & Jeans", "30", B, 26000, 48000, 85000, 2, "Classic straight leg with button fly. Honest fade at the knees."],
@@ -83,7 +84,7 @@
     const IMGS = Array.from({ length: 16 }, (_, i) => `assets/products/p${1001 + i}.jpg`);
     return raw.map((r, i) => ({
       id: "PRD-" + String(1001 + i),
-      sku: "ADN-" + (CAT_CODES[r[4]] || "GEN") + "-" + String(1001 + i),
+      sku: "ADN-" + (DEMO_CODES[r[3]] || "GEN") + "-" + String(1001 + i),
       barcode_id: "ADT-" + String(10001 + i),
       name: r[0], brand: r[1], color: r[2], demographic: r[3],
       category: r[4], size: r[5], condition: r[6],
@@ -156,9 +157,9 @@
       version: 3,
       settings: {
         store_name: "Adonai Thrift Store",
-        tagline: "An independent Kampala boutique curating pre-loved vintage garments. Every piece is laundered, photographed in daylight, and sold once.",
-        address: "Plot 14 Kampala Road / Mercer Hub, Kampala, Uganda",
-        whatsapp: "256758873398",
+        tagline: "Curated pre-loved vintage · Laundered, graded and sold once",
+        address: "Plot 45 Salama Road / kibuli Kampala, Uganda",
+        whatsapp: "256758893398",
         whatsapp_display: "+256 7588 73398",
         hotline: "+256 7656 52403",
         email: "adonaithriftstore@gmail.com",
@@ -177,7 +178,7 @@
       guests: seedGuests(),
       riders: seedRiders(),
       staff: seedStaff(),
-      counters: { product: 1016, sale_pos: posN, sale_web: webN, guest: 1004, rider: 1003, ledger: 1002 }
+      counters: { product: 1016, sale_seq: 1861, sale_pos: posN, sale_web: webN, guest: 1004, rider: 1003, ledger: 1002 }
     };
   }
 
@@ -252,7 +253,7 @@
     lines.forEach(({ p, qty }) => { if (p.in_stock_count < qty) throw stockError(p.name, p.in_stock_count); });
     lines.forEach(({ p, qty }) => { p.in_stock_count -= qty; });
     const finalItems = lines.map(({ p, qty }) => ({
-      product_id: p.id, barcode_id: p.barcode_id, name: p.name, qty,
+      product_id: p.id, sku: p.sku || "", barcode_id: p.barcode_id, name: p.name, size: p.size || "-", qty,
       unit_price: p.selling_price, line_total: p.selling_price * qty
     }));
     return { items: finalItems, total: finalItems.reduce((s, l) => s + l.line_total, 0) };
@@ -434,33 +435,58 @@
     processPosSale({ items, tender, cashier, customer_name, customer_phone }) {
       return tx("sales", st => {
         const { items: finalItems, total } = saleFromItems(st, items);
+        if (!st.counters.sale_seq) st.counters.sale_seq = Math.max(1861, st.counters.sale_pos || 1841);
+        const seq = ++st.counters.sale_seq;
         const sale = {
-          id: "AT-" + (++st.counters.sale_pos),
+          id: "AT-" + seq,
           channel: "pos", status: "completed",
           created_at: new Date().toISOString(),
           customer_name: String(customer_name || "Walk-in customer").trim(),
           customer_phone: String(customer_phone || "").trim(),
+          delivery_area: "In-Store POS (Walk-in)",
+          delivery_address: "",
+          delivery_fee: 0,
+          subtotal: total,
+          total,
           cashier: cashier || null,
-          items: finalItems, total, tender,
-          dispatch_status: "Delivered"
+          items: finalItems,
+          tender: Object.assign({ type: "cash", paid: true }, tender || {}),
+          dispatch_status: "Delivered",
+          assigned_rider_id: null,
+          assigned_rider_name: null
         };
         st.sales.push(sale);
         logSaleEntry(st, sale, cashier && cashier.name);
         return JSON.parse(JSON.stringify(sale));
       });
     },
-    createWebOrder({ customer_name, customer_phone, items }) {
+    createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items }) {
       return tx("sales", st => {
-        const { items: finalItems, total } = saleFromItems(st, items);
+        const { items: finalItems, total: subtotal } = saleFromItems(st, items);
+        const fee = delivery_type === "pickup" ? 0 : Number(delivery_fee != null ? delivery_fee : 7000);
+        const finalTotal = subtotal + fee;
+        if (!st.counters.sale_seq) st.counters.sale_seq = Math.max(1861, st.counters.sale_pos || 1841);
+        const seq = ++st.counters.sale_seq;
         const sale = {
-          id: "WEB-" + (++st.counters.sale_web),
-          channel: "web", status: "pending",
+          id: "AT-" + seq,
+          channel: "web",
+          status: "pending",
           created_at: new Date().toISOString(),
           customer_name: String(customer_name || "Web customer").trim(),
           customer_phone: String(customer_phone || "").trim(),
+          delivery_type: delivery_type || "boda",
+          delivery_area: String(delivery_area || "Kampala Central / Nakasero").trim(),
+          delivery_address: String(delivery_address || "").trim(),
+          delivery_fee: fee,
+          delivery_notes: String(delivery_notes || "").trim(),
+          subtotal,
+          total: finalTotal,
           cashier: null,
-          items: finalItems, total,
-          tender: { type: "whatsapp" }, dispatch_status: "Pending"
+          items: finalItems,
+          tender: { type: "whatsapp", paid: false },
+          dispatch_status: "Pending",
+          assigned_rider_id: null,
+          assigned_rider_name: null
         };
         st.sales.push(sale);
         return JSON.parse(JSON.stringify(sale));
@@ -469,8 +495,8 @@
     confirmWebOrder(id, method, by) {
       return tx("sales", st => {
         const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
-        if (s.channel !== "web" || s.status !== "pending") throw new Error("Order is not pending");
-        s.tender = { type: TENDER_TYPES.includes(method) ? method : "cash", confirmed_by: by || "admin" };
+        if (s.status === "cancelled") throw new Error("Order was cancelled");
+        s.tender = { type: TENDER_TYPES.includes(method) ? method : "cash", paid: true, confirmed_by: by || "admin" };
         s.status = "completed";
         s.completed_at = new Date().toISOString();
         logSaleEntry(st, s, by || "admin");
@@ -480,9 +506,27 @@
     cancelWebOrder(id) {
       return tx("sales", st => {
         const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
-        if (s.channel !== "web" || s.status !== "pending") throw new Error("Order is not pending");
+        if (s.status === "cancelled") return JSON.parse(JSON.stringify(s));
         s.items.forEach(it => { const p = byId(st.products, it.product_id); if (p) p.in_stock_count += it.qty; });
         s.status = "cancelled";
+        s.dispatch_status = "Cancelled";
+        if (s.assigned_rider_id) {
+          const r = byId(st.riders, s.assigned_rider_id);
+          if (r && r.status === "On delivery") r.status = "Available";
+        }
+        return JSON.parse(JSON.stringify(s));
+      });
+    },
+    assignRiderToOrder(orderId, riderId) {
+      return tx("sales", st => {
+        const s = byId(st.sales, orderId); if (!s) throw new Error("Order not found");
+        const r = byId(st.riders, riderId);
+        if (r) {
+          s.assigned_rider_id = r.id;
+          s.assigned_rider_name = r.name;
+          s.dispatch_status = "With rider";
+          r.status = "On delivery";
+        }
         return JSON.parse(JSON.stringify(s));
       });
     },
@@ -491,8 +535,12 @@
     setDispatchStatus(id, dispatch_status) {
       return tx("sales", st => {
         const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
-        if (!DISPATCH_STATUSES.includes(dispatch_status)) throw new Error("Unknown dispatch stage");
+        if (!DISPATCH_STATUSES.includes(dispatch_status) && dispatch_status !== "Cancelled") throw new Error("Unknown dispatch stage");
         s.dispatch_status = dispatch_status;
+        if (dispatch_status === "Delivered" && s.assigned_rider_id) {
+          const r = byId(st.riders, s.assigned_rider_id);
+          if (r && r.status === "On delivery") r.status = "Available";
+        }
         return JSON.parse(JSON.stringify(s));
       });
     },

@@ -416,6 +416,29 @@
   }
 
   /* ---------- cart drawer ---------- */
+  const DELIVERY_AREAS = [
+    { name: "Kampala Central / Nakasero", fee: 7000 },
+    { name: "Kololo / Kamwokya / Bukoto", fee: 7000 },
+    { name: "Ntinda / Naguru / Kiwatule", fee: 7000 },
+    { name: "Bugolobi / Mbuya / Mutungo", fee: 7000 },
+    { name: "Muyenga / Kansanga / Ggaba", fee: 7000 },
+    { name: "Kibuli / Nsambya / Makindye", fee: 7000 },
+    { name: "Rubaga / Mengo / Namirembe", fee: 7000 },
+    { name: "Bwaise / Kawempe / Kisaasi", fee: 7000 },
+    { name: "Entebbe Road & Corridor", fee: 12000 },
+    { name: "Mukono / Seeta Corridor", fee: 12000 },
+    { name: "Upcountry Express Parcel (Jinja, Mbarara, Mbale)", fee: 15000 }
+  ];
+
+  let deliveryType = "boda"; // 'boda' | 'pickup'
+  let selectedAreaIndex = 0;
+  let formState = {
+    name: "",
+    phone: "",
+    address: "",
+    notes: ""
+  };
+
   function openCart() { document.body.classList.add("cart-open"); }
   function closeCart() { document.body.classList.remove("cart-open"); }
   $("#cartBtn").addEventListener("click", openCart);
@@ -431,22 +454,37 @@
 
   function renderCart() {
     const lines = cartLines();
-    const total = lines.reduce((s, x) => s + x.sub, 0);
-    $("#cartCount").textContent = lines.reduce((s, x) => s + x.line.qty, 0);
+    const itemCount = lines.reduce((s, x) => s + x.line.qty, 0);
+    const subtotal = lines.reduce((s, x) => s + x.sub, 0);
+    const currentDeliveryFee = deliveryType === "pickup" ? 0 : (DELIVERY_AREAS[selectedAreaIndex] ? DELIVERY_AREAS[selectedAreaIndex].fee : 7000);
+    const grandTotal = subtotal + currentDeliveryFee;
+    $("#cartCount").textContent = itemCount;
 
     if (orderResult) {
       $("#cartBody").innerHTML = `
-        <div class="order-done">
-          <svg class="done-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>
-          <h4>Your pieces are reserved</h4>
-          <p><strong>${esc(orderResult.id)}</strong> · ${DB.ugx(orderResult.total)}</p>
-          <p class="note">We've set these aside for 24 hours. Send the WhatsApp message to confirm — MoMo, Airtel or cash all work.</p>
+        <div class="order-confirmed-view">
+          <div class="order-held-pill">
+            Held as <strong>${esc(orderResult.id)}</strong>. Your pieces are reserved off the rails.
+          </div>
+
+          <div class="total-due-card">
+            <span class="due-lbl">TOTAL AMOUNT DUE</span>
+            <span class="due-val">${DB.ugx(orderResult.total)}</span>
+          </div>
+
+          <p class="wa-instruct">WhatsApp should have opened with your order summary. If not, tap below to message our Kampala desk:</p>
+
+          <a class="open-wa-btn" id="openWaMsg" href="${esc(orderResult.waUrl)}" target="_blank" rel="noopener">
+            Open WhatsApp Order Message →
+          </a>
+
+          <div class="wa-msg-preview-box">
+            <pre>${esc(orderResult.rawMessage)}</pre>
+          </div>
         </div>`;
       $("#cartFoot").innerHTML = `
-        <button class="claim-btn" id="openWa">${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Open WhatsApp</button>
-        <button class="fchip keep-shopping" id="keepShopping">Keep browsing</button>`;
-      $("#openWa").addEventListener("click", () => window.open(orderResult.waUrl, "_blank"));
-      $("#keepShopping").addEventListener("click", () => { orderResult = null; renderCart(); });
+        <button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`;
+      $("#keepShopping").addEventListener("click", () => { orderResult = null; renderCart(); closeCart(); });
       return;
     }
 
@@ -456,68 +494,161 @@
       return;
     }
 
-    $("#cartBody").innerHTML = lines.map(({ line, p, sub }) => `
-      <div class="cart-line">
-        <span class="line-thumb">${catIcon(p.category)}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span>
-        <div class="grow">
-          <div class="name">${esc(p.name)}</div>
-          <div class="meta">${DB.ugx(p.selling_price)} · ${esc(p.brand)} · Size ${esc(p.size)}</div>
-          <div class="line-foot">
-            <span class="qty">
-              <button data-dec="${esc(p.id)}" ${line.qty <= 1 ? "disabled" : ""}>−</button>
-              <span>${line.qty}</span>
-              <button data-inc="${esc(p.id)}" ${line.qty >= p.in_stock_count ? "disabled" : ""}>+</button>
-            </span>
-            <span class="amt">${DB.ugx(sub)}</span>
+    $("#cartBody").innerHTML = `
+      ${lines.map(({ line, p, sub }) => `
+        <div class="cart-line-card">
+          <span class="line-thumb">${catIcon(p.category)}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span>
+          <div class="line-details">
+            <div class="line-title">${esc(p.name)}</div>
+            <div class="line-sku">${esc(p.sku || p.barcode_id || p.id)}</div>
+            <div class="line-price-meta">Size: ${esc(p.size && p.size !== "-" ? p.size : "Standard")} · ${DB.ugx(p.selling_price)}</div>
           </div>
-          <button class="rmlink" data-rm="${esc(p.id)}">Remove</button>
+          <button class="line-remove-btn" data-rm="${esc(p.id)}" aria-label="Remove item">✕</button>
+        </div>`).join("")}
+
+      <div class="claim-form">
+        <input class="claim-input" id="coName" placeholder="Your Full Name *" autocomplete="name" value="${esc(formState.name)}" required />
+        <input class="claim-input" id="coPhone" placeholder="WhatsApp Phone Number (e.g. 0758873398) *" autocomplete="tel" value="${esc(formState.phone)}" required />
+
+        <div class="delivery-toggle-row">
+          <button type="button" class="deliv-toggle-btn ${deliveryType === 'boda' ? 'active' : ''}" id="btnDelivBoda">Boda Delivery</button>
+          <button type="button" class="deliv-toggle-btn ${deliveryType === 'pickup' ? 'active' : ''}" id="btnDelivPickup">Store Pickup (Free)</button>
         </div>
-      </div>`).join("");
+
+        <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
+          <label class="claim-field-label">Destination Area:</label>
+          <select class="claim-select" id="coArea">
+            ${DELIVERY_AREAS.map((a, idx) => `<option value="${idx}" ${idx === selectedAreaIndex ? 'selected' : ''}>${esc(a.name)} (${DB.ugx(a.fee)})</option>`).join("")}
+          </select>
+          <input class="claim-input" id="coAddress" placeholder="Street, Building, Flat or Landmark Details *" value="${esc(formState.address)}" />
+        </div>
+
+        <textarea class="claim-textarea" id="coNotes" placeholder="Delivery notes or sizing question (optional)..." rows="2">${esc(formState.notes)}</textarea>
+      </div>
+    `;
 
     $("#cartFoot").innerHTML = `
-      <div class="tot-row"><span class="lbl">Total</span><span class="val">${DB.ugx(total)}</span></div>
-      <div class="check-form">
-        <input id="coName" placeholder="Your name" autocomplete="name" />
-        <input id="coPhone" placeholder="Phone number (07XX 000 000)" autocomplete="tel" />
-        <button class="claim-btn" id="waCheckout">${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Reserve on WhatsApp</button>
-        <p class="note">Reserving sets the pieces aside instantly, then WhatsApp opens to confirm payment and delivery.</p>
-      </div>`;
-    $("#waCheckout").addEventListener("click", checkout);
+      <div class="claim-summary-box">
+        <div class="sum-line"><span>Items (${itemCount}):</span><span>${DB.ugx(subtotal)}</span></div>
+        <div class="sum-line"><span>Rider Delivery:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
+        <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
+      </div>
+      <button class="claim-confirm-btn" id="waCheckout">Confirm Claim on WhatsApp (${DB.ugx(grandTotal)})</button>
+      <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
+    `;
+
+    // Bind form inputs
+    const elName = $("#coName"), elPhone = $("#coPhone"), elAddr = $("#coAddress"), elNotes = $("#coNotes"), elArea = $("#coArea");
+    if (elName) elName.addEventListener("input", e => { formState.name = e.target.value; });
+    if (elPhone) elPhone.addEventListener("input", e => { formState.phone = e.target.value; });
+    if (elAddr) elAddr.addEventListener("input", e => { formState.address = e.target.value; });
+    if (elNotes) elNotes.addEventListener("input", e => { formState.notes = e.target.value; });
+    if (elArea) elArea.addEventListener("change", e => {
+      selectedAreaIndex = Number(e.target.value);
+      renderCart();
+    });
+
+    const btnBoda = $("#btnDelivBoda"), btnPickup = $("#btnDelivPickup");
+    if (btnBoda) btnBoda.addEventListener("click", () => { deliveryType = "boda"; renderCart(); });
+    if (btnPickup) btnPickup.addEventListener("click", () => { deliveryType = "pickup"; renderCart(); });
+
+    const btnWa = $("#waCheckout");
+    if (btnWa) btnWa.addEventListener("click", checkout);
   }
 
   $("#cartBody").addEventListener("click", e => {
-    const dec = e.target.closest("[data-dec]"), inc = e.target.closest("[data-inc]"), rm = e.target.closest("[data-rm]");
-    if (dec) { const l = cart.find(x => x.product_id === dec.dataset.dec); if (l) l.qty = Math.max(1, l.qty - 1); }
-    if (inc) { const l = cart.find(x => x.product_id === inc.dataset.inc); const p = products.find(x => x.id === inc.dataset.inc); if (l && p) l.qty = Math.min(p.in_stock_count, l.qty + 1); }
-    if (rm)  { cart = cart.filter(x => x.product_id !== rm.dataset.rm); }
-    if (dec || inc || rm) { saveCart(); renderCart(); }
+    const rm = e.target.closest("[data-rm]");
+    if (rm) {
+      cart = cart.filter(x => x.product_id !== rm.dataset.rm);
+      saveCart();
+      renderCart();
+    }
   });
 
   /* ---------- WhatsApp checkout ---------- */
   async function checkout() {
     const btn = $("#waCheckout");
-    const name = $("#coName").value.trim();
-    const phone = $("#coPhone").value.trim();
-    if (!name) return toast("Please tell us your name first");
+    const name = formState.name.trim();
+    const phone = formState.phone.trim();
+    const address = formState.address.trim();
+    const notes = formState.notes.trim();
+
+    if (!name) {
+      toast("Please enter your name");
+      const el = $("#coName"); if (el) el.focus();
+      return;
+    }
+    if (!phone) {
+      toast("Please enter your WhatsApp phone number");
+      const el = $("#coPhone"); if (el) el.focus();
+      return;
+    }
+    if (deliveryType === "boda" && !address) {
+      toast("Please enter your landmark or street details");
+      const el = $("#coAddress"); if (el) el.focus();
+      return;
+    }
     if (cart.length === 0) return;
-    btn.disabled = true; btn.textContent = "Reserving your pieces…";
+
+    const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
+    const deliveryFee = deliveryType === "pickup" ? 0 : areaObj.fee;
+    const areaName = deliveryType === "pickup" ? "Store Pickup (Mercer Hub / Plot 45 Salama Road)" : areaObj.name;
+
+    btn.disabled = true;
+    btn.textContent = "Reserving your pieces…";
+
     try {
       const order = await DB.createWebOrder({
-        customer_name: name, customer_phone: phone,
+        customer_name: name,
+        customer_phone: phone,
+        delivery_type: deliveryType,
+        delivery_area: areaName,
+        delivery_address: address,
+        delivery_fee: deliveryFee,
+        delivery_notes: notes,
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
-      const lines = order.items.map(l => `- ${l.qty}x ${l.name} (${DB.ugx(l.line_total)})`).join("\n");
-      const msg = `Hello Adonai Thrift Store. I'd like to claim:\n${lines}\n\nTotal: ${DB.ugx(order.total)}\nOrder: ${order.id}\nName: ${order.customer_name}\nPhone: ${order.customer_phone}`;
-      const waUrl = `https://wa.me/${DB.getSettings().whatsapp}?text=${encodeURIComponent(msg)}`;
-      orderResult = { id: order.id, total: order.total, waUrl };
-      cart = []; saveCart();
-      renderCart(); refreshProducts();
+
+      const totalItems = order.items.reduce((a, b) => a + b.qty, 0);
+      const deliveryLocStr = deliveryType === "pickup"
+        ? "Store Pickup (Mercer Hub / Plot 45 Salama Road)"
+        : (address ? `${areaName} - ${address}` : areaName);
+
+      const msgLines = [
+        "👕 *ADONAI THRIFT STORE (UGANDA)*",
+        `*Order Ref:* ${order.id}`,
+        "-----------------------------------",
+        ...order.items.map(i => `• ${i.name} — ${DB.ugx(i.line_total)}`),
+        "-----------------------------------",
+        `*Subtotal (${totalItems} items):* ${DB.ugx(order.subtotal)}`,
+        `*Rider Delivery:* ${deliveryFee > 0 ? DB.ugx(deliveryFee) : "Free (Store Pickup)"}`,
+        `*TOTAL DUE:* ${DB.ugx(order.total)}`,
+        "-----------------------------------",
+        `*Delivery Address:* ${deliveryLocStr}`,
+        notes ? `*Notes:* ${notes}` : "",
+        `*Customer:* ${order.customer_name} (${order.customer_phone})`
+      ].filter(Boolean);
+
+      const fullMsg = msgLines.join("\n");
+      const waNumber = (DB.getSettings().whatsapp || "256758893398").replace(/[^0-9]/g, "");
+      const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(fullMsg)}`;
+
+      orderResult = {
+        id: order.id,
+        total: order.total,
+        waUrl,
+        rawMessage: fullMsg
+      };
+
+      cart = [];
+      saveCart();
+      renderCart();
+      refreshProducts();
       window.open(waUrl, "_blank");
     } catch (err) {
       toast(err.message || "Something went wrong — please try again");
       refreshProducts();
-    } finally {
-      const b = $("#waCheckout"); if (b) { b.disabled = false; b.innerHTML = `${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Reserve on WhatsApp`; }
+      renderCart();
     }
   }
 
