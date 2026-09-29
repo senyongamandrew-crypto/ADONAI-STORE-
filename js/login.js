@@ -37,27 +37,38 @@
     setTimeout(() => d.classList.remove("error"), 350);
   }
 
-  function submit() {
+  function checkOrSubmit(explicit = false) {
+    if (!pin) return;
     const staff = DB.verifyPin(pin);
-    if (!staff) return fail("Wrong PIN — try again");
-    Auth.signIn(staff);
-    // cashiers always land on the terminal; admins go where they were headed
-    location.replace(staff.role === "cashier" ? "pos.html" : next);
+    if (staff) {
+      Auth.signIn(staff);
+      // cashiers always land on the terminal; admins go where they were headed
+      location.replace(staff.role === "cashier" ? "pos.html" : next);
+      return;
+    }
+    if (explicit || pin.length >= 8) {
+      fail("Wrong PIN — try again");
+    }
   }
 
   $("#keypad").addEventListener("click", e => {
     const b = e.target.closest(".key"); if (!b) return;
     const k = b.dataset.k;
-    if (k === "C") pin = "";
+    if (k === "C") { pin = ""; $("#pinHint").textContent = "Ask the store admin for your staff PIN"; }
     else if (k === "⌫") pin = pin.slice(0, -1);
     else if (pin.length < 8) pin += k;
     draw();
-    if (pin.length >= 4) submit();
+    checkOrSubmit(false);
   });
 
   window.addEventListener("keydown", e => {
-    if (/^\d$/.test(e.key) && pin.length < 8) { pin += e.key; draw(); if (pin.length >= 4) submit(); }
+    if (/^\d$/.test(e.key) && pin.length < 8) {
+      pin += e.key;
+      draw();
+      checkOrSubmit(false);
+    }
     if (e.key === "Backspace") { pin = pin.slice(0, -1); draw(); }
+    if (e.key === "Enter") { checkOrSubmit(true); }
   });
 
   draw();

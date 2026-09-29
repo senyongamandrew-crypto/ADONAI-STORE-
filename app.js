@@ -121,15 +121,31 @@
   $("#meAvatar").textContent = initials(whoName);
 
   /* =============== navigation =============== */
-  let currentView = "overview";
-  function setView(v) {
+  const VALID_VIEWS = ["overview", "sales", "inventory", "intake", "customers", "dispatch", "payments", "staff", "settings"];
+  function currentHashView() {
+    const h = (location.hash || "").replace(/^#\/?/, "").trim();
+    return VALID_VIEWS.includes(h) ? h : null;
+  }
+  let currentView = currentHashView() || "overview";
+
+  function setView(v, updateHash = true) {
+    if (!VALID_VIEWS.includes(v)) v = "overview";
     currentView = v;
+    if (updateHash) {
+      if (location.hash.replace(/^#\/?/, "") !== v) {
+        history.replaceState(null, "", "#" + v);
+      }
+    }
     $$(".nav-item[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     $$(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
     shell.classList.remove("sb-open");
     render();
   }
   $$(".nav-item[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+  window.addEventListener("hashchange", () => {
+    const hv = currentHashView();
+    if (hv && hv !== currentView) setView(hv, false);
+  });
   document.body.addEventListener("click", e => {
     const g = e.target.closest("[data-goto]"); if (g) setView(g.dataset.goto);
     const x = e.target.closest("[data-close]"); if (x) closeModal();
@@ -920,5 +936,5 @@
   DB.on("*", () => render());
   window.addEventListener("resize", () => { if (currentView === "overview") renderOverview(); });
 
-  render();
+  setView(currentView, false);
 })();
