@@ -458,7 +458,7 @@
           Notice: Returns or exchanges are strictly accepted within 2 days of purchase upon presentation of a valid receipt.
         </div>
         <div class="rc-barcode-area">
-          <div class="rc-barcode-lines">||| | |||| || | |||| ||| |||| || | ||| |||| | ||</div>
+          <div class="rc-barcode-render">${DB.barcodeSVG(s.id, 44)}</div>
           <div class="rc-barcode-code">* ${esc(s.id)} *</div>
         </div>
       </div>
@@ -820,11 +820,8 @@
     $("#tagStrike").textContent = rrp > sell ? ugx(rrp) : "";
     const code = $("#inSku").value.trim() || "ADN-XXX-0000";
     $("#tagCode").textContent = code;
-    // fake-scanline barcode from the SKU character codes
-    $("#tagBars").innerHTML = code.split("").map(ch => {
-      const w = 1 + (ch.charCodeAt(0) % 4);
-      return `<i style="width:${w}px"></i>`;
-    }).join("");
+    // real Code 128 barcode from the SKU
+    $("#tagBars").innerHTML = DB.barcodeSVG(code, 46);
     $("#btnIntakeSave").textContent = `Tag & Save (${ugx(sell)})`;
   }
 

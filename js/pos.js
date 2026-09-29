@@ -465,7 +465,7 @@
           Notice: Returns or exchanges are strictly accepted within 2 days of purchase upon presentation of a valid receipt.
         </div>
         <div class="rc-barcode-area">
-          <div class="rc-barcode-lines">||| | |||| || | |||| ||| |||| || | ||| |||| | ||</div>
+          <div class="rc-barcode-render">${DB.barcodeSVG(sale.id, 44)}</div>
           <div class="rc-barcode-code">* ${esc(sale.id)} *</div>
         </div>
       </div>
