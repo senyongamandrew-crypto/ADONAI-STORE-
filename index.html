@@ -148,7 +148,13 @@
     <button class="c-btn ghost" data-consent="custom">Customize</button>
     <button class="c-btn light" data-consent="essential">Essential Only</button>
     <button class="c-btn primary" data-consent="all">Accept All</button>
+    <button class="c-btn-close" id="closeConsent" aria-label="Dismiss banner" title="Dismiss">✕</button>
   </div>
+</div>
+
+<!-- ============ PRODUCT DETAIL MODAL (photo views + deep specs) ============ -->
+<div class="prod-backdrop" id="prodBackdrop">
+  <div class="prod-modal" id="prodModal" role="dialog" aria-modal="true" aria-labelledby="pmodalTitle"></div>
 </div>
 
 <!-- ============ CART DRAWER ============ -->
@@ -168,6 +174,6 @@
 
 <script src="js/db.js"></script>
 <script src="js/auth.js"></script>
-<script src="js/storefront.js?v=2.1"></script>
+<script src="js/storefront.js?v=2.2"></script>
 </body>
 </html>
