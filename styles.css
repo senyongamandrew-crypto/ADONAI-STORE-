@@ -307,6 +307,8 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .stat-chip.role-rider { background: #F5EBD8; color: var(--amber); }
 
 /* ---- order pipeline lanes ---- */
+.fulfillment-filter-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.fulfillment-filter-bar .search-wide { flex: 1; min-width: 240px; margin-bottom: 0; }
 .search-wide {
   width: 100%; background: var(--card); border: 1px solid var(--line); color: var(--ink);
   border-radius: 12px; padding: 13px 16px; font: inherit; outline: none; margin-bottom: 4px;

@@ -557,7 +557,31 @@
         s.tender = { type: TENDER_TYPES.includes(method) ? method : "cash", paid: true, confirmed_by: by || "admin" };
         s.status = "completed";
         s.completed_at = new Date().toISOString();
-        logSaleEntry(st, s, by || "admin");
+        if (!st.ledger.some(l => l.sale_id === s.id)) {
+          logSaleEntry(st, s, by || "admin");
+        }
+        return JSON.parse(JSON.stringify(s));
+      });
+    },
+    setPaymentStatus(id, paid, method = "cash", by = "admin") {
+      return tx("sales", st => {
+        const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
+        if (s.status === "cancelled") throw new Error("Order is cancelled");
+        if (paid) {
+          const m = TENDER_TYPES.includes(method) ? method : "cash";
+          s.tender = {
+            type: m,
+            paid: true,
+            confirmed_by: by || "admin",
+            confirmed_at: new Date().toISOString()
+          };
+          if (!st.ledger.some(l => l.sale_id === s.id)) {
+            logSaleEntry(st, s, by || "admin");
+          }
+        } else {
+          s.tender = { type: "whatsapp", paid: false };
+          st.ledger = st.ledger.filter(l => l.sale_id !== s.id);
+        }
         return JSON.parse(JSON.stringify(s));
       });
     },

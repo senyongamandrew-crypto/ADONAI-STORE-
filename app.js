@@ -296,6 +296,17 @@
   ];
   let activeLane = "incoming";
   let orderTerm = "";
+  let payFilter = "all"; // 'all' | 'paid' | 'unpaid'
+
+  function isSalePaid(s) {
+    if (!s || !s.tender) return false;
+    if (s.tender.paid === true) return true;
+    if (s.tender.paid === false) return false;
+    if (s.channel === "pos" && s.status === "completed") return true;
+    if (s.tender.type === "cash" || s.tender.type === "mtn" || s.tender.type === "airtel") return true;
+    return false;
+  }
+
   $("#orderSearch").addEventListener("input", e => { orderTerm = e.target.value.trim().toLowerCase(); renderSales(); });
 
   function renderSales() {
@@ -304,7 +315,30 @@
     $("#pendingLine").textContent = `${webPend.length} pending online orders in UGX. Automatic background polling active (every 5s).`;
     $("#navWebBadge").textContent = webPend.length || "";
 
-    const filtered = sales.filter(s => !orderTerm || [s.id, s.customer_name, s.customer_phone].some(x => String(x || "").toLowerCase().includes(orderTerm)));
+    // Payment Filter Pills (All / Paid / Unpaid)
+    const pPills = $("#payFilterPills");
+    if (pPills) {
+      const paidCount = sales.filter(isSalePaid).length;
+      const unpaidCount = sales.filter(s => !isSalePaid(s)).length;
+      pPills.innerHTML = [
+        { key: "all", label: `All Orders (${sales.length})` },
+        { key: "paid", label: `Paid (${paidCount})` },
+        { key: "unpaid", label: `Unpaid (${unpaidCount})` }
+      ].map(p => `<button class="dpill ${p.key === payFilter ? 'active' : ''}" data-pay-filter="${p.key}">${p.label}</button>`).join("");
+      $$("#payFilterPills .dpill").forEach(b => b.addEventListener("click", () => {
+        payFilter = b.dataset.payFilter;
+        renderSales();
+      }));
+    }
+
+    const filtered = sales.filter(s => {
+      const matchSearch = !orderTerm || [s.id, s.customer_name, s.customer_phone].some(x => String(x || "").toLowerCase().includes(orderTerm));
+      if (!matchSearch) return false;
+      if (payFilter === "paid") return isSalePaid(s);
+      if (payFilter === "unpaid") return !isSalePaid(s);
+      return true;
+    });
+
     $("#laneTabs").innerHTML = LANES.map(l => {
       const n = filtered.filter(s => DB.laneOf(s) === l.key).length;
       return `<button class="lane-tab ${l.key === activeLane ? "active" : ""}" data-lane="${l.key}">${l.title} (${n})</button>`;
@@ -321,21 +355,27 @@
   }
 
   function orderCard(s) {
-    const isPaid = s.tender && (s.tender.paid || s.tender.type === "cash" || s.tender.type === "mtn" || s.tender.type === "airtel");
+    const paid = isSalePaid(s);
     const acts = [];
     if (s.channel === "web" && s.status === "pending") {
       acts.push(`<div class="pay-row">
         <button class="btn sm primary" data-open-order="${esc(s.id)}">Manage / Dispatch →</button>
-        <button class="btn sm" data-confirm-web="${esc(s.id)}" data-method="cash">Cash received</button>
-        <button class="btn sm" data-confirm-web="${esc(s.id)}" data-method="mtn">MTN MoMo</button>
+        ${!paid ? `
+          <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="cash">💰 Cash</button>
+          <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">📱 MoMo</button>
+        ` : `
+          <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">Mark Unpaid</button>
+        `}
         <button class="btn sm danger" data-cancel-web="${esc(s.id)}">Cancel</button></div>`);
     } else if (activeLane === "fulfillment") {
       acts.push(`<div class="pay-row">
         <button class="btn sm primary" data-open-order="${esc(s.id)}">🛵 Dispatch with rider →</button>
+        ${!paid ? `<button class="btn sm" data-set-paid="${esc(s.id)}" data-method="cash">Mark Paid</button>` : ""}
         <button class="btn sm" data-print-order="${esc(s.id)}">🖨 Receipt</button></div>`);
     } else if (activeLane === "rider") {
       acts.push(`<div class="pay-row">
         <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="Handed over">Mark handed over →</button>
+        ${!paid ? `<button class="btn sm" data-set-paid="${esc(s.id)}" data-method="cash">Mark Paid</button>` : ""}
         <button class="btn sm" data-open-order="${esc(s.id)}">Details</button></div>`);
     } else if (activeLane === "handed") {
       acts.push(`<div class="pay-row">
@@ -351,6 +391,7 @@
         <strong class="serif">${esc(s.id)}</strong>
         ${s.channel === "web" ? `<span class="stat-chip web">WHATSAPP</span>` : `<span class="stat-chip pos">REGISTER</span>`}
         ${s.status === "pending" ? `<span class="stat-chip pend">PENDING</span>` : s.status === "completed" ? `<span class="stat-chip ok">COMPLETED</span>` : `<span class="stat-chip bad">CANCELLED</span>`}
+        ${paid ? `<span class="stat-chip ok">PAID</span>` : `<span class="stat-chip pend">UNPAID</span>`}
         ${s.status === "completed" && s.channel === "web" ? laneChip(s.dispatch_status) : ""}
         <span class="muted small" style="margin-left:auto">${ago(s.created_at)}</span>
       </div>
@@ -496,7 +537,7 @@
     const s = DB.getSale(id);
     if (!s) return toast("Order not found", false);
     const riders = DB.listRiders();
-    const isPaid = s.tender && (s.tender.paid || s.tender.type === "cash" || s.tender.type === "mtn" || s.tender.type === "airtel");
+    const paid = isSalePaid(s);
     const subtotal = s.subtotal || (s.total - (s.delivery_fee || 0));
     const locationStr = s.delivery_area ? `${s.delivery_area}${s.delivery_address ? " - " + s.delivery_address : ""}` : (s.delivery_address || "Kampala Road Store");
 
@@ -511,7 +552,7 @@
 
       <div class="odm-chips">
         <span class="stat-chip ${s.status === 'completed' ? 'ok' : s.status === 'cancelled' ? 'bad' : 'pend'}">${s.status.toUpperCase()}</span>
-        <span class="stat-chip ${isPaid ? 'ok' : 'pend'}">${isPaid ? 'PAID' : 'UNPAID'}</span>
+        <span class="stat-chip ${paid ? 'ok' : 'pend'}">${paid ? 'PAID' : 'UNPAID'}</span>
         <span class="stat-chip ${s.channel === 'web' ? 'web' : 'pos'}">${s.channel === 'web' ? 'WhatsApp' : 'Register'}</span>
         ${s.assigned_rider_name ? `<span class="stat-chip blue">Rider: ${esc(s.assigned_rider_name)}</span>` : ''}
       </div>
@@ -540,6 +581,27 @@
         <div class="odm-total-row">
           <strong>Total Amount</strong>
           <strong class="rust">${ugx(s.total)}</strong>
+        </div>
+      </div>
+
+      <!-- Payment Status & Settlement Box -->
+      <div class="odm-section">
+        <div class="odm-section-label">Payment Status &amp; Tender Settlement</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <span style="font-weight:700">Payment:</span>
+            <span class="stat-chip ${paid ? 'ok' : 'pend'}" style="margin-left:6px">${paid ? 'PAID' : 'UNPAID'}</span>
+            ${paid ? `<span class="muted small" style="margin-left:6px">(${esc(DB.TENDER_LABEL(s.tender))})</span>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${!paid ? `
+              <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">💰 Cash</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">📱 MTN MoMo</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">🔴 Airtel</button>
+            ` : `
+              <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">↩ Revert to Unpaid</button>
+            `}
+          </div>
         </div>
       </div>
 
@@ -1066,6 +1128,31 @@
     const t = e.target;
 
     /* order pipeline */
+    const sp = t.closest("[data-set-paid]");
+    if (sp) {
+      try {
+        const method = sp.dataset.method || "cash";
+        await DB.setPaymentStatus(sp.dataset.setPaid, true, method, whoName);
+        toast(`${sp.dataset.setPaid} marked as PAID (${method.toUpperCase()})`);
+        if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
+          orderDetailModal(sp.dataset.setPaid);
+        }
+        renderSales();
+      } catch (err) { toast(err.message, false); }
+      return;
+    }
+    const su = t.closest("[data-set-unpaid]");
+    if (su) {
+      try {
+        await DB.setPaymentStatus(su.dataset.setUnpaid, false, "whatsapp", whoName);
+        toast(`${su.dataset.setUnpaid} marked as UNPAID`);
+        if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
+          orderDetailModal(su.dataset.setUnpaid);
+        }
+        renderSales();
+      } catch (err) { toast(err.message, false); }
+      return;
+    }
     const cf = t.closest("[data-confirm-web]");
     if (cf) { try { await DB.confirmWebOrder(cf.dataset.confirmWeb, cf.dataset.method, whoName); toast(`${cf.dataset.confirmWeb} confirmed & moved to Fulfillment`); } catch (err) { toast(err.message, false); } return; }
     const cw = t.closest("[data-cancel-web]");
