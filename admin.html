@@ -88,36 +88,45 @@
       </div>
       <div class="kpis" id="kpiCards"></div>
 
-      <div class="card" style="margin-top:16px">
-        <div class="card-head">
-          <div><h3>Hourly Sales Breakdown (UGX)</h3><p class="muted small">Today's real-time transaction volume</p></div>
-          <span class="muted small" id="weekTotal"></span>
+      <div class="dash-grid-top">
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Hourly Sales Breakdown (UGX)</h3><p class="muted small">Today's real-time transaction volume</p></div>
+            <span class="muted small" id="weekTotal"></span>
+          </div>
+          <canvas id="hourlyChart" height="150"></canvas>
         </div>
-        <canvas id="hourlyChart" height="150"></canvas>
+
+        <div class="dark-card" id="pollCard">
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+              <span class="poll-dot" id="pollDot"></span>
+              <span class="poll-tag">Live Order Polling</span>
+            </div>
+            <p id="pollText">No pending WhatsApp orders right now. The poller is watching every 5 seconds.</p>
+          </div>
+          <button class="dark-card-btn" data-goto="sales">View All Orders &amp; Deliveries →</button>
+        </div>
       </div>
 
-      <div class="dark-card" id="pollCard">
-        <span class="poll-dot" id="pollDot"></span> <span class="poll-tag">Polling</span>
-        <p id="pollText">No pending WhatsApp orders right now. The poller is watching every 5 seconds.</p>
-        <button class="dark-card-btn" data-goto="sales">View All Orders &amp; Deliveries →</button>
+      <div class="dash-grid-mid">
+        <div class="card">
+          <div class="card-head"><h3>Rack Inventory</h3></div>
+          <div id="rackBars"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Channels (UGX)</h3></div>
+          <div id="channelRows"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Boda Dispatch Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
+          <div id="riderPool"></div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="card-head"><h3>Rack Inventory</h3></div>
-        <div id="rackBars"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>Channels (UGX)</h3></div>
-        <div id="channelRows"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>Boda Dispatch Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
-        <div id="riderPool"></div>
-      </div>
-
-      <div class="card">
+      <div class="card" style="margin-top:18px">
         <div class="card-head"><h3>Recent Transactions</h3><button class="btn ghost sm" data-goto="sales">All Orders &amp; Invoices →</button></div>
         <p class="muted small" style="margin:-6px 0 10px">Latest in-store and WhatsApp checkouts</p>
         <div id="recentTx"></div>

@@ -274,6 +274,18 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .page-head.row { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
 .head-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
 
+/* ---- Dashboard Grid Layout ---- */
+.dash-grid-top { display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 16px; align-items: stretch; margin-top: 18px; }
+.dash-grid-top .card { margin: 0 !important; }
+.dash-grid-top .dark-card { margin: 0 !important; display: flex; flex-direction: column; justify-content: space-between; text-align: left; }
+.dash-grid-mid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 18px; }
+.dash-grid-mid .card { margin: 0 !important; }
+
+@media (max-width: 900px) {
+  .dash-grid-top { grid-template-columns: 1fr; }
+  .dash-grid-mid { grid-template-columns: 1fr; }
+}
+
 /* ---- screenshot KPI cards ---- */
 .kpi-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; box-shadow: var(--shadow); }
 .kpi-lab { font-size: 11px; letter-spacing: .1em; color: var(--muted); font-weight: 700; text-transform: uppercase; }
