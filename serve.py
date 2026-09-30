@@ -61,7 +61,13 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
 
+    def do_HEAD(self):
+        self.handle_request(head_only=True)
+
     def do_GET(self):
+        self.handle_request(head_only=False)
+
+    def handle_request(self, head_only=False):
         # 1. Enforce HTTPS if configured or behind proxy header
         force_https = os.environ.get("FORCE_HTTPS", "false").lower() in ("true", "1")
         proto = self.headers.get("X-Forwarded-Proto", "http")
@@ -89,13 +95,13 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
         # 3. Serve File or 404
         if target_file and os.path.isfile(target_file):
             try:
-                self.serve_file(target_file, clean_path)
+                self.serve_file(target_file, clean_path, head_only=head_only)
             except Exception as e:
-                self.serve_error(500, str(e))
+                self.serve_error(500, str(e), head_only=head_only)
         else:
-            self.serve_error(404, "Page Not Found")
+            self.serve_error(404, "Page Not Found", head_only=head_only)
 
-    def serve_file(self, filepath, clean_path):
+    def serve_file(self, filepath, clean_path, head_only=False):
         mime_type, _ = mimetypes.guess_type(filepath)
         if not mime_type:
             mime_type = "application/octet-stream"
@@ -124,9 +130,10 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
         self.apply_cache_headers(filepath, clean_path)
         self.end_headers()
 
-        self.wfile.write(content)
+        if not head_only:
+            self.wfile.write(content)
 
-    def serve_error(self, code, message):
+    def serve_error(self, code, message, head_only=False):
         error_file = os.path.join(ROOT, f"{code}.html")
         if not os.path.isfile(error_file):
             error_file = os.path.join(ROOT, "404.html")
@@ -142,7 +149,8 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
         self.apply_security_headers()
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
-        self.wfile.write(content)
+        if not head_only:
+            self.wfile.write(content)
 
     def apply_security_headers(self):
         self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
