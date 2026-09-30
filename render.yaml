@@ -21,6 +21,11 @@ services:
         value: 300
       - key: FORCE_HTTPS
         value: true
+      # Owner's emergency master PIN for /login — set the secret value
+      # yourself in the Render dashboard (Environment tab). Entering it
+      # on the staff keypad always grants admin access, server-verified.
+      - key: ADMIN_ACCESS_PIN
+        sync: false
 
 databases:
   - name: adonai-postgres

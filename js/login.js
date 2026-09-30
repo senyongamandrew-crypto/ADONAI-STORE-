@@ -37,15 +37,45 @@
     setTimeout(() => d.classList.remove("error"), 350);
   }
 
+  function enter(staff) {
+    Auth.signIn(staff);
+    // cashiers always land on the terminal; admins go where they were headed
+    location.replace(staff.role === "cashier" ? "pos.html" : next);
+  }
+
+  /* ---- server fallback: verifies against the backend, which checks
+     the ADMIN_ACCESS_PIN environment variable (owner's master PIN,
+     configured in the Render dashboard) and the staff roster in the
+     real database. Rescues access even when the PINs stored in this
+     browser are lost or forgotten. ---- */
+  let inFlight = false;
+  function serverVerify(candidate, explicit) {
+    if (inFlight) return;
+    inFlight = true;
+    fetch("/api/auth/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: candidate })
+    })
+      .then(r => r.json().then(data => ({ ok: r.ok, data })).catch(() => ({ ok: false, data: null })))
+      .then(({ ok, data }) => {
+        inFlight = false;
+        if (ok && data && data.ok && data.staff) { enter(data.staff); return; }
+        if (pin !== candidate) { checkOrSubmit(false); return; }   // user kept typing — re-check
+        if (explicit || pin.length >= 8) fail("Wrong PIN — try again");
+      })
+      .catch(() => {
+        inFlight = false;
+        // offline / static hosting — behave exactly like before
+        if (explicit || pin.length >= 8) fail("Wrong PIN — try again");
+      });
+  }
+
   function checkOrSubmit(explicit = false) {
     if (!pin) return;
     const staff = DB.verifyPin(pin);
-    if (staff) {
-      Auth.signIn(staff);
-      // cashiers always land on the terminal; admins go where they were headed
-      location.replace(staff.role === "cashier" ? "pos.html" : next);
-      return;
-    }
+    if (staff) { enter(staff); return; }
+    if (pin.length >= 4) { serverVerify(pin, explicit); return; }
     if (explicit || pin.length >= 8) {
       fail("Wrong PIN — try again");
     }

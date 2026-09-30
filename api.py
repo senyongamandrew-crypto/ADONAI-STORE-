@@ -4,8 +4,10 @@ Provides RESTful JSON endpoints connected to the PostgreSQL database for product
 orders, inventory, POS sales, dispatch logistics, ledger, and staff authentication.
 """
 from datetime import datetime
+import hashlib
 import json
 import logging
+import os
 from sqlalchemy import inspect, or_, text
 
 import time
@@ -317,6 +319,48 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 rows = session.query(StoreSetting).all()
                 data = {r.key: r.value for r in rows}
                 return json_response({"settings": data})
+
+        # ----------------------------------------------------
+        # 7. Staff Authentication — server-side PIN verification
+        #    Priority 1: ADMIN_ACCESS_PIN environment variable
+        #                (the owner's emergency master PIN, set in
+        #                 the Render dashboard — always grants admin)
+        #    Priority 2: staff roster in the database (SHA-256 hashes)
+        # ----------------------------------------------------
+        if clean_path == "/api/auth/verify" and method == "POST":
+            pin = str(body.get("pin") or "").strip()
+            if not pin:
+                return json_response({"ok": False, "error": "PIN required"}, status=400)
+
+            env_pin = str(
+                os.environ.get("ADMIN_ACCESS_PIN")
+                or os.environ.get("STAFF_ACCESS_PIN")
+                or ""
+            ).strip()
+            if env_pin and pin == env_pin:
+                logger.info("[AUTH] Owner signed in with the environment master PIN")
+                return json_response({
+                    "ok": True,
+                    "via": "env",
+                    "staff": {"id": "ENV-ADMIN", "name": "Store Owner (Master PIN)", "role": "admin"}
+                })
+
+            pin_hash = hashlib.sha256(pin.encode("utf-8")).hexdigest()
+            with get_db() as session:
+                user = (
+                    session.query(User)
+                    .filter(User.active.is_(True), User.pin_hash == pin_hash)
+                    .first()
+                )
+                if user:
+                    logger.info("[AUTH] %s (%s) signed in via database PIN", user.name, user.role)
+                    return json_response({
+                        "ok": True,
+                        "via": "db",
+                        "staff": {"id": user.id, "name": user.name, "role": user.role}
+                    })
+
+            return json_response({"ok": False, "error": "Invalid PIN"}, status=401)
 
         return json_response({"error": "API route not found"}, status=404)
 
