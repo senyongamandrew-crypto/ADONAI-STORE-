@@ -140,6 +140,21 @@
         <div class="due">Due: <strong id="dueAmount">UGX 0</strong></div>
       </div>
 
+      <!-- Walk-in Customer Details (for receipt & customer book) -->
+      <div class="pos-cust-block">
+        <label class="fld-label" style="margin-top:0">👤 Walk-in Customer Details (for Receipt)</label>
+        <div class="grid2">
+          <div>
+            <label class="fld-sublabel" for="posCustName">Customer Name *</label>
+            <input id="posCustName" class="in" type="text" placeholder="e.g. Nakato Sarah" autocomplete="name" required />
+          </div>
+          <div>
+            <label class="fld-sublabel" for="posCustPhone">Phone Number *</label>
+            <input id="posCustPhone" class="in" type="tel" placeholder="07XX 000 000" autocomplete="tel" required />
+          </div>
+        </div>
+      </div>
+
       <div class="tender-tabs">
         <button class="ttab active" data-tender="cash">💵 Cash</button>
         <button class="ttab mtn" data-tender="mtn">📱 MTN MoMo</button>

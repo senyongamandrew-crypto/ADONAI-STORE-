@@ -490,7 +490,7 @@
     },
 
     /* ----- sales (POS + WhatsApp, unified) ----- */
-    processPosSale({ items, tender, cashier, customer_name, customer_phone }) {
+    processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_notes }) {
       return tx("sales", st => {
         const { items: finalItems, total } = saleFromItems(st, items);
         if (!st.counters.sale_seq) st.counters.sale_seq = Math.max(1861, st.counters.sale_pos || 1841);
@@ -499,8 +499,9 @@
           id: "AT-" + seq,
           channel: "pos", status: "completed",
           created_at: new Date().toISOString(),
-          customer_name: String(customer_name || "Walk-in customer").trim(),
+          customer_name: String(customer_name || "Walk-in Guest").trim(),
           customer_phone: String(customer_phone || "").trim(),
+          customer_notes: String(customer_notes || "").trim(),
           delivery_area: "In-Store POS (Walk-in)",
           delivery_address: "",
           delivery_fee: 0,

@@ -203,6 +203,15 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .due { color: var(--muted); }
 .due strong { color: var(--ink); font: 700 22px var(--font-display); }
 
+.pos-cust-block {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.fld-sublabel {
+  display: block; font-size: 11px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px;
+}
+
 .tender-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
 .ttab {
   flex: 1; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);

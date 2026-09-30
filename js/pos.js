@@ -317,12 +317,22 @@
     if (!cartDetailed().length) return;
     tenderType = "cash";
     syncTenderUI();
+    if ($("#posCustName")) $("#posCustName").value = "";
+    if ($("#posCustPhone")) $("#posCustPhone").value = "";
     $("#cashTendered").value = "";
-    $("#momoName").value = ""; $("#momoPhone").value = ""; $("#momoRef").value = ""; $("#momoVerified").checked = false;
+    $("#momoName").value = "";
+    $("#momoPhone").value = "";
+    delete $("#momoName").dataset.customized;
+    delete $("#momoPhone").dataset.customized;
+    $("#momoRef").value = "";
+    $("#momoVerified").checked = false;
     $("#dueAmount").textContent = DB.ugx(cartTotal());
     $("#tenderBackdrop").classList.add("open");
     updateChange();
-    setTimeout(() => $("#cashTendered").focus(), 60);
+    setTimeout(() => {
+      if ($("#posCustName")) $("#posCustName").focus();
+      else $("#cashTendered").focus();
+    }, 60);
   }
   function closeTender() { $("#tenderBackdrop").classList.remove("open"); }
 
@@ -330,6 +340,14 @@
     $$(".ttab").forEach(t => t.classList.toggle("active", t.dataset.tender === tenderType));
     $("#pane-cash").classList.toggle("active", tenderType === "cash");
     $("#pane-momo").classList.toggle("active", tenderType !== "cash");
+    if (tenderType !== "cash") {
+      if (!$("#momoName").dataset.customized && $("#posCustName")) {
+        $("#momoName").value = $("#posCustName").value;
+      }
+      if (!$("#momoPhone").dataset.customized && $("#posCustPhone")) {
+        $("#momoPhone").value = $("#posCustPhone").value;
+      }
+    }
     validateTender();
   }
   $(".tender-tabs").addEventListener("click", e => {
@@ -354,13 +372,35 @@
     updateChange(); validateTender();
   });
 
-  ["#momoName", "#momoPhone", "#momoRef"].forEach(s => $(s).addEventListener("input", validateTender));
+  if ($("#posCustName")) {
+    $("#posCustName").addEventListener("input", () => {
+      if (tenderType !== "cash" && !$("#momoName").dataset.customized) {
+        $("#momoName").value = $("#posCustName").value;
+      }
+      validateTender();
+    });
+  }
+  if ($("#posCustPhone")) {
+    $("#posCustPhone").addEventListener("input", () => {
+      if (tenderType !== "cash" && !$("#momoPhone").dataset.customized) {
+        $("#momoPhone").value = $("#posCustPhone").value;
+      }
+      validateTender();
+    });
+  }
+
+  $("#momoName").addEventListener("input", () => { $("#momoName").dataset.customized = "true"; validateTender(); });
+  $("#momoPhone").addEventListener("input", () => { $("#momoPhone").dataset.customized = "true"; validateTender(); });
+  $("#momoRef").addEventListener("input", validateTender);
   $("#momoVerified").addEventListener("change", validateTender);
 
   function validateTender() {
     const due = cartTotal();
+    const custName = $("#posCustName") ? $("#posCustName").value.trim() : "";
+    const custPhone = $("#posCustPhone") ? $("#posCustPhone").value.trim() : "";
+    const hasCustomer = custName.length > 0 && custPhone.length > 0;
     let ok = false;
-    if (due > 0) {
+    if (due > 0 && hasCustomer) {
       if (tenderType === "cash") ok = (Number($("#cashTendered").value) || 0) >= due;
       else ok = $("#momoRef").value.trim().length >= 4 && $("#momoVerified").checked;
     }
@@ -379,19 +419,27 @@
   $("#tenderConfirm").addEventListener("click", async () => {
     const btn = $("#tenderConfirm");
     btn.disabled = true; btn.textContent = "Processing…";
+    const custName = $("#posCustName") ? $("#posCustName").value.trim() : "";
+    const custPhone = $("#posCustPhone") ? $("#posCustPhone").value.trim() : "";
     const items = cartDetailed().map(({ l }) => ({ product_id: l.product_id, qty: l.qty }));
     const tender = tenderType === "cash"
       ? { type: "cash", tendered: Number($("#cashTendered").value) || 0 }
       : {
           type: tenderType,
-          sender_name: $("#momoName").value.trim(),
-          sender_phone: $("#momoPhone").value.trim(),
+          sender_name: $("#momoName").value.trim() || custName,
+          sender_phone: $("#momoPhone").value.trim() || custPhone,
           ref: $("#momoRef").value.trim(),
           verified: $("#momoVerified").checked,
           verified_by: cashier.name
         };
     try {
-      const sale = await DB.processPosSale({ items, tender, cashier });
+      const sale = await DB.processPosSale({
+        items,
+        tender,
+        cashier,
+        customer_name: custName || "Walk-in Guest",
+        customer_phone: custPhone || ""
+      });
       lastSale = sale;
       cart = [];
       closeTender();
@@ -449,10 +497,12 @@
         </div>
         <div class="rc-dashed"></div>
         <div class="rc-cust-box">
-          <div class="rc-cust-row"><span class="rc-cust-k">Customer:</span> <strong class="rc-cust-v">${esc(sale.customer_name || "Walk-in customer")}</strong></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Customer:</span> <strong class="rc-cust-v">${esc(sale.customer_name || "Walk-in Guest")}</strong></div>
           <div class="rc-cust-row"><span class="rc-cust-k">Phone:</span> <span class="rc-cust-v">${esc(sale.customer_phone || "—")}</span></div>
+          ${sale.customer_notes ? `<div class="rc-cust-row"><span class="rc-cust-k">Notes:</span> <span class="rc-cust-v">${esc(sale.customer_notes)}</span></div>` : ""}
           <div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.delivery_area ? `${sale.delivery_area}${sale.delivery_address ? " - " + sale.delivery_address : ""}` : sale.delivery_address || "In-Store POS (Walk-in)")}</span></div>
           <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${sale.channel === "web" ? "WhatsApp" : "In-Store POS"}</span></div>
+          ${sale.cashier ? `<div class="rc-cust-row"><span class="rc-cust-k">Cashier:</span> <span class="rc-cust-v">${esc(sale.cashier.name || sale.cashier)}</span></div>` : ""}
         </div>
         <div class="rc-dashed"></div>
         <table class="rc-table">
