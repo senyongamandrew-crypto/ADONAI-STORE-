@@ -10,6 +10,8 @@
 <link rel="stylesheet" href="styles.css?v=3.1" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="apple-touch-icon" href="assets/favicon.svg" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1A1612" />
 </head>
 <body>
 <div class="app" id="shell">
@@ -362,9 +364,10 @@
 <!-- ============ THERMAL RECEIPT (print-only, 80mm) ============ -->
 <div id="receiptSheet"></div>
 
+<script src="js/analytics.js"></script>
 <script src="js/db.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/intake.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=3.1"></script>
 </body>
 </html>

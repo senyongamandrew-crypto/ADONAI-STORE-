@@ -147,11 +147,85 @@
     }).join("");
   }
 
-  $("#demoChips").addEventListener("click", e => { const b = e.target.closest("[data-demo]"); if (!b) return; fDemo = b.dataset.demo; renderChips(); renderGrid(); });
-  $("#catChips").addEventListener("click", e => { const b = e.target.closest("[data-catv]"); if (!b) return; fCat = b.dataset.catv; renderChips(); renderGrid(); });
+  function updateDynamicSEO() {
+    let title = "Adonai Thrift Store | Quality Apparel & Thrift Fashion in Kampala";
+    if (fCat !== "All" && fDemo !== "All") {
+      title = `${fDemo}'s ${fCat} | Curated Vintage | Adonai Thrift Store Kampala`;
+    } else if (fCat !== "All") {
+      title = `Curated Vintage ${fCat} | Adonai Thrift Store Kampala`;
+    } else if (fDemo !== "All") {
+      title = `${fDemo}'s Vintage Fashion | Adonai Thrift Store Kampala`;
+    }
+    document.title = title;
+  }
+
+  function matchesSearch(p, query) {
+    if (!query) return true;
+    const tokens = query.split(/\s+/).filter(Boolean);
+    const searchable = [
+      p.name, p.brand, p.color, p.category, p.demographic,
+      p.sku, p.barcode_id, p.size, p.condition, p.desc
+    ].join(" ").toLowerCase();
+
+    return tokens.every(token => {
+      if (searchable.includes(token)) return true;
+      if (token.length >= 4) {
+        const words = searchable.split(/\s+/);
+        return words.some(w => levenshteinDist(w.slice(0, token.length + 1), token) <= 1);
+      }
+      return false;
+    });
+  }
+
+  function levenshteinDist(a, b) {
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    const m = [];
+    for (let i = 0; i <= b.length; i++) m[i] = [i];
+    for (let j = 0; j <= a.length; j++) m[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        m[i][j] = b[i - 1] === a[j - 1] ? m[i - 1][j - 1] : Math.min(m[i - 1][j - 1] + 1, m[i][j - 1] + 1, m[i - 1][j] + 1);
+      }
+    }
+    return m[b.length][a.length];
+  }
+
+  $("#demoChips").addEventListener("click", e => {
+    const b = e.target.closest("[data-demo]");
+    if (!b) return;
+    fDemo = b.dataset.demo;
+    renderChips();
+    renderGrid();
+    updateDynamicSEO();
+  });
+
+  $("#catChips").addEventListener("click", e => {
+    const b = e.target.closest("[data-catv]");
+    if (!b) return;
+    fCat = b.dataset.catv;
+    renderChips();
+    renderGrid();
+    updateDynamicSEO();
+  });
+
   $("#sizeSel").addEventListener("change", e => { fSize = e.target.value; renderGrid(); });
   $("#condSel").addEventListener("change", e => { fCond = e.target.value; renderGrid(); });
-  $("#shopSearch").addEventListener("input", e => { term = e.target.value.trim().toLowerCase(); renderGrid(); });
+
+  let searchDebounceTimer = null;
+  $("#shopSearch").addEventListener("input", e => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      term = e.target.value.trim().toLowerCase();
+      renderGrid();
+      if (window.AdonaiAnalytics && term) {
+        const visibleCount = $("#productGrid").children.length;
+        window.AdonaiAnalytics.trackSearch(term, visibleCount);
+      }
+    }, 300);
+  });
+
   $("#priceRange").addEventListener("input", e => {
     fMax = Number(e.target.value);
     $("#priceVal").textContent = DB.ugx(fMax);
@@ -174,9 +248,9 @@
   /* ---------- product card with multi-angle preview ---------- */
   function mediaHTML(p, photos, disc) {
     const mainImg = photos[0] || p.image_url;
-    const img = mainImg ? `<img src="${esc(mainImg)}" alt="${esc(p.name)}" loading="lazy" />` : "";
+    const img = mainImg ? `<img src="${esc(mainImg)}" alt="${esc(p.name)}" width="400" height="500" loading="lazy" decoding="async" />` : "";
     const dots = photos.length > 1
-      ? `<div class="media-dots" title="Click to view all photo angles">${photos.map((src, i) => `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(src)}" alt="Angle ${i + 1}" /></i>`).join("")}</div>`
+      ? `<div class="media-dots" title="Click to view all photo angles">${photos.map((src, i) => `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(src)}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" /></i>`).join("")}</div>`
       : "";
     return `
       <div class="pmedia">
@@ -227,10 +301,13 @@
       .filter(p => fSize === "All" || p.size === fSize)
       .filter(p => fCond === "All" || p.condition === fCond)
       .filter(p => p.selling_price <= fMax)
-      .filter(p => !term || [p.name, p.brand, p.color, p.category, p.sku, p.barcode_id, p.desc].join(" ").toLowerCase().includes(term))
+      .filter(p => matchesSearch(p, term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#gridEmpty").hidden = list.length > 0;
     grid.innerHTML = list.map(cardHTML).join("");
+    if (window.AdonaiAnalytics && list.length > 0) {
+      window.AdonaiAnalytics.trackViewItemList(list, fCat !== "All" ? fCat : (fDemo !== "All" ? fDemo : "All"));
+    }
   }
 
   $("#productGrid").addEventListener("click", e => {
@@ -277,12 +354,17 @@
     renderProductModal(p);
     $("#prodBackdrop").classList.add("open");
     document.body.classList.add("modal-open");
+    if (window.AdonaiAnalytics) {
+      window.AdonaiAnalytics.trackViewItem(p);
+    }
+    document.title = `${p.name} — ${DB.ugx(p.selling_price)} | Adonai Thrift Store Kampala`;
   }
 
   function closeProductModal() {
     $("#prodBackdrop").classList.remove("open");
     document.body.classList.remove("modal-open");
     activeModalProductId = null;
+    updateDynamicSEO();
   }
 
   function renderProductModal(p) {
@@ -425,6 +507,9 @@
     if (line) line.qty++; else cart.push({ product_id: id, qty: 1 });
     saveCart(); renderCart();
     toast(`${p.name} added to your bag`);
+    if (window.AdonaiAnalytics) {
+      window.AdonaiAnalytics.trackAddToCart(p, 1);
+    }
     openCart();
   }
 
@@ -452,7 +537,14 @@
     notes: ""
   };
 
-  function openCart() { document.body.classList.add("cart-open"); }
+  function openCart() {
+    document.body.classList.add("cart-open");
+    if (window.AdonaiAnalytics && cart.length > 0) {
+      const lines = cartLines();
+      const total = lines.reduce((s, x) => s + x.sub, 0);
+      window.AdonaiAnalytics.trackBeginCheckout(lines.map(x => x.p), total);
+    }
+  }
   function closeCart() { document.body.classList.remove("cart-open"); }
   $("#cartBtn").addEventListener("click", openCart);
   $("#closeCart").addEventListener("click", closeCart);
@@ -510,7 +602,7 @@
     $("#cartBody").innerHTML = `
       ${lines.map(({ line, p, sub }) => `
         <div class="cart-line-card">
-          <span class="line-thumb">${catIcon(p.category)}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span>
+          <span class="line-thumb">${catIcon(p.category)}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" width="48" height="48" onerror="this.remove()" />` : ""}</span>
           <div class="line-details">
             <div class="line-title">${esc(p.name)}</div>
             <div class="line-sku">${esc(p.sku || p.barcode_id || p.id)}</div>
@@ -520,6 +612,12 @@
         </div>`).join("")}
 
       <div class="claim-form">
+        <!-- Anti-Spam Bot Trap (Honeypot) -->
+        <div style="display:none !important; position:absolute; left:-9999px;">
+          <input type="text" id="hp_company" name="hp_company" tabindex="-1" autocomplete="off" />
+          <input type="text" id="hp_website" name="hp_website" tabindex="-1" autocomplete="off" />
+        </div>
+
         <input class="claim-input" id="coName" placeholder="Your Full Name *" autocomplete="name" value="${esc(formState.name)}" required />
         <input class="claim-input" id="coPhone" placeholder="WhatsApp Phone Number (e.g. 0758873398) *" autocomplete="tel" value="${esc(formState.phone)}" required />
 
@@ -572,26 +670,37 @@
   $("#cartBody").addEventListener("click", e => {
     const rm = e.target.closest("[data-rm]");
     if (rm) {
+      const p = products.find(x => x.id === rm.dataset.rm);
       cart = cart.filter(x => x.product_id !== rm.dataset.rm);
       saveCart();
       renderCart();
+      if (p && window.AdonaiAnalytics) {
+        window.AdonaiAnalytics.trackRemoveFromCart(p);
+      }
     }
   });
 
   /* ---------- WhatsApp checkout ---------- */
   async function checkout() {
     const btn = $("#waCheckout");
+    const hpCompany = $("#hp_company") ? $("#hp_company").value.trim() : "";
+    const hpWebsite = $("#hp_website") ? $("#hp_website").value.trim() : "";
+    if (hpCompany || hpWebsite) {
+      console.warn("[AntiSpam] Bot submission trapped");
+      return;
+    }
+
     const name = formState.name.trim();
     const phone = formState.phone.trim();
     const address = formState.address.trim();
     const notes = formState.notes.trim();
 
-    if (!name) {
-      toast("Please enter your name");
+    if (!name || name.length < 2) {
+      toast("Please enter your full name");
       const el = $("#coName"); if (el) el.focus();
       return;
     }
-    if (!phone) {
+    if (!phone || phone.length < 7) {
       toast("Please enter your WhatsApp phone number");
       const el = $("#coPhone"); if (el) el.focus();
       return;
@@ -605,7 +714,7 @@
 
     const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
     const deliveryFee = deliveryType === "pickup" ? 0 : areaObj.fee;
-    const areaName = deliveryType === "pickup" ? "Store Pickup (Mercer Hub / Plot 45 Salama Road)" : areaObj.name;
+    const areaName = deliveryType === "pickup" ? "Store Pickup (Plot 45 Salama Road / Kibuli)" : areaObj.name;
 
     btn.disabled = true;
     btn.textContent = "Reserving your pieces…";
@@ -622,9 +731,13 @@
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
 
+      if (window.AdonaiAnalytics) {
+        window.AdonaiAnalytics.trackPurchaseViaWhatsApp(order);
+      }
+
       const totalItems = order.items.reduce((a, b) => a + b.qty, 0);
       const deliveryLocStr = deliveryType === "pickup"
-        ? "Store Pickup (Mercer Hub / Plot 45 Salama Road)"
+        ? "Store Pickup (Plot 45 Salama Road / Kibuli)"
         : (address ? `${areaName} - ${address}` : areaName);
 
       const msgLines = [
@@ -643,7 +756,7 @@
       ].filter(Boolean);
 
       const fullMsg = msgLines.join("\n");
-      const waNumber = (DB.getSettings().whatsapp || "256758893398").replace(/[^0-9]/g, "");
+      const waNumber = (DB.getSettings().whatsapp || "256758873398").replace(/[^0-9]/g, "");
       const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(fullMsg)}`;
 
       orderResult = {

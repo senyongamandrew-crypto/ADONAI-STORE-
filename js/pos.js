@@ -448,6 +448,9 @@
       closeTender();
       refreshProducts();                 // stock now lower; tiles re-render
       showReceipt(sale);
+      if (window.AdonaiAnalytics) {
+        window.AdonaiAnalytics.trackPosSale(sale);
+      }
       flash(`✓ Sale ${sale.id} completed — ${DB.ugx(sale.total)}`, true);
       setTimeout(() => window.print(), 400);  // auto thermal print
     } catch (err) {

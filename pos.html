@@ -3,13 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Adonai Store — POS Register</title>
+<title>Adonai Store — POS Register &amp; Checkout Terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=2.2" />
+<link rel="stylesheet" href="css/pos.css?v=2.3" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="apple-touch-icon" href="assets/favicon.svg" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1A1612" />
 </head>
 <body data-authed="false">
 
@@ -237,9 +239,10 @@
 <!-- ============ THERMAL RECEIPT (print-only, 80mm) ============ -->
 <div id="receiptSheet"></div>
 
+<script src="js/analytics.js"></script>
 <script src="js/db.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/intake.js"></script>
-<script src="js/pos.js"></script>
+<script src="js/pos.js?v=2.3"></script>
 </body>
 </html>
