@@ -3,21 +3,70 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Adonai — POS Register</title>
+<title>Adonai Store — POS Register &amp; Checkout Terminal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=2.1" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23C24E2B'/><text x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='Georgia'>T</text></svg>" />
+<link rel="stylesheet" href="css/pos.css?v=2.3" />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+<link rel="apple-touch-icon" href="assets/favicon.svg" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1A1612" />
 </head>
 <body data-authed="false">
 
 <div id="appShell" class="pos-app">
 
+  <!-- ============ SIDEBAR MENU DRAWER (POS) ============ -->
+  <aside class="sidebar pos-sidebar" id="posSidebar" aria-label="POS navigation">
+    <div class="sb-head-row">
+      <div class="brand">
+        <img class="pos-brand-logo" src="assets/adonai-logo-horizontal-light.svg" alt="Adonai Store" width="180" height="42" style="max-height:40px;width:auto;display:block;" />
+      </div>
+      <button class="sb-close-btn" id="closePosSidebar" type="button" aria-label="Close menu">✕</button>
+    </div>
+    <div class="brand-meta">
+      <span>Kampala, Uganda</span>
+      <span class="ver-chip">POS v2.2</span>
+    </div>
+
+    <nav class="nav" id="posNavList">
+      <a class="nav-item active" href="pos.html" title="Open the cashier register"><span class="nav-ico">📥</span><span>POS Register</span></a>
+      <a class="nav-item" href="admin.html#sales"><span class="nav-ico">📦</span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
+      <a class="nav-item" href="admin.html#inventory"><span class="nav-ico">🔖</span><span>Inventory Rack</span></a>
+      <a class="nav-item" href="admin.html#intake"><span class="nav-ico">➕</span><span>Catalog Intake</span></a>
+      <a class="nav-item" href="admin.html#customers"><span class="nav-ico">👥</span><span>Customer Book</span></a>
+      <a class="nav-item" href="admin.html#dispatch"><span class="nav-ico">🛵</span><span>Boda Riders &amp; Dispatch</span></a>
+      <a class="nav-item" href="admin.html#overview"><span class="nav-ico">📊</span><span>Sales Analytics</span></a>
+      <a class="nav-item" href="admin.html#payments"><span class="nav-ico">📒</span><span>Financial Ledger</span></a>
+      <a class="nav-item" href="admin.html#staff"><span class="nav-ico">🔑</span><span>Staff &amp; Permissions</span></a>
+      <a class="nav-item" href="admin.html#settings"><span class="nav-ico">⚙️</span><span>Store Settings</span></a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="install-card" id="posSidebarInstall">
+        <span class="nav-ico">⬇️</span>
+        <div><strong>Install POS App on Phone</strong><span>Add to home screen</span></div>
+      </div>
+      <div class="me-card">
+        <span class="me-avatar" id="posMeAvatar">S</span>
+        <div>
+          <strong id="posMeName">Staff</strong>
+          <span id="posMeRole">open access</span>
+        </div>
+      </div>
+      <div class="foot-actions">
+        <a class="mini-link" href="admin.html">Operations Console →</a>
+        <button class="mini-link" id="btnPosSbExit" type="button">Exit POS</button>
+      </div>
+    </div>
+  </aside>
+  <div class="sb-scrim" id="posSbScrim"></div>
+
   <!-- ============ CONSOLE TOPBAR (reference register) ============ -->
   <header class="pos-head">
     <div class="pillrow">
-      <a class="pill" href="admin.html">☰ Menu</a>
+      <button class="pill" id="btnPosMenu" type="button" title="Open Navigation Menu">☰ Menu</button>
     </div>
     <div class="head-right">
       <span class="pill live" id="netPill"><span class="dot"></span>Sync Live</span>
@@ -50,7 +99,7 @@
         <input id="barcodeInput" class="barcode-in" type="text" inputmode="text"
                placeholder="Scan barcode or type SKU (e.g. ADN-DEN-1001, ADN-MEN-1002)…" autocomplete="off" />
         <button class="lookup-btn" id="btnLookup" title="Look up scanned code">Lookup</button>
-        <button class="cam-btn" id="btnCamera" title="Use camera for intake photo">📷 Camera</button>
+        <button class="cam-btn" id="btnCamera" title="Upload item photo from gallery or local files">📁 Upload Photo</button>
       </div>
 
       <div class="drow" id="posDemos"></div>
@@ -91,6 +140,35 @@
       <div class="tender-head">
         <h3>Settle payment</h3>
         <div class="due">Due: <strong id="dueAmount">UGX 0</strong></div>
+      </div>
+
+      <!-- Walk-in Customer Details (for receipt & customer book) -->
+      <div class="pos-cust-block">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <label class="fld-label" style="margin:0; font-weight:700; color:var(--ink);">👤 Customer Details (Printed on Receipt)</label>
+          <span style="font-size:11px; color:var(--muted); font-weight:600;">* Required</span>
+        </div>
+        <div class="grid2">
+          <div>
+            <label class="fld-sublabel" for="posCustName">Customer Name *</label>
+            <input id="posCustName" class="in" type="text" placeholder="e.g. Nakato Sarah" autocomplete="name" required />
+          </div>
+          <div>
+            <label class="fld-sublabel" for="posCustPhone">Phone Number *</label>
+            <input id="posCustPhone" class="in" type="tel" placeholder="07XX 000 000" autocomplete="tel" required />
+          </div>
+        </div>
+        <div class="grid2" style="margin-top:8px;">
+          <div>
+            <label class="fld-sublabel" for="posCustLocation">Location / Area (Optional)</label>
+            <input id="posCustLocation" class="in" type="text" placeholder="e.g. Salama Rd / Kibuli" />
+          </div>
+          <div>
+            <label class="fld-sublabel" for="posCustNotes">Receipt Note / Memo (Optional)</label>
+            <input id="posCustNotes" class="in" type="text" placeholder="e.g. Regular VIP client" />
+          </div>
+        </div>
+      </div>
       </div>
 
       <div class="tender-tabs">
@@ -161,9 +239,10 @@
 <!-- ============ THERMAL RECEIPT (print-only, 80mm) ============ -->
 <div id="receiptSheet"></div>
 
+<script src="js/analytics.js"></script>
 <script src="js/db.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/intake.js"></script>
-<script src="js/pos.js"></script>
+<script src="js/pos.js?v=2.3"></script>
 </body>
 </html>

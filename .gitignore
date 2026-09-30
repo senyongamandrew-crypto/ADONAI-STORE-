@@ -1,0 +1,22 @@
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Local Database Files
+*.db
+*.sqlite
+*.sqlite3
+adonai.db
+
+# Secrets & Environment
+.env
+.env.local
+
+# Logs
+*.log

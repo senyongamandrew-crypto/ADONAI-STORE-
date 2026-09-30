@@ -21,6 +21,40 @@
   $("#meRole").className = "role";
   $(".avatar", $("#mePill")).textContent = (cashier.name || "S").charAt(0).toUpperCase();
 
+  const posMeName = $("#posMeName");
+  if (posMeName) posMeName.textContent = cashier.name;
+  const posMeRole = $("#posMeRole");
+  if (posMeRole) posMeRole.textContent = Auth.locked() ? ("Role: " + cashier.role.toUpperCase()) : "Open access · Staff";
+  const posMeAvatar = $("#posMeAvatar");
+  if (posMeAvatar) posMeAvatar.textContent = (cashier.name || "S").charAt(0).toUpperCase();
+
+  function updatePosNavBadge() {
+    const webPend = DB.listSales().filter(s => s.channel === "web" && s.status === "pending").length;
+    const badge = $("#posNavWebBadge");
+    if (badge) badge.textContent = webPend || "";
+  }
+
+  const openPosMenu = () => {
+    document.body.classList.add("sb-open");
+    updatePosNavBadge();
+  };
+  const closePosMenu = () => {
+    document.body.classList.remove("sb-open");
+  };
+
+  const btnPosMenu = $("#btnPosMenu");
+  if (btnPosMenu) btnPosMenu.addEventListener("click", openPosMenu);
+  const closePosSidebar = $("#closePosSidebar");
+  if (closePosSidebar) closePosSidebar.addEventListener("click", closePosMenu);
+  const posSbScrim = $("#posSbScrim");
+  if (posSbScrim) posSbScrim.addEventListener("click", closePosMenu);
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && document.body.classList.contains("sb-open")) {
+      closePosMenu();
+    }
+  });
+
   function setNet() {
     const online = navigator.onLine;
     const pill = $("#netPill");
@@ -31,10 +65,13 @@
   window.addEventListener("offline", setNet);
   setNet();
 
-  $("#btnExit").addEventListener("click", () => {
+  const doExitPos = () => {
     Auth.signOut();                       // revoke staff privileges
     location.href = "index.html";         // back to public storefront
-  });
+  };
+  $("#btnExit").addEventListener("click", doExitPos);
+  const btnPosSbExit = $("#btnPosSbExit");
+  if (btnPosSbExit) btnPosSbExit.addEventListener("click", doExitPos);
 
   /* ---------- sound feedback ---------- */
   let actx = null;
@@ -107,15 +144,18 @@
   });
   $("#btnCamera").addEventListener("click", () => {
     openIntake();
-    flash("📷 Camera opens your device photo capture — snap the piece, tag it, save.", true);
+    flash("📁 Choose an item to update its photo or add a new piece from gallery/files.", true);
     setTimeout(() => openIntakeEditor(null), 350);
   });
   let installPromptEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPromptEvt = e; });
-  $("#btnInstall").addEventListener("click", () => {
+  const triggerInstall = () => {
     if (installPromptEvt) { installPromptEvt.prompt(); installPromptEvt = null; }
     else flash("Use browser menu → “Add to Home screen” to install the POS app.", true);
-  });
+  };
+  $("#btnInstall").addEventListener("click", triggerInstall);
+  const posSidebarInstall = $("#posSidebarInstall");
+  if (posSidebarInstall) posSidebarInstall.addEventListener("click", triggerInstall);
 
   function handleScan(code) {
     const p = DB.findByBarcode(code);
@@ -170,13 +210,13 @@
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#tileGrid").innerHTML = list.length ? list.map(p => {
       const out = p.in_stock_count <= 0;
-      const img = p.image_url ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" onerror="this.remove()" />` : "";
+      const img = p.image_url ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" />` : "";
       return `
       <button class="tile" data-tile="${esc(p.id)}" ${out ? "disabled" : ""}>
-        <span class="tile-img">${EMOJI[p.category] || "🏷️"}${img}<span class="tile-chip">${esc(p.demographic)} - ${esc(p.category)}</span></span>
+        <span class="tile-img">${img || (EMOJI[p.category] || "🏷️")}</span>
         <span class="tile-body">
           <span class="t-name">${esc(p.name)}</span>
-          <span class="t-meta">Size ${esc(p.size)} · ${esc(p.condition)} · ${esc(p.barcode_id)}</span>
+          <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${esc(p.condition)}</span>
           <span class="t-row">
             <span class="t-price">${DB.ugx(p.selling_price)}</span>
             <span class="stock-dot ${out ? "out" : ""}">${out ? "SOLD" : p.in_stock_count + " left"}</span>
@@ -277,12 +317,24 @@
     if (!cartDetailed().length) return;
     tenderType = "cash";
     syncTenderUI();
+    if ($("#posCustName")) $("#posCustName").value = "";
+    if ($("#posCustPhone")) $("#posCustPhone").value = "";
+    if ($("#posCustLocation")) $("#posCustLocation").value = "";
+    if ($("#posCustNotes")) $("#posCustNotes").value = "";
     $("#cashTendered").value = "";
-    $("#momoName").value = ""; $("#momoPhone").value = ""; $("#momoRef").value = ""; $("#momoVerified").checked = false;
+    $("#momoName").value = "";
+    $("#momoPhone").value = "";
+    delete $("#momoName").dataset.customized;
+    delete $("#momoPhone").dataset.customized;
+    $("#momoRef").value = "";
+    $("#momoVerified").checked = false;
     $("#dueAmount").textContent = DB.ugx(cartTotal());
     $("#tenderBackdrop").classList.add("open");
     updateChange();
-    setTimeout(() => $("#cashTendered").focus(), 60);
+    setTimeout(() => {
+      if ($("#posCustName")) $("#posCustName").focus();
+      else $("#cashTendered").focus();
+    }, 60);
   }
   function closeTender() { $("#tenderBackdrop").classList.remove("open"); }
 
@@ -290,6 +342,14 @@
     $$(".ttab").forEach(t => t.classList.toggle("active", t.dataset.tender === tenderType));
     $("#pane-cash").classList.toggle("active", tenderType === "cash");
     $("#pane-momo").classList.toggle("active", tenderType !== "cash");
+    if (tenderType !== "cash") {
+      if (!$("#momoName").dataset.customized && $("#posCustName")) {
+        $("#momoName").value = $("#posCustName").value;
+      }
+      if (!$("#momoPhone").dataset.customized && $("#posCustPhone")) {
+        $("#momoPhone").value = $("#posCustPhone").value;
+      }
+    }
     validateTender();
   }
   $(".tender-tabs").addEventListener("click", e => {
@@ -314,13 +374,32 @@
     updateChange(); validateTender();
   });
 
-  ["#momoName", "#momoPhone", "#momoRef"].forEach(s => $(s).addEventListener("input", validateTender));
+  ["#posCustName", "#posCustPhone", "#posCustLocation", "#posCustNotes"].forEach(sel => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener("input", () => {
+      if (sel === "#posCustName" && tenderType !== "cash" && !$("#momoName").dataset.customized) {
+        $("#momoName").value = el.value;
+      }
+      if (sel === "#posCustPhone" && tenderType !== "cash" && !$("#momoPhone").dataset.customized) {
+        $("#momoPhone").value = el.value;
+      }
+      validateTender();
+    });
+  });
+
+  $("#momoName").addEventListener("input", () => { $("#momoName").dataset.customized = "true"; validateTender(); });
+  $("#momoPhone").addEventListener("input", () => { $("#momoPhone").dataset.customized = "true"; validateTender(); });
+  $("#momoRef").addEventListener("input", validateTender);
   $("#momoVerified").addEventListener("change", validateTender);
 
   function validateTender() {
     const due = cartTotal();
+    const custName = $("#posCustName") ? $("#posCustName").value.trim() : "";
+    const custPhone = $("#posCustPhone") ? $("#posCustPhone").value.trim() : "";
+    const hasCustomer = custName.length > 0 && custPhone.length > 0;
     let ok = false;
-    if (due > 0) {
+    if (due > 0 && hasCustomer) {
       if (tenderType === "cash") ok = (Number($("#cashTendered").value) || 0) >= due;
       else ok = $("#momoRef").value.trim().length >= 4 && $("#momoVerified").checked;
     }
@@ -339,24 +418,39 @@
   $("#tenderConfirm").addEventListener("click", async () => {
     const btn = $("#tenderConfirm");
     btn.disabled = true; btn.textContent = "Processing…";
+    const custName = $("#posCustName") ? $("#posCustName").value.trim() : "";
+    const custPhone = $("#posCustPhone") ? $("#posCustPhone").value.trim() : "";
+    const custLoc = $("#posCustLocation") ? $("#posCustLocation").value.trim() : "";
+    const custNotes = $("#posCustNotes") ? $("#posCustNotes").value.trim() : "";
     const items = cartDetailed().map(({ l }) => ({ product_id: l.product_id, qty: l.qty }));
     const tender = tenderType === "cash"
       ? { type: "cash", tendered: Number($("#cashTendered").value) || 0 }
       : {
           type: tenderType,
-          sender_name: $("#momoName").value.trim(),
-          sender_phone: $("#momoPhone").value.trim(),
+          sender_name: $("#momoName").value.trim() || custName,
+          sender_phone: $("#momoPhone").value.trim() || custPhone,
           ref: $("#momoRef").value.trim(),
           verified: $("#momoVerified").checked,
           verified_by: cashier.name
         };
     try {
-      const sale = await DB.processPosSale({ items, tender, cashier });
+      const sale = await DB.processPosSale({
+        items,
+        tender,
+        cashier,
+        customer_name: custName || "Walk-in Guest",
+        customer_phone: custPhone || "",
+        customer_location: custLoc,
+        customer_notes: custNotes
+      });
       lastSale = sale;
       cart = [];
       closeTender();
       refreshProducts();                 // stock now lower; tiles re-render
       showReceipt(sale);
+      if (window.AdonaiAnalytics) {
+        window.AdonaiAnalytics.trackPosSale(sale);
+      }
       flash(`✓ Sale ${sale.id} completed — ${DB.ugx(sale.total)}`, true);
       setTimeout(() => window.print(), 400);  // auto thermal print
     } catch (err) {
@@ -370,37 +464,107 @@
   });
 
   /* ---------- receipt (80mm thermal + on-screen preview) ---------- */
+  function receiptDateFormat(dateStr) {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    const dayName = d.toLocaleDateString("en-GB", { weekday: "long" });
+    const dayNum = d.toLocaleDateString("en-GB", { day: "numeric" });
+    const monthName = d.toLocaleDateString("en-GB", { month: "long" });
+    return `${dayName}, ${dayNum} ${monthName}`;
+  }
+  function receiptTimeFormat(dateStr) {
+    const d = dateStr ? new Date(dateStr) : new Date();
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
   function receiptHTML(sale) {
-    const s = DB.getSettings();
-    const when = new Date(sale.created_at);
-    const dt = when.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) + " " +
-               when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-    let tenderBlock = "";
-    if (sale.tender.type === "cash") {
-      tenderBlock = `<tr><td>CASH</td><td class="r">${DB.ugx(sale.tender.tendered)}</td></tr>
-                     <tr><td>CHANGE</td><td class="r">${DB.ugx(sale.tender.change || 0)}</td></tr>`;
-    } else if (sale.tender.type === "mtn" || sale.tender.type === "airtel") {
-      const label = sale.tender.type === "mtn" ? "MTN MoMo" : "Airtel Money";
-      tenderBlock = `<tr><td>${label.toUpperCase()}</td><td class="r">${DB.ugx(sale.total)}</td></tr>
-                     <tr><td colspan="2">Ref: ${esc(sale.tender.ref || "-")}${sale.tender.sender_name ? " · " + esc(sale.tender.sender_name) : ""}</td></tr>`;
-    }
-    const rows = sale.items.map(l => `
-      <tr><td>${esc(l.name)}<br/><small>${l.qty} × ${DB.ugx(l.unit_price)}</small></td><td class="r">${DB.ugx(l.line_total)}</td></tr>`).join("");
+    const S = DB.getSettings();
+    const totalQty = sale.items.reduce((a, b) => a + b.qty, 0);
+    const subtotal = sale.subtotal || (sale.total - (sale.delivery_fee || 0));
     return `
-      <div class="rc">
-        <div class="store">${esc(s.store_name).toUpperCase()}</div>
-        <div class="meta">${esc(s.tagline)}<br/>${esc(s.address)} · WhatsApp +${esc(s.whatsapp)}</div>
-        <hr/>
-        <div class="meta">${dt}<br/>Served by: ${esc(sale.cashier ? sale.cashier.name : "Staff")}</div>
-        <hr/>
-        <table>${rows}
-          <tr class="tot"><td>TOTAL</td><td class="r">${DB.ugx(sale.total)}</td></tr>
-          ${tenderBlock}
+      <div class="receipt-paper">
+        <div class="rc-brand">
+          <img src="assets/adonai-logo-stacked.svg" alt="Adonai Store" class="rc-logo-img" style="width:115px;max-width:48mm;height:auto;margin:0 auto 4px;display:block;" />
+          <div class="rc-sub">CURATED VINTAGE · KAMPALA</div>
+        </div>
+        <div class="rc-meta-top">
+          <strong>${esc(S.store_name || "Adonai Store")}</strong><br/>
+          ${esc(S.address || "Plot 45 Salama Road / kibuli Kampala, Uganda")}<br/>
+          Phone: ${esc(S.hotline || "+256 7656 52403")} | WhatsApp: ${esc(S.whatsapp_display || "+256 7588 73398")}<br/>
+          <span class="rc-tiktok">TikTok: ${esc(S.tiktok || "@adonai.thrift256")}</span>
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-ref-row">
+          <span>RECEIPT / INVOICE REF:</span>
+          <strong>${esc(sale.id)}</strong>
+        </div>
+        <div class="rc-datetime-row">
+          <span>Date: ${receiptDateFormat(sale.created_at)}</span>
+          <span>Time: ${receiptTimeFormat(sale.created_at)}</span>
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-cust-box">
+          <div class="rc-cust-row"><span class="rc-cust-k">Customer:</span> <strong class="rc-cust-v">${esc(sale.customer_name || "Walk-in Guest")}</strong></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Phone:</span> <span class="rc-cust-v">${esc(sale.customer_phone || "—")}</span></div>
+          ${sale.customer_location ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.customer_location)}</span></div>` : (sale.delivery_area && sale.delivery_area !== "In-Store POS (Walk-in)" ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.delivery_area)}</span></div>` : "")}
+          ${sale.customer_notes ? `<div class="rc-cust-row"><span class="rc-cust-k">Notes:</span> <span class="rc-cust-v">${esc(sale.customer_notes)}</span></div>` : ""}
+          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${sale.channel === "web" ? "Online WhatsApp" : "In-Store POS (Walk-in)"}</span></div>
+          ${sale.cashier ? `<div class="rc-cust-row"><span class="rc-cust-k">Cashier:</span> <span class="rc-cust-v">${esc(sale.cashier.name || sale.cashier)}</span></div>` : ""}
+        </div>
+        <div class="rc-dashed"></div>
+        <table class="rc-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">ITEM / SIZE</th>
+              <th style="text-align:center">QTY</th>
+              <th style="text-align:right">PRICE</th>
+              <th style="text-align:right">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sale.items.map(it => `
+              <tr>
+                <td style="text-align:left">
+                  <div class="rc-it-name">${esc(it.name)}</div>
+                  <div class="rc-it-sku">${esc(it.sku || it.barcode_id || "")}</div>
+                </td>
+                <td style="text-align:center">${it.qty}</td>
+                <td style="text-align:right">${DB.ugx(it.unit_price)}</td>
+                <td style="text-align:right">${DB.ugx(it.line_total)}</td>
+              </tr>
+            `).join("")}
+          </tbody>
         </table>
-        <hr/>
-        <div class="order-id">${esc(sale.id)}</div>
-        <div class="foot">Items sold are unique thrift pieces.<br/>Thank you for shopping at ${esc(s.store_name)}! 🙏</div>
-      </div>`;
+        <div class="rc-dashed"></div>
+        <div class="rc-sum-section">
+          <div class="rc-sum-row">
+            <span>Item Subtotal (${totalQty} items)</span>
+            <span>${DB.ugx(subtotal)}</span>
+          </div>
+          ${sale.delivery_fee > 0 ? `
+            <div class="rc-sum-row">
+              <span>Rider Delivery Fee</span>
+              <span>${DB.ugx(sale.delivery_fee)}</span>
+            </div>
+          ` : ""}
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-grand-row">
+          <strong>TOTAL PAID (UGX)</strong>
+          <strong class="rc-grand-total">${DB.ugx(sale.total)}</strong>
+        </div>
+        <div class="rc-pay-method">
+          PAYMENT METHOD: ${(sale.tender && sale.tender.paid && sale.tender.type === "cash") ? "CASH · COMPLETED" : (sale.tender && sale.tender.paid && sale.tender.type === "mtn") ? "MTN MOMO · VERIFIED" : (sale.tender && sale.tender.paid && sale.tender.type === "airtel") ? "AIRTEL MONEY · VERIFIED" : (sale.tender && sale.tender.paid) ? `${sale.tender.type.toUpperCase()} · PAID` : "UNPAID · UNPAID"}
+        </div>
+        <div class="rc-dashed"></div>
+        <div class="rc-notice">
+          Notice: Returns or exchanges are strictly accepted within 2 days of purchase upon presentation of a valid receipt.
+        </div>
+        <div class="rc-barcode-area">
+          <div class="rc-barcode-render">${DB.barcodeSVG(sale.id, 44)}</div>
+          <div class="rc-barcode-code">* ${esc(sale.id)} *</div>
+        </div>
+      </div>
+    `;
   }
 
   function showReceipt(sale) {
@@ -506,12 +670,14 @@
       try {
         if (sv.dataset.intakeSave) {
           await DB.updateProduct(sv.dataset.intakeSave, v);
-          flash("✓ Item updated — live on the storefront now", true);
+          flash("✓ Item and photo updated — live across POS and storefront now", true);
         } else {
           const np = await DB.addProduct(v);
-          flash(`✓ ${np.name} added · barcode ${np.barcode_id}`, true);
+          flash(`✓ ${np.name} added with photo · barcode ${np.barcode_id}`, true);
         }
-        beep(true); closeIntake();
+        beep(true);
+        closeIntake();
+        refreshProducts();
       } catch (err) { flash("✗ " + err.message, false); beep(false); }
     }
   });

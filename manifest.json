@@ -1,0 +1,42 @@
+{
+  "name": "Adonai Thrift Store",
+  "short_name": "Adonai",
+  "description": "Curated pre-loved vintage fashion & apparel in Kampala, Uganda.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FAF7F2",
+  "theme_color": "#1A1612",
+  "icons": [
+    {
+      "src": "assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/adonai-mark.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["shopping", "lifestyle", "fashion"],
+  "shortcuts": [
+    {
+      "name": "Browse Collection",
+      "short_name": "Catalog",
+      "description": "View live rail inventory",
+      "url": "/#shop",
+      "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "POS Counter",
+      "short_name": "POS",
+      "description": "Cashier Register terminal",
+      "url": "/pos",
+      "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
+    }
+  ]
+}

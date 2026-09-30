@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Allow: /privacy-policy
+Allow: /terms-and-conditions
+Allow: /assets/
+Allow: /css/
+Allow: /js/
+Disallow: /admin
+Disallow: /pos
+Disallow: /login
+Disallow: /components/
+
+Sitemap: https://adonaithrift.ug/sitemap.xml

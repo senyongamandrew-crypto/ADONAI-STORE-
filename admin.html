@@ -3,28 +3,30 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Adonai — Operations Console</title>
+<title>Adonai Store — Operations Console</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=3.0" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23C24E2B'/><text x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='Georgia'>T</text></svg>" />
+<link rel="stylesheet" href="styles.css?v=3.1" />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+<link rel="apple-touch-icon" href="assets/favicon.svg" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#1A1612" />
 </head>
 <body>
 <div class="app" id="shell">
 
   <!-- ============ SIDEBAR (warm dark — matches reference console) ============ -->
   <aside class="sidebar" id="sidebar">
-    <div class="brand">
-      <div class="brand-mark">T</div>
-      <div>
-        <div class="brand-name">Adonai</div>
-        <div class="brand-sub">Thrift Store</div>
+    <div class="sb-head-row">
+      <div class="brand">
+        <img class="admin-brand-logo" src="assets/adonai-logo-horizontal-light.svg" alt="Adonai Store" width="180" height="42" style="max-height:40px;width:auto;display:block;" />
       </div>
+      <button class="sb-close-btn" id="closeSidebar" type="button" aria-label="Close menu">✕</button>
     </div>
     <div class="brand-meta">
       <span>Kampala, Uganda</span>
-      <span class="ver-chip">POS v2.1</span>
+      <span class="ver-chip">OPS v2.3</span>
     </div>
 
     <nav class="nav" id="navList">
@@ -85,36 +87,45 @@
       </div>
       <div class="kpis" id="kpiCards"></div>
 
-      <div class="card" style="margin-top:16px">
-        <div class="card-head">
-          <div><h3>Hourly Sales Breakdown (UGX)</h3><p class="muted small">Today's real-time transaction volume</p></div>
-          <span class="muted small" id="weekTotal"></span>
+      <div class="dash-grid-top">
+        <div class="card">
+          <div class="card-head">
+            <div><h3>Hourly Sales Breakdown (UGX)</h3><p class="muted small">Today's real-time transaction volume</p></div>
+            <span class="muted small" id="weekTotal"></span>
+          </div>
+          <canvas id="hourlyChart" height="150"></canvas>
         </div>
-        <canvas id="hourlyChart" height="150"></canvas>
+
+        <div class="dark-card" id="pollCard">
+          <div>
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+              <span class="poll-dot" id="pollDot"></span>
+              <span class="poll-tag">Live Order Polling</span>
+            </div>
+            <p id="pollText">No pending WhatsApp orders right now. The poller is watching every 5 seconds.</p>
+          </div>
+          <button class="dark-card-btn" data-goto="sales">View All Orders &amp; Deliveries →</button>
+        </div>
       </div>
 
-      <div class="dark-card" id="pollCard">
-        <span class="poll-dot" id="pollDot"></span> <span class="poll-tag">Polling</span>
-        <p id="pollText">No pending WhatsApp orders right now. The poller is watching every 5 seconds.</p>
-        <button class="dark-card-btn" data-goto="sales">View All Orders &amp; Deliveries →</button>
+      <div class="dash-grid-mid">
+        <div class="card">
+          <div class="card-head"><h3>Rack Inventory</h3></div>
+          <div id="rackBars"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Channels (UGX)</h3></div>
+          <div id="channelRows"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Boda Dispatch Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
+          <div id="riderPool"></div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="card-head"><h3>Rack Inventory</h3></div>
-        <div id="rackBars"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>Channels (UGX)</h3></div>
-        <div id="channelRows"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head"><h3>Boda Dispatch Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
-        <div id="riderPool"></div>
-      </div>
-
-      <div class="card">
+      <div class="card" style="margin-top:18px">
         <div class="card-head"><h3>Recent Transactions</h3><button class="btn ghost sm" data-goto="sales">All Orders &amp; Invoices →</button></div>
         <p class="muted small" style="margin:-6px 0 10px">Latest in-store and WhatsApp checkouts</p>
         <div id="recentTx"></div>
@@ -128,7 +139,10 @@
         <h1>Order Fulfillment</h1>
         <p class="muted" id="pendingLine"></p>
       </div>
-      <input class="search-wide" id="orderSearch" type="search" placeholder="Search order ref, customer, phone" />
+      <div class="fulfillment-filter-bar">
+        <input class="search-wide" id="orderSearch" type="search" placeholder="Search order ref, customer, phone" />
+        <div class="dpills" id="payFilterPills"></div>
+      </div>
       <div class="lane-tabs" id="laneTabs"></div>
       <div id="lanePanel"></div>
     </section>
@@ -214,8 +228,8 @@
 
         <h4 class="sec">4. Item Photos (4 Angles)</h4>
         <div class="photos-head">
-          <div><label class="flab">Multi-angle item photography (dual media capture)</label>
-            <p class="muted small">Choose Take Photo with Camera or Upload from Gallery</p></div>
+          <div><label class="flab">Multi-angle item photography (gallery &amp; local files)</label>
+            <p class="muted small">Upload high-resolution thrift photos from your gallery or local files</p></div>
           <span class="muted small" id="angleCount">0 / 4 angles</span>
         </div>
         <div class="photo-row" id="photoRow"></div>
@@ -347,9 +361,13 @@
 <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modalBox"></div></div>
 <div class="toast" id="toast"></div>
 
+<!-- ============ THERMAL RECEIPT (print-only, 80mm) ============ -->
+<div id="receiptSheet"></div>
+
+<script src="js/analytics.js"></script>
 <script src="js/db.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/intake.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=3.1"></script>
 </body>
 </html>

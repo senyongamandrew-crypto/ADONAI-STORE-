@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1612" />
+      <stop offset="50%" stop-color="#241E18" />
+      <stop offset="100%" stop-color="#120F0C" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D4AF37" />
+      <stop offset="100%" stop-color="#AA820A" />
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#9E2A2B" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#1A1612" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="1200" height="630" fill="url(#bgGrad)" />
+  <circle cx="600" cy="220" r="450" fill="url(#glow)" />
+
+  <!-- Outer Border Frame -->
+  <rect x="30" y="30" width="1140" height="570" rx="16" fill="none" stroke="#3D342A" stroke-width="2" />
+  <rect x="42" y="42" width="1116" height="546" rx="12" fill="none" stroke="#D4AF37" stroke-width="1" stroke-opacity="0.3" />
+
+  <!-- Top Badge -->
+  <g transform="translate(600, 110)">
+    <rect x="-140" y="-18" width="280" height="36" rx="18" fill="#2C231B" stroke="#D4AF37" stroke-width="1.5" />
+    <text text-anchor="middle" y="5" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="13" font-weight="700" letter-spacing="3" fill="#D4AF37">KAMPALA · CURATED VINTAGE</text>
+  </g>
+
+  <!-- Wordmark Logo -->
+  <g transform="translate(600, 240)">
+    <text text-anchor="middle" y="0" font-family="'Playfair Display', Georgia, serif" font-size="78" font-weight="800" letter-spacing="4" fill="#FAF7F2">ADONAI</text>
+    <text text-anchor="middle" y="52" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="20" font-weight="600" letter-spacing="14" fill="#D4AF37">THRIFT STORE</text>
+  </g>
+
+  <!-- Value Proposition Line -->
+  <text x="600" y="380" text-anchor="middle" font-family="'Playfair Display', Georgia, serif" font-size="28" font-style="italic" fill="#E6DFD5">Pre-loved pieces with plenty of life left.</text>
+
+  <!-- Feature Pills -->
+  <g transform="translate(600, 460)">
+    <!-- Pill 1 -->
+    <g transform="translate(-320, 0)">
+      <rect x="-110" y="-20" width="220" height="40" rx="20" fill="#221C16" stroke="#4A3F33" stroke-width="1" />
+      <text text-anchor="middle" y="6" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="14" font-weight="600" fill="#FAF7F2">✨ 1-of-1 Rare Finds</text>
+    </g>
+    <!-- Pill 2 -->
+    <g transform="translate(0, 0)">
+      <rect x="-110" y="-20" width="220" height="40" rx="20" fill="#221C16" stroke="#4A3F33" stroke-width="1" />
+      <text text-anchor="middle" y="6" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="14" font-weight="600" fill="#FAF7F2">🛵 Same-Day Boda</text>
+    </g>
+    <!-- Pill 3 -->
+    <g transform="translate(320, 0)">
+      <rect x="-110" y="-20" width="220" height="40" rx="20" fill="#221C16" stroke="#4A3F33" stroke-width="1" />
+      <text text-anchor="middle" y="6" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="14" font-weight="600" fill="#FAF7F2">📱 MTN &amp; Airtel MoMo</text>
+    </g>
+  </g>
+
+  <!-- Footer Location & URL -->
+  <text x="600" y="540" text-anchor="middle" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="14" font-weight="500" fill="#9E9182">Plot 45 Salama Road / Kibuli · Kampala, Uganda · adonaithrift.ug</text>
+</svg>
