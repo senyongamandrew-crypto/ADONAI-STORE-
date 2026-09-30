@@ -33,6 +33,10 @@ When you're ready to publish:
 
 From that moment `/pos` and `/admin` require a PIN at `/login` (cashiers always land on the terminal; admins can reach the dashboard). The public storefront stays open to everyone. "Log Out / Exit POS" revokes the session and returns to the storefront.
 
+### 🆘 Locked out? The environment master PIN always works
+
+Set **`ADMIN_ACCESS_PIN`** (4–8 digits) in the Render dashboard → your service → **Environment**. Typing that PIN on the `/login` keypad is verified **server-side** and always signs you in as **admin** — even if the staff PINs stored in the browser were never set, were lost, or were forgotten. Once in, go to **`/admin` → Staff & Access** to reset staff PINs or turn the lock off. (Staff PINs saved in the server database also work on the keypad via the same `/api/auth/verify` endpoint.)
+
 ## Architecture
 
 ```
