@@ -20,6 +20,7 @@ import io
 import mimetypes
 import os
 import socketserver
+import sys
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -175,7 +176,7 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    PORT = int(os.environ.get("PORT", "8080"))
+    PORT = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8080"))
     socketserver.ThreadingTCPServer.allow_reuse_address = True
     with socketserver.ThreadingTCPServer(("0.0.0.0", PORT), ProductionHandler) as srv:
         print(f"Adonai Thrift Store Production Server listening on 0.0.0.0:{PORT}")
