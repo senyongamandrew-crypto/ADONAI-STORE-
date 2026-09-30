@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: adonai-thrift-store
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --threads 2 --timeout 120
+    plan: starter
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: adonai-postgres
+          property: connectionString
+      - key: PORT
+        value: 10000
+      - key: DB_POOL_SIZE
+        value: 10
+      - key: DB_MAX_OVERFLOW
+        value: 20
+      - key: DB_POOL_RECYCLE
+        value: 300
+      - key: FORCE_HTTPS
+        value: true
+
+databases:
+  - name: adonai-postgres
+    databaseName: adonai_db
+    user: adonai_user
+    plan: starter

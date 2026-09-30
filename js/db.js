@@ -224,6 +224,22 @@
         subs.filter(s => s.table === "*" || true).forEach(s => { try { s.cb("*"); } catch (e) {} });
       });
       document.addEventListener("visibilitychange", () => { if (!document.hidden) { state = null; reload(); subs.filter(s => s.table === "*").forEach(s => s.cb("reload")); } });
+
+      // Hydrate state from Render PostgreSQL backend if live
+      try {
+        fetch("/api/sync/pull", { method: "POST" })
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (data && Array.isArray(data.products) && data.products.length > 0) {
+              reload();
+              state.products = data.products;
+              if (Array.isArray(data.sales) && data.sales.length > 0) state.sales = data.sales;
+              save();
+              broadcast("*");
+            }
+          })
+          .catch(() => {});
+      } catch (e) {}
     }
   }
   initRealtime();
