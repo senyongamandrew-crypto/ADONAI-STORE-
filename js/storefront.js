@@ -218,9 +218,6 @@
       </div>
     </article>`;
   }
-      </div>
-    </article>`;
-  }
 
   function renderGrid() {
     const grid = $("#productGrid");
