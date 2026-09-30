@@ -210,13 +210,13 @@
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#tileGrid").innerHTML = list.length ? list.map(p => {
       const out = p.in_stock_count <= 0;
-      const img = p.image_url ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" onerror="this.remove()" />` : "";
+      const img = p.image_url ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" />` : "";
       return `
       <button class="tile" data-tile="${esc(p.id)}" ${out ? "disabled" : ""}>
-        <span class="tile-img">${EMOJI[p.category] || "🏷️"}${img}<span class="tile-chip">${esc(p.demographic)} - ${esc(p.category)}</span></span>
+        <span class="tile-img">${img || (EMOJI[p.category] || "🏷️")}</span>
         <span class="tile-body">
           <span class="t-name">${esc(p.name)}</span>
-          <span class="t-meta">Size ${esc(p.size)} · ${esc(p.condition)} · ${esc(p.barcode_id)}</span>
+          <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${esc(p.condition)}</span>
           <span class="t-row">
             <span class="t-price">${DB.ugx(p.selling_price)}</span>
             <span class="stock-dot ${out ? "out" : ""}">${out ? "SOLD" : p.in_stock_count + " left"}</span>

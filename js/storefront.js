@@ -161,18 +161,14 @@
   /* ---------- product card with multi-angle preview ---------- */
   function mediaHTML(p, photos) {
     const mainImg = photos[0] || p.image_url;
-    const img = mainImg ? `<img src="${esc(mainImg)}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()" />` : "";
+    const img = mainImg ? `<img src="${esc(mainImg)}" alt="${esc(p.name)}" loading="lazy" />` : "";
     const dots = photos.length > 1
-      ? photos.map((src, i) => `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(src)}" alt="Angle ${i + 1}" onerror="this.remove()" /></i>`).join("")
-      : `<i>${mainImg ? `<img src="${esc(mainImg)}" alt="" onerror="this.remove()" />` : ""}</i>`;
+      ? `<div class="media-dots" title="Click to view all photo angles">${photos.map((src, i) => `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(src)}" alt="Angle ${i + 1}" /></i>`).join("")}</div>`
+      : "";
     return `
       <div class="pmedia">
-        <span class="media-icon">${catIcon(p.category)}</span>
-        ${img}
-        <span class="grade-pill">${esc(p.condition)}</span>
-        ${p.in_stock_count === 1 ? `<span class="singular-pill">1-of-1 Piece</span>` : ""}
-        <div class="media-dots" title="Click to view all photo angles">${dots}</div>
-        <div class="pmedia-hint"><span>🔍 Click piece for all photo views</span></div>
+        ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
+        ${dots}
       </div>`;
   }
 
@@ -189,7 +185,7 @@
           <span class="psku">${esc(p.sku || p.id)}</span>
         </div>
         <h3 class="pname">${esc(p.name)}</h3>
-        <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : ""].filter(Boolean).join(" · "))}</p>
+        <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : "", p.condition].filter(Boolean).join(" · "))}</p>
         ${p.desc ? `<p class="pdesc">${esc(p.desc)}</p>` : ""}
         <div class="price-row">
           <span class="pprice">${DB.ugx(p.selling_price)}</span>
@@ -298,8 +294,8 @@
           ${totalPhotos > 1 ? `
             <button class="pmodal-nav prev" id="pmodalPrev" aria-label="Previous angle">‹</button>
             <button class="pmodal-nav next" id="pmodalNext" aria-label="Next angle">›</button>
+            <span class="pmodal-badge" id="pmodalBadge">${activeModalPhotoIdx + 1} / ${totalPhotos} · ${esc(angleLabel)}</span>
           ` : ""}
-          <span class="pmodal-badge" id="pmodalBadge">${totalPhotos > 1 ? `${activeModalPhotoIdx + 1} / ${totalPhotos} · ${esc(angleLabel)}` : `${esc(p.condition)}`}</span>
         </div>
 
         ${totalPhotos > 1 ? `

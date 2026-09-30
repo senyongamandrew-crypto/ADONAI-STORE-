@@ -145,45 +145,24 @@ h1, h2, h3, .brand-word, .section-title {
 .pcard.sold img { filter: grayscale(.85); }
 
 .pmedia { position: relative; aspect-ratio: 4 / 3.4; background: var(--tint); overflow: hidden; }
-.pmedia img { width: 100%; height: 100%; object-fit: cover; transition: transform .25s ease; }
-.pcard:hover .pmedia img { transform: scale(1.03); }
+.pmedia img { width: 100%; height: 100%; object-fit: cover; transition: transform .25s ease; display: block; }
+.pcard:hover .pmedia img { transform: scale(1.02); }
 .pmedia .media-icon { position: absolute; inset: 0; display: grid; place-items: center; color: #C5BCAF; }
 .pmedia .media-icon svg { width: 54px; height: 54px; }
-.pmedia-hint {
-  position: absolute; inset: 0; background: rgba(23, 18, 16, 0.45);
-  display: flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity .2s ease; z-index: 3;
-}
-.pmedia-hint span {
-  background: rgba(255, 255, 255, 0.95); color: var(--ink);
-  font: 700 11.5px var(--font-text); padding: 6px 14px; border-radius: 999px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2); transform: translateY(4px);
-  transition: transform .2s ease;
-}
-.pcard:hover .pmedia-hint { opacity: 1; }
-.pcard:hover .pmedia-hint span { transform: translateY(0); }
-.grade-pill {
-  position: absolute; top: 12px; left: 12px; z-index: 2;
-  font-size: 11px; font-weight: 700; letter-spacing: .02em;
-  background: rgba(255, 255, 255, .95); border: 1px solid var(--line); color: var(--ink);
-  padding: 6px 12px; border-radius: 999px;
-}
-.singular-pill {
-  position: absolute; top: 12px; right: 12px; z-index: 2;
-  font-size: 11px; font-weight: 700; letter-spacing: .02em; color: #fff;
-  background: rgba(23, 18, 16, .82); padding: 6px 12px; border-radius: 999px;
-}
 .media-dots {
-  position: absolute; left: 12px; right: 12px; bottom: 10px; z-index: 2;
-  display: flex; gap: 6px; padding: 5px 8px; border-radius: 999px; width: max-content;
+  position: absolute; left: 12px; bottom: 10px; z-index: 2;
+  display: flex; gap: 6px; padding: 4px 8px; border-radius: 999px; width: max-content;
   background: rgba(23, 18, 16, .45); backdrop-filter: blur(6px);
 }
 .media-dots i {
+<<<<<<< HEAD
   width: 22px; height: 22px; border-radius: 50%; overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, .65); background: var(--tint);
+.media-dots i {
+  width: 20px; height: 20px; border-radius: 50%; overflow: hidden;
+  border: 1.5px solid rgba(255, 255, 255, .7); background: var(--tint);
   display: grid; place-items: center; color: #C5BCAF; cursor: pointer;
 }
-.media-dots i.active { border-color: var(--rust); }
+.media-dots i.active { border-color: var(--rust); box-shadow: 0 0 0 2px rgba(194, 78, 43, .4); }
 .media-dots i img { width: 100%; height: 100%; object-fit: cover; }
 
 .pbody { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; text-align: left; }
