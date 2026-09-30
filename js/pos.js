@@ -429,12 +429,11 @@
     return `
       <div class="receipt-paper">
         <div class="rc-brand">
-          <div class="rc-t-mark">T</div>
-          <h2 class="rc-title">Adonai</h2>
-          <div class="rc-sub">THRIFT STORE</div>
+          <img src="assets/adonai-logo-stacked.svg" alt="Adonai Store" class="rc-logo-img" style="width:115px;max-width:48mm;height:auto;margin:0 auto 4px;display:block;" />
+          <div class="rc-sub">CURATED VINTAGE · KAMPALA</div>
         </div>
         <div class="rc-meta-top">
-          <strong>${esc(S.store_name || "Adonai Thrift Store")}</strong><br/>
+          <strong>${esc(S.store_name || "Adonai Store")}</strong><br/>
           ${esc(S.address || "Plot 45 Salama Road / kibuli Kampala, Uganda")}<br/>
           Phone: ${esc(S.hotline || "+256 7656 52403")} | WhatsApp: ${esc(S.whatsapp_display || "+256 7588 73398")}<br/>
           <span class="rc-tiktok">TikTok: ${esc(S.tiktok || "@adonai.thrift256")}</span>

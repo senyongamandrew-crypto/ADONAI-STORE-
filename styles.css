@@ -505,12 +505,9 @@ textarea.sel-full { resize: vertical; min-height: 78px; line-height: 1.5; }
   border: 1px solid var(--line); box-shadow: var(--shadow);
 }
 .rc-brand { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; margin-bottom: 6px; }
-.rc-t-mark {
-  width: 32px; height: 32px; background: var(--rust); color: #FFF; border-radius: 8px;
-  display: grid; place-items: center; font: 800 18px var(--font-display); margin-bottom: 3px;
-}
+.rc-logo-img { width: 115px; max-width: 48mm; height: auto; margin: 0 auto 4px; display: block; }
 .rc-title { font-family: var(--font-display); font-size: 22px; font-weight: 800; color: #1A1410; margin: 0; line-height: 1.1; }
-.rc-sub { font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; color: #7A6F66; font-weight: 700; }
+.rc-sub { font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; color: #7A6F66; font-weight: 700; margin-top: 2px; }
 .rc-meta-top { text-align: center; font-size: 11px; color: #4A4038; margin-top: 6px; line-height: 1.45; }
 .rc-tiktok { color: var(--rust); font-weight: 600; }
 .rc-dashed { border-top: 1px dashed #C5BCAF; margin: 10px 0; }

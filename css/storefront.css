@@ -52,6 +52,8 @@ h1, h2, h3, .brand-word, .section-title {
 }
 .head-row { display: flex; align-items: center; gap: 20px; height: 72px; }
 .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand-logo-img { height: 38px; width: auto; max-width: 200px; display: block; object-fit: contain; }
+.foot-logo-img { height: 75px; width: auto; max-width: 130px; display: block; margin-bottom: 12px; }
 .t-mark {
   width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
   background: var(--rust); color: #fff;

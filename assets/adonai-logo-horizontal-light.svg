@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 110" width="480" height="110" fill="none">
+  <!-- Stylized white A mark -->
+  <g transform="translate(8, 22)">
+    <path d="M23 7 L35.5 7 L49.5 54 L37.5 54 L29.2 38.5 L21 54 L9 54 Z" fill="#FFFFFF"/>
+    <polygon points="29.2,16.5 29.8,22.2 32.5,20.5 30.8,23.2 36.5,23.9 30.8,24.6 32.5,27.3 29.8,25.6 29.2,31.3 28.6,25.6 25.9,27.3 27.6,24.6 21.9,23.9 27.6,23.2 25.9,20.5 28.6,22.2" fill="#171210"/>
+  </g>
+  <!-- DONAI text in white -->
+  <text x="66" y="72" font-family="'Playfair Display', Georgia, 'Times New Roman', serif" font-weight="800" font-size="48" fill="#FFFFFF" letter-spacing="1.5">DONAI</text>
+  <!-- STORE text in golden ochre -->
+  <text x="248" y="72" font-family="'Playfair Display', Georgia, 'Times New Roman', serif" font-weight="800" font-size="48" fill="#DA9902" letter-spacing="2">STORE</text>
+  <!-- Golden underline bar -->
+  <rect x="66" y="88" width="386" height="5" rx="2.5" fill="#DA9902"/>
+</svg>
