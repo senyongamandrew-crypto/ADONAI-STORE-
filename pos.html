@@ -142,7 +142,10 @@
 
       <!-- Walk-in Customer Details (for receipt & customer book) -->
       <div class="pos-cust-block">
-        <label class="fld-label" style="margin-top:0">👤 Walk-in Customer Details (for Receipt)</label>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <label class="fld-label" style="margin:0; font-weight:700; color:var(--ink);">👤 Customer Details (Printed on Receipt)</label>
+          <span style="font-size:11px; color:var(--muted); font-weight:600;">* Required</span>
+        </div>
         <div class="grid2">
           <div>
             <label class="fld-sublabel" for="posCustName">Customer Name *</label>
@@ -153,6 +156,17 @@
             <input id="posCustPhone" class="in" type="tel" placeholder="07XX 000 000" autocomplete="tel" required />
           </div>
         </div>
+        <div class="grid2" style="margin-top:8px;">
+          <div>
+            <label class="fld-sublabel" for="posCustLocation">Location / Area (Optional)</label>
+            <input id="posCustLocation" class="in" type="text" placeholder="e.g. Salama Rd / Kibuli" />
+          </div>
+          <div>
+            <label class="fld-sublabel" for="posCustNotes">Receipt Note / Memo (Optional)</label>
+            <input id="posCustNotes" class="in" type="text" placeholder="e.g. Regular VIP client" />
+          </div>
+        </div>
+      </div>
       </div>
 
       <div class="tender-tabs">

@@ -490,20 +490,28 @@
     },
 
     /* ----- sales (POS + WhatsApp, unified) ----- */
-    processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_notes }) {
+    processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes }) {
       return tx("sales", st => {
         const { items: finalItems, total } = saleFromItems(st, items);
         if (!st.counters.sale_seq) st.counters.sale_seq = Math.max(1861, st.counters.sale_pos || 1841);
         const seq = ++st.counters.sale_seq;
+        const cName = String(customer_name || "Walk-in Guest").trim();
+        const cPhone = String(customer_phone || "").trim();
+        const cLocation = String(customer_location || "").trim();
+        const cEmail = String(customer_email || "").trim();
+        const cNotes = String(customer_notes || "").trim();
+
         const sale = {
           id: "AT-" + seq,
           channel: "pos", status: "completed",
           created_at: new Date().toISOString(),
-          customer_name: String(customer_name || "Walk-in Guest").trim(),
-          customer_phone: String(customer_phone || "").trim(),
-          customer_notes: String(customer_notes || "").trim(),
-          delivery_area: "In-Store POS (Walk-in)",
-          delivery_address: "",
+          customer_name: cName,
+          customer_phone: cPhone,
+          customer_email: cEmail,
+          customer_location: cLocation,
+          customer_notes: cNotes,
+          delivery_area: cLocation || "In-Store POS (Walk-in)",
+          delivery_address: cLocation,
           delivery_fee: 0,
           subtotal: total,
           total,
@@ -516,6 +524,27 @@
         };
         st.sales.push(sale);
         logSaleEntry(st, sale, cashier && cashier.name);
+
+        // Auto-link or save walk-in customer in Guest Book
+        if (cName && cName !== "Walk-in Guest") {
+          let existingGuest = st.guests.find(g => (cPhone && g.phone && g.phone === cPhone) || (g.name && g.name.toLowerCase() === cName.toLowerCase()));
+          if (!existingGuest) {
+            st.guests.push({
+              id: "GUS-" + (++st.counters.guest),
+              name: cName,
+              phone: cPhone,
+              email: cEmail,
+              address: cLocation,
+              neighborhood: cLocation,
+              notes: cNotes ? `Walk-in POS: ${cNotes}` : "Walk-in POS Customer",
+              created_at: new Date().toISOString()
+            });
+          } else {
+            if (cPhone && !existingGuest.phone) existingGuest.phone = cPhone;
+            if (cLocation && !existingGuest.neighborhood) existingGuest.neighborhood = cLocation;
+          }
+        }
+
         return JSON.parse(JSON.stringify(sale));
       });
     },

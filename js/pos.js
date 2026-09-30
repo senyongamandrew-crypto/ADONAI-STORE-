@@ -319,6 +319,8 @@
     syncTenderUI();
     if ($("#posCustName")) $("#posCustName").value = "";
     if ($("#posCustPhone")) $("#posCustPhone").value = "";
+    if ($("#posCustLocation")) $("#posCustLocation").value = "";
+    if ($("#posCustNotes")) $("#posCustNotes").value = "";
     $("#cashTendered").value = "";
     $("#momoName").value = "";
     $("#momoPhone").value = "";
@@ -372,22 +374,19 @@
     updateChange(); validateTender();
   });
 
-  if ($("#posCustName")) {
-    $("#posCustName").addEventListener("input", () => {
-      if (tenderType !== "cash" && !$("#momoName").dataset.customized) {
-        $("#momoName").value = $("#posCustName").value;
+  ["#posCustName", "#posCustPhone", "#posCustLocation", "#posCustNotes"].forEach(sel => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener("input", () => {
+      if (sel === "#posCustName" && tenderType !== "cash" && !$("#momoName").dataset.customized) {
+        $("#momoName").value = el.value;
+      }
+      if (sel === "#posCustPhone" && tenderType !== "cash" && !$("#momoPhone").dataset.customized) {
+        $("#momoPhone").value = el.value;
       }
       validateTender();
     });
-  }
-  if ($("#posCustPhone")) {
-    $("#posCustPhone").addEventListener("input", () => {
-      if (tenderType !== "cash" && !$("#momoPhone").dataset.customized) {
-        $("#momoPhone").value = $("#posCustPhone").value;
-      }
-      validateTender();
-    });
-  }
+  });
 
   $("#momoName").addEventListener("input", () => { $("#momoName").dataset.customized = "true"; validateTender(); });
   $("#momoPhone").addEventListener("input", () => { $("#momoPhone").dataset.customized = "true"; validateTender(); });
@@ -421,6 +420,8 @@
     btn.disabled = true; btn.textContent = "Processing…";
     const custName = $("#posCustName") ? $("#posCustName").value.trim() : "";
     const custPhone = $("#posCustPhone") ? $("#posCustPhone").value.trim() : "";
+    const custLoc = $("#posCustLocation") ? $("#posCustLocation").value.trim() : "";
+    const custNotes = $("#posCustNotes") ? $("#posCustNotes").value.trim() : "";
     const items = cartDetailed().map(({ l }) => ({ product_id: l.product_id, qty: l.qty }));
     const tender = tenderType === "cash"
       ? { type: "cash", tendered: Number($("#cashTendered").value) || 0 }
@@ -438,7 +439,9 @@
         tender,
         cashier,
         customer_name: custName || "Walk-in Guest",
-        customer_phone: custPhone || ""
+        customer_phone: custPhone || "",
+        customer_location: custLoc,
+        customer_notes: custNotes
       });
       lastSale = sale;
       cart = [];
@@ -499,9 +502,9 @@
         <div class="rc-cust-box">
           <div class="rc-cust-row"><span class="rc-cust-k">Customer:</span> <strong class="rc-cust-v">${esc(sale.customer_name || "Walk-in Guest")}</strong></div>
           <div class="rc-cust-row"><span class="rc-cust-k">Phone:</span> <span class="rc-cust-v">${esc(sale.customer_phone || "—")}</span></div>
+          ${sale.customer_location ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.customer_location)}</span></div>` : (sale.delivery_area && sale.delivery_area !== "In-Store POS (Walk-in)" ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.delivery_area)}</span></div>` : "")}
           ${sale.customer_notes ? `<div class="rc-cust-row"><span class="rc-cust-k">Notes:</span> <span class="rc-cust-v">${esc(sale.customer_notes)}</span></div>` : ""}
-          <div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(sale.delivery_area ? `${sale.delivery_area}${sale.delivery_address ? " - " + sale.delivery_address : ""}` : sale.delivery_address || "In-Store POS (Walk-in)")}</span></div>
-          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${sale.channel === "web" ? "WhatsApp" : "In-Store POS"}</span></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${sale.channel === "web" ? "Online WhatsApp" : "In-Store POS (Walk-in)"}</span></div>
           ${sale.cashier ? `<div class="rc-cust-row"><span class="rc-cust-k">Cashier:</span> <span class="rc-cust-v">${esc(sale.cashier.name || sale.cashier)}</span></div>` : ""}
         </div>
         <div class="rc-dashed"></div>

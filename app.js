@@ -466,9 +466,9 @@
         <div class="rc-cust-box">
           <div class="rc-cust-row"><span class="rc-cust-k">Customer:</span> <strong class="rc-cust-v">${esc(s.customer_name || "Walk-in Guest")}</strong></div>
           <div class="rc-cust-row"><span class="rc-cust-k">Phone:</span> <span class="rc-cust-v">${esc(s.customer_phone || "—")}</span></div>
+          ${s.customer_location ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(s.customer_location)}</span></div>` : (s.delivery_area && s.delivery_area !== "Storefront Walk-in" ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(s.delivery_area)}</span></div>` : "")}
           ${s.customer_notes ? `<div class="rc-cust-row"><span class="rc-cust-k">Notes:</span> <span class="rc-cust-v">${esc(s.customer_notes)}</span></div>` : ""}
-          <div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(s.delivery_area ? `${s.delivery_area}${s.delivery_address ? " - " + s.delivery_address : ""}` : s.delivery_address || "Storefront Walk-in")}</span></div>
-          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${s.channel === "web" ? "WhatsApp" : "In-Store POS"}</span></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${s.channel === "web" ? "Online WhatsApp" : "In-Store POS (Walk-in)"}</span></div>
           ${s.cashier ? `<div class="rc-cust-row"><span class="rc-cust-k">Cashier:</span> <span class="rc-cust-v">${esc(s.cashier.name || s.cashier)}</span></div>` : ""}
         </div>
         <div class="rc-dashed"></div>
