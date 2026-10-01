@@ -507,6 +507,76 @@
     </svg>`;
   }
 
+  /*
+     Open-access POS sales stay usable when the terminal has not been signed
+     into the remote API yet. The register already has a complete local
+     catalogue and localStorage database, so item selection and receipt
+     creation should not be blocked by an optional server reservation call.
+     Authenticated terminals continue to use the atomic server checkout below.
+  */
+  function processLocalPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes }) {
+    return tx("sales", st => {
+      if (!Array.isArray(items) || !items.length) throw new Error("Sale must contain at least one item");
+      const result = saleFromItems(st, items);
+      const now = new Date().toISOString();
+      const sequence = (Number(st.counters.sale_pos) || Number(st.counters.sale_seq) || 0) + 1;
+      st.counters.sale_pos = sequence;
+
+      const finalTender = Object.assign({ type: "cash", paid: true }, tender || {});
+      if (finalTender.type === "cash") {
+        const tendered = Number(finalTender.tendered) || 0;
+        finalTender.tendered = tendered;
+        finalTender.change = Math.max(0, tendered - result.total);
+      }
+
+      const sale = {
+        id: "AT-" + sequence,
+        channel: "pos",
+        status: "completed",
+        created_at: now,
+        customer_name: String(customer_name || "Walk-in Guest").trim(),
+        customer_phone: String(customer_phone || "").trim(),
+        customer_location: String(customer_location || "").trim(),
+        delivery_address: String(customer_location || "").trim(),
+        delivery_type: "pickup",
+        delivery_fee: 0,
+        delivery_notes: String(customer_notes || "").trim(),
+        customer_email: String(customer_email || "").trim(),
+        cashier: cashier || { name: "Staff", role: "open access" },
+        items: result.items,
+        subtotal: result.total,
+        total: result.total,
+        tender: finalTender,
+        dispatch_status: "Delivered",
+        assigned_rider_id: null,
+        assigned_rider_name: null
+      };
+
+      st.sales.push(sale);
+      logSaleEntry(st, sale, sale.cashier && sale.cashier.name);
+
+      // Keep the local customer book consistent with the remote POS path.
+      const cName = sale.customer_name;
+      const cPhone = sale.customer_phone;
+      if (cName && cName !== "Walk-in Guest") {
+        const existingGuest = st.guests.find(g =>
+          (cPhone && g.phone && g.phone === cPhone) ||
+          (g.name && g.name.toLowerCase() === cName.toLowerCase())
+        );
+        if (!existingGuest) {
+          st.guests.push({
+            id: "GUS-" + (++st.counters.guest), name: cName, phone: cPhone,
+            email: sale.customer_email, address: sale.customer_location,
+            neighborhood: sale.customer_location,
+            notes: sale.delivery_notes ? `Walk-in POS: ${sale.delivery_notes}` : "Walk-in POS Customer",
+            created_at: now
+          });
+        }
+      }
+      return JSON.parse(JSON.stringify(sale));
+    });
+  }
+
   /* ---------- public API ---------- */
   global.DB = {
     CATEGORIES, CONDITIONS, DEMOGRAPHICS, CAT_CODES, TENDER_TYPES, DISPATCH_STATUSES,
@@ -688,6 +758,20 @@
 
     /* ----- sales (POS + WhatsApp, unified) ----- */
     async processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes, lock_owner }) {
+      // The POS intentionally supports open access while the local access lock
+      // is off. In that mode there is no JWT to use for the protected server
+      // checkout, so complete the sale against the same local DB used by the
+      // catalogue. Once a cashier signs in, the existing atomic API path below
+      // remains the source of truth for shared stock and accounting.
+      const token = (typeof Auth !== "undefined" && Auth.token) ? Auth.token() : "";
+      const accessLocked = (typeof Auth !== "undefined" && Auth.locked) ? Auth.locked() : false;
+      if (!token && !accessLocked) {
+        return processLocalPosSale({
+          items, tender, cashier, customer_name, customer_phone,
+          customer_location, customer_email, customer_notes
+        });
+      }
+
       const payload = {
         channel: "pos",
         lock_owner: String(lock_owner || ""),
