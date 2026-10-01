@@ -62,7 +62,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Set up Java JDK 17
         uses: actions/setup-java@v4
@@ -70,27 +69,68 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Node Dependencies
-        run: npm ci
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
-      - name: Bundle POS Web Assets & Sync Native Project
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Bundle POS Web Assets into Native Project
+        run: npm run bundle:pos
+
+      - name: Decode Release Keystore (if configured)
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          npm run bundle:pos
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "No ANDROID_KEYSTORE_BASE64 secret set — the build will generate a local signing key."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/adonai-release.keystore"
+          {
+            echo "ADONAI_KEYSTORE_FILE=$RUNNER_TEMP/adonai-release.keystore"
+            echo "ADONAI_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "ADONAI_KEY_ALIAS=$KEY_ALIAS"
+            echo "ADONAI_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
-      - name: Compile and Package Android POS APK
+      - name: Compile Signed Release APK
+        run: npm run build:apk
+
+      - name: Compile Debug APK
+        run: npm run build:apk:debug
+
+      - name: Verify APKs are installable (signature + structure)
         run: |
-          npm run build:apk
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          for f in dist/adonai-pos-v2.apk dist/adonai-pos-v2-debug.apk; do
+            echo "=== $f"
+            test -s "$f"
+            unzip -l "$f" | grep -q classes.dex
+            unzip -l "$f" | grep -q resources.arsc
+            "$BT/aapt2" dump badging "$f" | head -5
+            "$BT/apksigner" verify --verbose "$f"
+          done
 
-      - name: Verify Generated APK Artifact
-        run: |
-          ls -lh dist/adonai-pos-v2.apk
-          test -s dist/adonai-pos-v2.apk
-
-      - name: Upload Standalone APK Artifact
+      - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: adonai-pos-v2-apk
           path: dist/adonai-pos-v2.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adonai-pos-v2-debug-apk
+          path: dist/adonai-pos-v2-debug.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -104,15 +144,17 @@ jobs:
           prerelease: false
           files: |
             dist/adonai-pos-v2.apk
+            dist/adonai-pos-v2-debug.apk
           body: |
             ## Adonai Thrift Store — Android POS APK Release
-            
-            ### 📦 Download & Installation:
-            - **Direct APK**: Download `adonai-pos-v2.apk` attached below.
+
+            ### 📦 Download & Installation
+            - **Direct APK**: `adonai-pos-v2.apk` (signed release build)
             - **Package ID**: `com.adonaithrift.pos`
-            - **Target**: Android Mobile / Tablet POS Cashier Terminal
-            
-            ### ✨ Features:
+            - **Min Android**: 5.1 (API 22) · **Target**: API 34
+            - Enable "Install unknown apps" for your browser/file manager, then tap the APK.
+
+            ### ✨ Features
             - Offline SQLite & local cache sync
             - Barcode & SKU lookup
             - Camera intake & photo compression

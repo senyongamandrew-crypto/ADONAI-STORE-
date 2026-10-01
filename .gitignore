@@ -25,3 +25,9 @@ android/app/build/
 
 # Logs
 *.log
+
+# Build output
+dist/*.apk
+android/.gradle/
+android/*.keystore
+android/app/release/
