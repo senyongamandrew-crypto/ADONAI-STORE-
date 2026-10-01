@@ -954,3 +954,41 @@ html[data-pointer="touch"] .lnk { padding: 6px 2px; }
   .finance-tabs { position:relative; top:auto; padding:6px; border-radius:14px; }
   .finance-tab { min-height:44px; padding:9px 12px; }
 }
+
+/* ======================================================================
+   VIEWING CONTROL PANEL — user-adjustable display size (--ui-scale)
+   ====================================================================== */
+:root { --ui-scale: 1; }
+
+body { zoom: var(--ui-scale, 1); }
+.app { min-height: calc(100vh / var(--ui-scale, 1)); }
+.app > .sidebar { height: calc(100vh / var(--ui-scale, 1)); }
+
+.ui-scale-panel {
+  margin: 10px 12px 4px; padding: 10px 11px 9px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--dark-line, rgba(255,255,255,.12)); border-radius: 12px;
+}
+.usp-head { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+.usp-ico { font-size: 13px; }
+.usp-title {
+  font-weight: 700; font-size: 12px; color: var(--dark-text, #EFE7DE);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.usp-val { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--accent, #C24E2B); white-space: nowrap; }
+.usp-row { display: flex; align-items: center; gap: 8px; }
+.usp-btn {
+  flex: 0 0 auto; min-width: 34px; height: 30px; border-radius: 9px; cursor: pointer;
+  background: var(--dark-card, #221A16); color: var(--dark-text, #EFE7DE);
+  border: 1px solid var(--dark-line, rgba(255,255,255,.12)); font-weight: 800; font-size: 12.5px;
+}
+.usp-btn:active { background: var(--accent, #C24E2B); border-color: var(--accent, #C24E2B); color: #fff; }
+.usp-range { flex: 1 1 auto; width: 100%; accent-color: var(--accent, #C24E2B); height: 22px; }
+.usp-presets { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.usp-chip {
+  flex: 1 1 auto; padding: 5px 7px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--dark-muted, #A08F83);
+  border: 1px solid var(--dark-line, rgba(255,255,255,.12)); font-weight: 700; font-size: 11px;
+}
+.usp-chip.active { background: var(--accent, #C24E2B); border-color: var(--accent, #C24E2B); color: #fff; }
+.usp-hint { margin-top: 7px; font-size: 10.5px; line-height: 1.35; color: var(--dark-muted, #A08F83); }
