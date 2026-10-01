@@ -29,19 +29,44 @@
     clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2600);
   }
 
-  /* ---------- store profile & footer (from the shared DB settings) ---------- */
-  const S = DB.getSettings();
-  $("#footTagline").textContent = S.tagline;
-  $("#footLoc").textContent = S.address.split(",")[0]; // "Plot 14 Kampala Road / Mercer Hub"
-  $("#footContactList").innerHTML = `
-    <li><span class="k">WhatsApp:</span> <a class="rust" href="https://wa.me/${esc(S.whatsapp)}" target="_blank" rel="noopener">+${esc(S.whatsapp)}</a></li>
-    <li><span class="k">Hotline:</span> <a href="tel:${esc(S.hotline.replace(/\s/g, ""))}">${esc(S.hotline)}</a></li>
-    <li><span class="k">Email:</span> <a href="mailto:${esc(S.email)}">${esc(S.email)}</a></li>
-    <li><span class="k">Location:</span> ${esc(S.address)}</li>
-    <li><span class="k">Hours:</span> ${esc(S.hours)}</li>`;
-  $("#footSocial").innerHTML = `
-    <li><span class="k">TikTok:</span> <a class="rust" href="https://tiktok.com/${esc(S.tiktok.replace("@", "@"))}" target="_blank" rel="noopener">${esc(S.tiktok)}</a></li>
-    <li><span class="k">Instagram:</span> <a class="rust" href="https://instagram.com/${esc(S.instagram.replace("@", ""))}" target="_blank" rel="noopener">${esc(S.instagram)}</a></li>`;
+  /* ---------- store profile & footer (from live System Parameters) ---------- */
+  let S = DB.getSettings();
+
+  function renderStoreProfile() {
+    S = DB.getSettings();
+    const storeName = S.store_name || "Adonai Thrift Store";
+    const address = S.address || "Kampala, Uganda";
+    const whatsapp = String(S.whatsapp || "256758873398").replace(/\D/g, "");
+    const whatsappDisplay = S.whatsapp_display || (whatsapp ? "+" + whatsapp : "");
+    const hotline = S.hotline || S.phone || "";
+    const email = S.email || "";
+    const tiktok = S.tiktok || "";
+    const instagram = S.instagram || "";
+
+    $("#footTagline").textContent = S.tagline || "Curated pre-loved vintage";
+    $("#footLoc").textContent = address.split(",")[0];
+    $("#footContactList").innerHTML = `
+      <li><span class="k">WhatsApp:</span> <a class="rust" href="https://wa.me/${esc(whatsapp)}" target="_blank" rel="noopener">${esc(whatsappDisplay)}</a></li>
+      <li><span class="k">Hotline:</span> <a href="tel:${esc(hotline.replace(/\s/g, ""))}">${esc(hotline)}</a></li>
+      <li><span class="k">Email:</span> <a href="mailto:${esc(email)}">${esc(email)}</a></li>
+      <li><span class="k">Location:</span> ${esc(address)}</li>
+      <li><span class="k">Hours:</span> ${esc(S.hours || "")}</li>`;
+    $("#footSocial").innerHTML = `
+      <li><span class="k">TikTok:</span> <a class="rust" href="https://tiktok.com/${esc(tiktok)}" target="_blank" rel="noopener">${esc(tiktok)}</a></li>
+      <li><span class="k">Instagram:</span> <a class="rust" href="https://instagram.com/${esc(instagram.replace("@", ""))}" target="_blank" rel="noopener">${esc(instagram)}</a></li>`;
+
+    const trackLink = $("#trackOrderLink");
+    if (trackLink) trackLink.href = `https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hello ${storeName}, I would like to track my order`)}`;
+    const scope = $("#deliveryScopeText");
+    if (scope) scope.textContent = S.delivery_scope || "Delivery available across Uganda";
+    const pickupAddress = $("#storePickupAddress");
+    if (pickupAddress) pickupAddress.textContent = address;
+    const copyright = $("#footCopyright");
+    if (copyright) copyright.textContent = `© 2026 ${storeName} · All prices in Ugandan Shillings (UGX)`;
+    document.title = `${storeName} | Quality Apparel & Thrift Fashion in Kampala`;
+  }
+
+  renderStoreProfile();
   $("#installBtn").addEventListener("click", () => toast("Tip: use your browser's \"Add to Home Screen\" to install Adonai Store app"));
   $$("[data-policy]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); toast("Full store policies publish with the live site"); }));
 
@@ -145,13 +170,14 @@
   }
 
   function updateDynamicSEO() {
-    let title = "Adonai Thrift Store | Quality Apparel & Thrift Fashion in Kampala";
+    const storeName = S.store_name || "Adonai Thrift Store";
+    let title = `${storeName} | Quality Apparel & Thrift Fashion in Kampala`;
     if (fCat !== "All" && fDemo !== "All") {
-      title = `${fDemo}'s ${fCat} | Curated Vintage | Adonai Thrift Store Kampala`;
+      title = `${fDemo}'s ${fCat} | Curated Vintage | ${storeName} Kampala`;
     } else if (fCat !== "All") {
-      title = `Curated Vintage ${fCat} | Adonai Thrift Store Kampala`;
+      title = `Curated Vintage ${fCat} | ${storeName} Kampala`;
     } else if (fDemo !== "All") {
-      title = `${fDemo}'s Vintage Fashion | Adonai Thrift Store Kampala`;
+      title = `${fDemo}'s Vintage Fashion | ${storeName} Kampala`;
     }
     document.title = title;
   }
@@ -434,7 +460,7 @@
         ${p.staff_notes ? `<div class="pmodal-store-notes"><strong>Store note:</strong> ${esc(p.staff_notes)}</div>` : ""}
 
         <div class="pmodal-assurance">
-          📍 Plot 14 Kampala Road / Mercer Hub · 🛵 Same-Day Kampala Boda Delivery · 📱 MTN MoMo / Airtel Money / Cash
+          📍 ${esc(S.address || "Kampala, Uganda")} · 🛵 Same-Day Kampala Boda Delivery · 📱 MTN MoMo / Airtel Money / Cash
         </div>
 
         <div class="pmodal-actions">
@@ -511,19 +537,24 @@
   }
 
   /* ---------- cart drawer ---------- */
-  const DELIVERY_AREAS = [
-    { name: "Kampala Central / Nakasero", fee: 7000 },
-    { name: "Kololo / Kamwokya / Bukoto", fee: 7000 },
-    { name: "Ntinda / Naguru / Kiwatule", fee: 7000 },
-    { name: "Bugolobi / Mbuya / Mutungo", fee: 7000 },
-    { name: "Muyenga / Kansanga / Ggaba", fee: 7000 },
-    { name: "Kibuli / Nsambya / Makindye", fee: 7000 },
-    { name: "Rubaga / Mengo / Namirembe", fee: 7000 },
-    { name: "Bwaise / Kawempe / Kisaasi", fee: 7000 },
-    { name: "Entebbe Road & Corridor", fee: 12000 },
-    { name: "Mukono / Seeta Corridor", fee: 12000 },
-    { name: "Upcountry Express Parcel (Jinja, Mbarara, Mbale)", fee: 15000 }
-  ];
+  function buildDeliveryAreas() {
+    const base = Math.max(0, Number(S.base_delivery_fee != null ? S.base_delivery_fee : S.boda_base_fee) || 7000);
+    return [
+      { name: "Kampala Central / Nakasero", fee: base },
+      { name: "Kololo / Kamwokya / Bukoto", fee: base },
+      { name: "Ntinda / Naguru / Kiwatule", fee: base },
+      { name: "Bugolobi / Mbuya / Mutungo", fee: base },
+      { name: "Muyenga / Kansanga / Ggaba", fee: base },
+      { name: "Kibuli / Nsambya / Makindye", fee: base },
+      { name: "Rubaga / Mengo / Namirembe", fee: base },
+      { name: "Bwaise / Kawempe / Kisaasi", fee: base },
+      { name: "Entebbe Road & Corridor", fee: base + 5000 },
+      { name: "Mukono / Seeta Corridor", fee: base + 5000 },
+      { name: "Upcountry Express Parcel (Jinja, Mbarara, Mbale)", fee: base + 8000 }
+    ];
+  }
+
+  let DELIVERY_AREAS = buildDeliveryAreas();
 
   let deliveryType = "boda"; // 'boda' | 'pickup'
   let selectedAreaIndex = 0;
@@ -558,7 +589,9 @@
     const lines = cartLines();
     const itemCount = lines.reduce((s, x) => s + x.line.qty, 0);
     const subtotal = lines.reduce((s, x) => s + x.sub, 0);
-    const currentDeliveryFee = deliveryType === "pickup" ? 0 : (DELIVERY_AREAS[selectedAreaIndex] ? DELIVERY_AREAS[selectedAreaIndex].fee : 7000);
+    const currentDeliveryFee = deliveryType === "pickup"
+      ? 0
+      : (DELIVERY_AREAS[selectedAreaIndex] ? DELIVERY_AREAS[selectedAreaIndex].fee : DELIVERY_AREAS[0].fee);
     const grandTotal = subtotal + currentDeliveryFee;
     $("#cartCount").textContent = itemCount;
 
@@ -711,7 +744,8 @@
 
     const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
     const deliveryFee = deliveryType === "pickup" ? 0 : areaObj.fee;
-    const areaName = deliveryType === "pickup" ? "Store Pickup (Plot 45 Salama Road / Kibuli)" : areaObj.name;
+    const pickupAddress = S.address || "Kampala, Uganda";
+    const areaName = deliveryType === "pickup" ? `Store Pickup (${pickupAddress})` : areaObj.name;
 
     btn.disabled = true;
     btn.textContent = "Reserving your pieces…";
@@ -734,11 +768,11 @@
 
       const totalItems = order.items.reduce((a, b) => a + b.qty, 0);
       const deliveryLocStr = deliveryType === "pickup"
-        ? "Store Pickup (Plot 45 Salama Road / Kibuli)"
+        ? `Store Pickup (${pickupAddress})`
         : (address ? `${areaName} - ${address}` : areaName);
 
       const msgLines = [
-        "👕 *ADONAI THRIFT STORE (UGANDA)*",
+        `👕 *${String(S.store_name || "ADONAI THRIFT STORE").toUpperCase()} (UGANDA)*`,
         `*Order Ref:* ${order.id}`,
         "-----------------------------------",
         ...order.items.map(i => `• ${i.name} — ${DB.ugx(i.line_total)}`),
@@ -775,7 +809,7 @@
     }
   }
 
-  /* ---------- real-time stock sync ---------- */
+  /* ---------- real-time stock & System Parameters sync ---------- */
   DB.on("products", () => {
     const before = new Map(products.map(p => [p.id, p.in_stock_count]));
     refreshProducts();
@@ -787,6 +821,18 @@
         toast(`"${p.name}" just sold in the shop — pieces move fast`);
       }
     }
+  });
+
+  DB.on("settings", () => {
+    renderStoreProfile();
+    DELIVERY_AREAS = buildDeliveryAreas();
+    if (selectedAreaIndex >= DELIVERY_AREAS.length) selectedAreaIndex = 0;
+    renderCart();
+    if (activeModalProductId) {
+      const product = products.find(p => p.id === activeModalProductId);
+      if (product) renderProductModal(product);
+    }
+    updateDynamicSEO();
   });
 
   /* ---------- boot ---------- */

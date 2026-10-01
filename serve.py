@@ -32,7 +32,9 @@ logger = logging.getLogger("adonai.server")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 ROUTES = {
-    "/": "index.html",
+    # Local review sessions may opt into a POS-first root without changing the
+    # production storefront route on Render.
+    "/": "pos.html" if os.environ.get("ADONAI_PREVIEW_POS_ROOT") == "1" else "index.html",
     "/store": "index.html",
     "/pos": "pos.html",
     "/admin": "admin.html",

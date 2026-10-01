@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=3.3" />
+<link rel="stylesheet" href="styles.css?v=4.1" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="apple-touch-icon" href="assets/favicon.svg" />
 <link rel="manifest" href="manifest.json" />
@@ -37,7 +37,7 @@
       <button class="nav-item" data-view="customers"><span class="nav-ico">👥</span><span>Customer Book</span></button>
       <button class="nav-item" data-view="dispatch"><span class="nav-ico">🛵</span><span>Boda Riders &amp; Dispatch</span></button>
       <button class="nav-item active" data-view="overview"><span class="nav-ico">📊</span><span>Sales Analytics</span></button>
-      <button class="nav-item" data-view="payments"><span class="nav-ico">📒</span><span>Financial Ledger</span></button>
+      <button class="nav-item" data-view="payments"><span class="nav-ico">📒</span><span>Financial Ledgers</span></button>
       <button class="nav-item" data-view="staff"><span class="nav-ico">🔑</span><span>Staff &amp; Permissions</span></button>
       <button class="nav-item" data-view="settings"><span class="nav-ico">⚙️</span><span>Store Settings</span></button>
       <button class="nav-item store-nav-item" id="btnAdminSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico">🌐</span><span>Open Live Web Storefront ↗</span></button>
@@ -63,12 +63,8 @@
   <main class="main">
 
     <!-- shared console topbar -->
-    <header class="ol-topbar">
-      <button class="pill" id="btnMenu">☰ Menu</button>
-      <div class="ol-topbar-right">
-        <span class="pill live" id="syncPill"><span class="live-dot"></span><span id="syncText">Sync Live · 0s | Auto 5s</span></span>
-        <button class="pill store" id="btnAdminOpenWebStore" type="button" title="Launch the live customer website in device browser">🌐 Open Live Web Storefront ↗</button>
-      </div>
+    <header class="ol-topbar console-toolbar">
+      <button class="pill menu-trigger" id="btnMenu" type="button" aria-label="Open operations menu">☰ <span>Menu</span></button>
     </header>
 
     <!-- ==================== SALES ANALYTICS ==================== -->
@@ -217,6 +213,7 @@
 
         <h4 class="sec">3. Pricing Structure (UGX)</h4>
         <div class="fgrid">
+          <div class="field full"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
           <div class="field"><label>Cost price (UGX)</label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
           <div class="field"><label>Sell price (UGX)<span class="fhint">Active Price</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
@@ -280,19 +277,99 @@
       <div class="rider-list" id="riderList"></div>
     </section>
 
-    <!-- ==================== FINANCIAL LEDGER ==================== -->
-    <section class="view" id="view-payments">
-      <div class="page-head">
-        <p class="kicker">FINANCIAL LEDGER &amp; CASH BOOK</p>
-        <h1>Store Ledger (UGX)</h1>
-        <p class="muted">Track daily sales, boda rider payouts, operational expenses, and cash drawer reconciliations.</p>
-        <div class="head-actions">
-          <button class="btn primary" id="btnNewEntry">+ Record New Entry</button>
+    <!-- ==================== FINANCIAL LEDGERS HUB ==================== -->
+    <section class="view finance-hub" id="view-payments">
+      <div class="page-head finance-title-row">
+        <div>
+          <p class="kicker">LIVE POSTGRESQL · DOUBLE-ENTRY ACCOUNTING</p>
+          <h1>Financial Ledgers</h1>
+          <p class="muted">Post day-to-day cash outs, allocate bale costs, review profitability, and control aging stock from one audit-ready workspace.</p>
+        </div>
+        <div class="finance-live"><span class="live-dot"></span><span><strong>Live books</strong><small id="financeUpdated">Ready to sync</small></span></div>
+      </div>
+
+      <div class="finance-tabs" id="financeTabs" role="tablist" aria-label="Financial ledger workspaces">
+        <button class="finance-tab active" role="tab" aria-selected="true" data-finance-tab="expenses"><span>01</span> Daily Expense</button>
+        <button class="finance-tab" role="tab" aria-selected="false" data-finance-tab="lots"><span>02</span> Bale Costs</button>
+        <button class="finance-tab" role="tab" aria-selected="false" data-finance-tab="dashboard"><span>03</span> Executive</button>
+        <button class="finance-tab" role="tab" aria-selected="false" data-finance-tab="aging"><span>04</span> Dead Stock</button>
+        <button class="finance-tab" role="tab" aria-selected="false" data-finance-tab="journal"><span>05</span> General Journal</button>
+      </div>
+
+      <div class="finance-panel active" id="finance-expenses" role="tabpanel">
+        <div class="finance-split">
+          <form class="card finance-form" id="expenseForm">
+            <div class="finance-card-head"><div><p class="kicker">CASH OUT</p><h3>Post an expense</h3></div><span class="finance-icon">↗</span></div>
+            <p class="muted small">One click creates the expense and its balanced debit/credit journal lines atomically.</p>
+            <div class="finance-form-grid">
+              <div class="field"><label for="expenseCategory">Category</label><select class="sel-full" id="expenseCategory" required><option value="">Choose category…</option><option>Rent</option><option>Utilities</option><option>Transport &amp; Boda</option><option>Packaging</option><option>Cleaning</option><option>Wages</option><option>Marketing</option><option>Repairs</option><option>Other Operations</option></select></div>
+              <div class="field"><label for="expenseAmount">Amount (UGX)</label><input class="sel-full" id="expenseAmount" type="number" min="1" step="1" inputmode="numeric" required placeholder="25,000" /></div>
+              <div class="field"><label for="expensePayment">Paid from</label><select class="sel-full" id="expensePayment" required><option value="cash">Cash Drawer</option><option value="mobile_money">Mobile Money</option><option value="bank">Bank Account</option></select></div>
+              <div class="field"><label for="expenseVendor">Vendor / payee</label><input class="sel-full" id="expenseVendor" maxlength="150" placeholder="e.g. Kampala Packaging" /></div>
+              <div class="field"><label for="expenseReceipt">Receipt / reference</label><input class="sel-full" id="expenseReceipt" maxlength="120" placeholder="Optional receipt number" /></div>
+              <div class="field"><label for="expenseDate">Date &amp; time</label><input class="sel-full" id="expenseDate" type="datetime-local" required /></div>
+              <div class="field full"><label for="expenseNotes">Notes</label><textarea class="sel-full" id="expenseNotes" rows="2" maxlength="1000" placeholder="Purpose or approval note"></textarea></div>
+            </div>
+            <button class="btn primary big finance-submit" type="submit" id="expenseSubmit">Post expense &amp; journal entry</button>
+          </form>
+          <div class="card finance-table-card">
+            <div class="finance-card-head"><div><p class="kicker">TODAY'S ACTIVITY</p><h3>Editable cash outs</h3></div><strong class="finance-total" id="expenseTodayTotal">UGX 0</strong></div>
+            <div id="expenseList" class="finance-list-state" aria-live="polite">Loading today’s expenses…</div>
+          </div>
         </div>
       </div>
-      <div class="kpis" id="ledgerKpis"></div>
-      <div class="kpills" id="ledgerPills"></div>
-      <div class="ledger-list" id="ledgerRows"></div>
+
+      <div class="finance-panel" id="finance-lots" role="tabpanel" hidden>
+        <div class="finance-split">
+          <form class="card finance-form" id="stockLotForm">
+            <div class="finance-card-head"><div><p class="kicker">INVENTORY LANDED COST</p><h3>Register a stock lot / bale</h3></div><span class="finance-icon">▦</span></div>
+            <p class="muted small">The landed unit cost is available in POS Intake so every tagged piece receives accurate COGS.</p>
+            <div class="finance-form-grid">
+              <div class="field"><label for="lotSupplier">Supplier</label><input class="sel-full" id="lotSupplier" required maxlength="150" placeholder="Supplier or market source" /></div>
+              <div class="field"><label for="lotDescription">Lot description</label><input class="sel-full" id="lotDescription" required maxlength="500" placeholder="e.g. Grade A mixed denim bale" /></div>
+              <div class="field"><label for="lotAcquisition">Acquisition cost (UGX)</label><input class="sel-full" id="lotAcquisition" type="number" min="0" step="1" required /></div>
+              <div class="field"><label for="lotShipping">Shipping / handling (UGX)</label><input class="sel-full" id="lotShipping" type="number" min="0" step="1" value="0" required /></div>
+              <div class="field"><label for="lotItemCount">Saleable item count</label><input class="sel-full" id="lotItemCount" type="number" min="1" step="1" required /></div>
+              <div class="field"><label for="lotPayment">Paid from</label><select class="sel-full" id="lotPayment"><option value="cash">Cash Drawer</option><option value="mobile_money">Mobile Money</option><option value="bank">Bank Account</option></select></div>
+              <div class="field"><label for="lotDate">Acquisition date &amp; time</label><input class="sel-full" id="lotDate" type="datetime-local" required /></div>
+              <div class="field unit-cost-field"><label>Calculated unit cost</label><output id="lotUnitCost">UGX 0 / item</output></div>
+            </div>
+            <button class="btn primary big finance-submit" type="submit" id="lotSubmit">Register lot &amp; cost allocation</button>
+          </form>
+          <div class="card finance-table-card">
+            <div class="finance-card-head"><div><p class="kicker">COST ALLOCATION</p><h3>Registered lots</h3></div><span class="muted small">Newest first</span></div>
+            <div id="stockLotList" class="finance-list-state" aria-live="polite">Loading stock lots…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="finance-panel" id="finance-dashboard" role="tabpanel" hidden>
+        <div class="finance-toolbar"><div><p class="kicker">MANAGER VIEW · READ ONLY</p><h3>Executive profitability</h3></div><label class="date-control">Business date <input class="sel-full" id="dashboardDate" type="date" /></label></div>
+        <div class="finance-metrics" id="dashboardMetrics"></div>
+        <div class="finance-chart-grid">
+          <div class="card chart-card"><div class="finance-card-head"><div><p class="kicker">REVENUE MIX</p><h3>Sales by channel</h3></div></div><div class="bar-chart" id="channelChart"></div></div>
+          <div class="card chart-card"><div class="finance-card-head"><div><p class="kicker">MARGIN QUALITY</p><h3>Category profitability</h3></div></div><div class="bar-chart" id="categoryChart"></div></div>
+        </div>
+      </div>
+
+      <div class="finance-panel" id="finance-aging" role="tabpanel" hidden>
+        <div class="finance-toolbar"><div><p class="kicker">SELL-THROUGH CONTROL</p><h3>Dead stock &amp; inventory aging</h3></div><div class="aging-pills" id="agingPills"><button class="lane-tab active" data-aging-days="30">30+ days</button><button class="lane-tab" data-aging-days="60">60+ days</button><button class="lane-tab" data-aging-days="90">90+ days</button></div></div>
+        <div class="aging-summary" id="agingSummary"></div>
+        <div class="card finance-table-card"><div id="agingList" class="finance-list-state">Loading aging stock…</div></div>
+      </div>
+
+      <div class="finance-panel" id="finance-journal" role="tabpanel" hidden>
+        <div class="finance-toolbar"><div><p class="kicker">AUDIT VIEW · DOUBLE ENTRY</p><h3>General journal &amp; account ledger</h3></div><span class="balance-badge" id="journalBalance">Debits = Credits</span></div>
+        <form class="journal-filters" id="journalFilters">
+          <div class="field"><label for="journalSearch">Search</label><input class="sel-full" id="journalSearch" type="search" placeholder="Reference, memo, account…" /></div>
+          <div class="field"><label for="journalAccount">Account</label><select class="sel-full" id="journalAccount"><option value="">All accounts</option></select></div>
+          <div class="field"><label for="journalSource">Source</label><select class="sel-full" id="journalSource"><option value="">All sources</option></select></div>
+          <div class="field"><label for="journalFrom">From</label><input class="sel-full" id="journalFrom" type="date" /></div>
+          <div class="field"><label for="journalTo">To</label><input class="sel-full" id="journalTo" type="date" /></div>
+          <button class="btn primary" type="submit">Apply filters</button>
+        </form>
+        <div class="card journal-table-wrap"><div id="journalTable" class="finance-list-state">Loading general journal…</div></div>
+      </div>
     </section>
 
     <!-- ==================== STAFF & PERMISSIONS ==================== -->
@@ -362,9 +439,9 @@
 
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
-<script src="js/db.js?v=2.5"></script>
-<script src="js/auth.js"></script>
-<script src="js/intake.js"></script>
-<script src="app.js?v=3.3"></script>
+<script src="js/db.js?v=3.0"></script>
+<script src="js/auth.js?v=2.6"></script>
+<script src="js/intake.js?v=3.0"></script>
+<script src="app.js?v=4.1"></script>
 </body>
 </html>

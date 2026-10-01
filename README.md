@@ -95,7 +95,7 @@ checkout can sync with the live backend.
 
 ## 3. Cross-Navigation (POS to Website Only)
 
-- In the Android POS topbar and sidebar, tap **"🌐 Open Live Web Storefront ↗"**.
+- In the Android POS navigation drawer, tap **"🌐 Open Live Web Storefront ↗"**. The launcher is intentionally kept out of dashboard headers.
 - This launches an external Android Intent (`Intent.ACTION_VIEW`) through the native WebView bridge, opening the live website in the phone's external browser (Chrome / Samsung Internet).
 - The public website contains **no return link** to the POS app. Navigating back to the cashier terminal is done via Android's task manager / app switcher.
 
@@ -112,6 +112,17 @@ checkout can sync with the live backend.
 | **POS App** | `/api/orders` | `POST` (`channel="pos"`) | **JWT / Terminal Key** | Atomically decrements stock, settles tender, logs ledger |
 | **POS App** | `/api/products` | `POST` | **JWT / Terminal Key** | Intakes new piece into shared database & inventory |
 | **POS App** | `/api/sync/pull` | `POST`/`GET` | **JWT / Terminal Key** | Full operational state sync (sales, inventory, ledger) |
+| **Storefront** | `/api/settings` | `GET` | Public, sanitized | Reads the current public store profile and delivery settings |
+| **System Parameters** | `/api/settings` | `POST` | **Admin JWT / Master Key** | Publishes configuration changes to the shared database |
+
+### Live System Parameters
+
+Saving **Store Settings → System Parameters** publishes the store name, contact
+channels, social handles, address, opening hours, delivery scope, and base boda
+fee to the shared backend. The live storefront checks for updated settings every
+5 seconds and refreshes its footer, WhatsApp links, pickup details, delivery
+fees, checkout messages, and browser title without requiring a redeploy. Admin
+and Master Key values remain excluded from every public settings response.
 
 ### Render Environment Variables
 Configure in your Render Dashboard (**Environment** tab):

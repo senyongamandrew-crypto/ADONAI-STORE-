@@ -13,6 +13,8 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    CheckConstraint,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -81,6 +83,10 @@ class Product(Base):
     image_url = Column(Text, nullable=True)
     images_json = Column(Text, default="[]")  # JSON string array of additional image angles
     rack_location = Column(String(50), nullable=True, index=True)
+    # Additive financial-ledger fields.  These are also installed safely by the
+    # Render migration for databases that already contain the products table.
+    stock_lot_id = Column(String(64), nullable=True, index=True)
+    inventory_status = Column(String(30), default="AVAILABLE", nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -123,6 +129,8 @@ class Product(Base):
             "image_url": self.image_url or "",
             "images": self.images,
             "rack_location": self.rack_location or "Rail A-1",
+            "stock_lot_id": self.stock_lot_id or "",
+            "inventory_status": self.inventory_status or "AVAILABLE",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -234,6 +242,9 @@ class OrderItem(Base):
     barcode_id = Column(String(50), nullable=True)
     name = Column(String(255), nullable=False)
     unit_price = Column(Integer, nullable=False)
+    # Snapshots preserve historical COGS/category even when the product changes.
+    unit_cost = Column(Integer, default=0, nullable=False)
+    category = Column(String(100), nullable=True, index=True)
     qty = Column(Integer, default=1)
     line_total = Column(Integer, nullable=False)
 
@@ -246,6 +257,8 @@ class OrderItem(Base):
             "barcode_id": self.barcode_id or "",
             "name": self.name,
             "unit_price": self.unit_price,
+            "unit_cost": self.unit_cost or 0,
+            "category": self.category or "Uncategorised",
             "qty": self.qty,
             "line_total": self.line_total
         }
@@ -294,6 +307,241 @@ class LedgerEntry(Base):
             "staff": self.staff_name or "",
             "ref_id": self.ref_id or "",
             "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
+# ---------------------------------------------------------------------------
+# Additive accounting and stock-control schema
+# ---------------------------------------------------------------------------
+
+class AccountingJournalEntry(Base):
+    """Immutable journal header. Reversals are posted as separate entries."""
+    __tablename__ = "accounting_journal_entries"
+
+    id = Column(String(64), primary_key=True)
+    reference = Column(String(100), nullable=False, index=True)
+    source = Column(String(50), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    status = Column(String(20), default="POSTED", nullable=False, index=True)
+    occurred_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_by_id = Column(String(50), nullable=True)
+    created_by_name = Column(String(100), nullable=True)
+    reversal_of_id = Column(String(64), nullable=True, index=True)
+
+    lines = relationship(
+        "AccountingJournalLine", back_populates="entry", cascade="all, delete-orphan"
+    )
+
+    def to_dict(self, include_lines=False):
+        data = {
+            "id": self.id,
+            "reference": self.reference,
+            "source": self.source,
+            "description": self.description or "",
+            "status": self.status,
+            "occurred_at": self.occurred_at.isoformat() + "Z" if self.occurred_at else None,
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
+            "created_by_id": self.created_by_id or "",
+            "created_by_name": self.created_by_name or "",
+            "reversal_of_id": self.reversal_of_id or "",
+        }
+        if include_lines:
+            data["lines"] = [line.to_dict() for line in self.lines]
+        return data
+
+
+class AccountingJournalLine(Base):
+    __tablename__ = "accounting_journal_lines"
+
+    id = Column(String(64), primary_key=True)
+    journal_entry_id = Column(
+        String(64),
+        ForeignKey("accounting_journal_entries.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    account_code = Column(String(20), nullable=False, index=True)
+    account_name = Column(String(120), nullable=False, index=True)
+    debit = Column(Integer, default=0, nullable=False)
+    credit = Column(Integer, default=0, nullable=False)
+    memo = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    entry = relationship("AccountingJournalEntry", back_populates="lines")
+
+    __table_args__ = (
+        CheckConstraint("debit >= 0", name="ck_journal_line_debit_nonnegative"),
+        CheckConstraint("credit >= 0", name="ck_journal_line_credit_nonnegative"),
+        CheckConstraint(
+            "(debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0)",
+            name="ck_journal_line_one_side",
+        ),
+        Index("idx_journal_line_account_entry", "account_code", "journal_entry_id"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "journal_entry_id": self.journal_entry_id,
+            "account_code": self.account_code,
+            "account_name": self.account_name,
+            "debit": self.debit,
+            "credit": self.credit,
+            "memo": self.memo or "",
+        }
+
+
+class ExpenseRecord(Base):
+    __tablename__ = "financial_expenses"
+
+    id = Column(String(64), primary_key=True)
+    category = Column(String(100), nullable=False, index=True)
+    amount = Column(Integer, nullable=False)
+    payment_method = Column(String(50), nullable=False, index=True)
+    vendor = Column(String(150), nullable=True, index=True)
+    receipt_reference = Column(String(120), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    status = Column(String(20), default="POSTED", nullable=False, index=True)
+    occurred_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    journal_entry_id = Column(String(64), nullable=True, index=True)
+    created_by_id = Column(String(50), nullable=True)
+    created_by_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    voided_at = Column(DateTime, nullable=True)
+    voided_by_id = Column(String(50), nullable=True)
+    void_reason = Column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_financial_expense_positive"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "category": self.category,
+            "amount": self.amount,
+            "payment_method": self.payment_method,
+            "vendor": self.vendor or "",
+            "receipt_reference": self.receipt_reference or "",
+            "notes": self.notes or "",
+            "status": self.status,
+            "occurred_at": self.occurred_at.isoformat() + "Z" if self.occurred_at else None,
+            "journal_entry_id": self.journal_entry_id or "",
+            "created_by_id": self.created_by_id or "",
+            "created_by_name": self.created_by_name or "",
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
+            "voided_at": self.voided_at.isoformat() + "Z" if self.voided_at else None,
+            "void_reason": self.void_reason or "",
+        }
+
+
+class StockLot(Base):
+    __tablename__ = "financial_stock_lots"
+
+    id = Column(String(64), primary_key=True)
+    lot_code = Column(String(50), unique=True, nullable=False, index=True)
+    supplier = Column(String(150), nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    acquisition_cost = Column(Integer, nullable=False)
+    shipping_cost = Column(Integer, default=0, nullable=False)
+    total_landed_cost = Column(Integer, nullable=False)
+    item_count = Column(Integer, nullable=False)
+    unit_cost = Column(Integer, nullable=False)
+    payment_method = Column(String(50), default="cash", nullable=False)
+    status = Column(String(30), default="OPEN", nullable=False, index=True)
+    allocated_count = Column(Integer, default=0, nullable=False)
+    acquired_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    journal_entry_id = Column(String(64), nullable=True, index=True)
+    created_by_id = Column(String(50), nullable=True)
+    created_by_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("acquisition_cost >= 0", name="ck_stock_lot_acquisition_nonnegative"),
+        CheckConstraint("shipping_cost >= 0", name="ck_stock_lot_shipping_nonnegative"),
+        CheckConstraint("item_count > 0", name="ck_stock_lot_items_positive"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "lot_code": self.lot_code,
+            "supplier": self.supplier,
+            "description": self.description,
+            "acquisition_cost": self.acquisition_cost,
+            "shipping_cost": self.shipping_cost,
+            "total_landed_cost": self.total_landed_cost,
+            "item_count": self.item_count,
+            "unit_cost": self.unit_cost,
+            "payment_method": self.payment_method,
+            "status": self.status,
+            "allocated_count": self.allocated_count,
+            "remaining_count": max(0, self.item_count - self.allocated_count),
+            "acquired_at": self.acquired_at.isoformat() + "Z" if self.acquired_at else None,
+            "journal_entry_id": self.journal_entry_id or "",
+            "created_by_name": self.created_by_name or "",
+        }
+
+
+class InventoryAdjustment(Base):
+    __tablename__ = "financial_inventory_adjustments"
+
+    id = Column(String(64), primary_key=True)
+    product_id = Column(String(50), nullable=False, index=True)
+    adjustment_type = Column(String(30), nullable=False, index=True)
+    quantity = Column(Integer, default=0, nullable=False)
+    old_price = Column(Integer, nullable=True)
+    new_price = Column(Integer, nullable=True)
+    loss_amount = Column(Integer, default=0, nullable=False)
+    reason = Column(Text, nullable=True)
+    journal_entry_id = Column(String(64), nullable=True, index=True)
+    created_by_id = Column(String(50), nullable=True)
+    created_by_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "product_id": self.product_id,
+            "adjustment_type": self.adjustment_type,
+            "quantity": self.quantity,
+            "old_price": self.old_price,
+            "new_price": self.new_price,
+            "loss_amount": self.loss_amount,
+            "reason": self.reason or "",
+            "journal_entry_id": self.journal_entry_id or "",
+            "created_by_name": self.created_by_name or "",
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
+        }
+
+
+class InventoryLock(Base):
+    __tablename__ = "pos_inventory_locks"
+
+    id = Column(String(64), primary_key=True)
+    product_id = Column(String(50), nullable=False, index=True)
+    lock_owner = Column(String(100), nullable=False, index=True)
+    quantity = Column(Integer, default=1, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_by_id = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("product_id", "lock_owner", name="uq_pos_lock_product_owner"),
+        CheckConstraint("quantity > 0", name="ck_pos_inventory_lock_positive"),
+        Index("idx_pos_lock_product_expiry", "product_id", "expires_at"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "product_id": self.product_id,
+            "lock_owner": self.lock_owner,
+            "quantity": self.quantity,
+            "expires_at": self.expires_at.isoformat() + "Z" if self.expires_at else None,
         }
 
 

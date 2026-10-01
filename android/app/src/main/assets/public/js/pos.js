@@ -16,6 +16,17 @@
 
   /* ---------- header: cashier pill + network status ---------- */
   const cashier = me || { name: "Staff", role: Auth.locked() ? "staff" : "open access" };
+  const LOCK_OWNER_KEY = "adonai-pos-lock-owner";
+  let lockOwner = "";
+  try {
+    lockOwner = sessionStorage.getItem(LOCK_OWNER_KEY) || "";
+    if (!lockOwner) {
+      lockOwner = `POS-${(cashier.id || "TERMINAL")}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+      sessionStorage.setItem(LOCK_OWNER_KEY, lockOwner);
+    }
+  } catch (e) {
+    lockOwner = `POS-${(cashier.id || "TERMINAL")}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  }
   $("#meName").textContent = cashier.name;
   $("#meRole").textContent = cashier.role;
   $("#meRole").className = "role";
@@ -55,17 +66,11 @@
     }
   });
 
-  function setNet() {
-    const online = navigator.onLine;
-    const pill = $("#netPill");
-    pill.classList.toggle("offline", !online);
-    pill.innerHTML = `<span class="dot"></span>${online ? "Sync Live" : "Reconnecting…"}`;
-  }
-  window.addEventListener("online", setNet);
-  window.addEventListener("offline", setNet);
-  setNet();
+  // Synchronization remains automatic in DB; repeated toolbar status pills are
+  // intentionally omitted so the register stays focused on checkout.
 
-  const doExitPos = () => {
+  const doExitPos = async () => {
+    try { await DB.releaseInventoryLockOwner(lockOwner); } catch (e) {}
     Auth.signOut();                       // revoke staff privileges
     location.href = "login.html";         // return to terminal login
   };
@@ -133,8 +138,6 @@
     }
   };
 
-  const btnOpenWebStore = $("#btnOpenWebStore");
-  if (btnOpenWebStore) btnOpenWebStore.addEventListener("click", openLiveWebStorefront);
   const btnSbOpenWebStore = $("#btnSbOpenWebStore");
   if (btnSbOpenWebStore) btnSbOpenWebStore.addEventListener("click", openLiveWebStorefront);
 
@@ -215,12 +218,12 @@
   let installPromptEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPromptEvt = e; });
 
-  function handleScan(code) {
+  async function handleScan(code) {
     const p = DB.findByBarcode(code);
     if (!p) { flash(`✗ No product for barcode "${code}"`, false); beep(false); return; }
     if (p.in_stock_count <= 0) { flash(`✗ "${p.name}" is sold out`, false); beep(false); return; }
-    if (!addLine(p.id)) return;
-    flash(`✓ Added: ${p.name} — ${DB.ugx(p.selling_price)}`, true);
+    if (!(await addLine(p.id))) return;
+    flash(`✓ Held for this POS: ${p.name} — ${DB.ugx(p.selling_price)}`, true);
     beep(true);
   }
 
@@ -283,9 +286,9 @@
       </button>`;
     }).join("") : `<p class="cart-empty">No items match.</p>`;
   }
-  $("#tileGrid").addEventListener("click", e => {
+  $("#tileGrid").addEventListener("click", async e => {
     const t = e.target.closest("[data-tile]");
-    if (t) addLine(t.dataset.tile);
+    if (t) await addLine(t.dataset.tile);
   });
 
   /* ============================================================
@@ -312,15 +315,31 @@
     }, { passive: true });
   }
 
+  const lockQueues = new Map();
   function addLine(pid) {
-    const p = products.find(x => x.id === pid);
-    if (!p || p.in_stock_count <= 0) { flash("✗ Item unavailable", false); beep(false); return false; }
-    const l = cart.find(x => x.product_id === pid);
-    const cur = l ? l.qty : 0;
-    if (cur + 1 > p.in_stock_count) { flash(`✗ Only ${p.in_stock_count} in stock for "${p.name}"`, false); beep(false); return false; }
-    if (l) l.qty++; else cart.push({ product_id: pid, qty: 1 });
-    renderCart();
-    return true;
+    const prior = lockQueues.get(pid) || Promise.resolve();
+    const task = prior.catch(() => false).then(async () => {
+      const p = products.find(x => x.id === pid);
+      if (!p || p.in_stock_count <= 0) { flash("✗ Item unavailable", false); beep(false); return false; }
+      const current = cart.find(x => x.product_id === pid);
+      const quantity = current ? current.qty : 0;
+      if (quantity + 1 > p.in_stock_count) { flash(`✗ Only ${p.in_stock_count} in stock for "${p.name}"`, false); beep(false); return false; }
+      try {
+        await DB.acquireInventoryLock(pid, lockOwner, 1);
+        const line = cart.find(x => x.product_id === pid);
+        if (line) line.qty++; else cart.push({ product_id: pid, qty: 1 });
+        renderCart();
+        return true;
+      } catch (error) {
+        flash("✗ " + (error.message || "Could not reserve this item"), false);
+        beep(false);
+        DB.pullProducts(false);
+        return false;
+      }
+    });
+    lockQueues.set(pid, task);
+    task.finally(() => { if (lockQueues.get(pid) === task) lockQueues.delete(pid); });
+    return task;
   }
 
   function clampCart() {
@@ -373,22 +392,44 @@
     btn.textContent = "Charge · " + DB.ugx(cartTotal());
   }
 
-  $("#cartLines").addEventListener("click", e => {
+  $("#cartLines").addEventListener("click", async e => {
     const dec = e.target.closest("[data-dec]"), inc = e.target.closest("[data-inc]"), rm = e.target.closest("[data-rm]");
-    if (dec) { const l = cart.find(x => x.product_id === dec.dataset.dec); if (l) l.qty = Math.max(1, l.qty - 1); }
-    if (inc) {
-      const l = cart.find(x => x.product_id === inc.dataset.inc);
-      const p = products.find(x => x.id === inc.dataset.inc);
-      if (l && p) {
-        if (l.qty + 1 > p.in_stock_count) { flash(`✗ Only ${p.in_stock_count} in stock`, false); beep(false); return; }
-        l.qty++;
+    try {
+      if (dec) {
+        const l = cart.find(x => x.product_id === dec.dataset.dec);
+        if (l && l.qty > 1) {
+          await DB.releaseInventoryLock(l.product_id, lockOwner, 1);
+          l.qty--;
+        }
       }
+      if (inc) await addLine(inc.dataset.inc);
+      if (rm) {
+        const l = cart.find(x => x.product_id === rm.dataset.rm);
+        if (l) await DB.releaseInventoryLock(l.product_id, lockOwner, l.qty);
+        cart = cart.filter(x => x.product_id !== rm.dataset.rm);
+      }
+      if (dec || rm) renderCart();
+    } catch (error) {
+      flash("✗ " + (error.message || "Could not update the POS hold"), false);
+      beep(false);
     }
-    if (rm) cart = cart.filter(x => x.product_id !== rm.dataset.rm);
-    if (dec || inc || rm) renderCart();
   });
 
-  $("#btnClear").addEventListener("click", () => { cart = []; renderCart(); });
+  $("#btnClear").addEventListener("click", async () => {
+    await Promise.allSettled(Array.from(lockQueues.values()));
+    try { await DB.releaseInventoryLockOwner(lockOwner); } catch (error) { flash("⚠ Hold release will retry automatically", false); }
+    cart = [];
+    renderCart();
+  });
+
+  // Extend active holds while the cart is open. The short server expiry also
+  // guarantees abandoned or crashed terminals cannot block stock indefinitely.
+  window.setInterval(() => {
+    if (cart.length && !document.hidden) DB.heartbeatInventoryLocks(lockOwner).catch(() => {});
+  }, 60000);
+  window.addEventListener("pagehide", () => {
+    if (cart.length) DB.releaseInventoryLockOwner(lockOwner, true).catch(() => {});
+  });
 
   /* ============================================================
      TENDER SETTLEMENT
@@ -523,7 +564,8 @@
         customer_name: custName || "Walk-in Guest",
         customer_phone: custPhone || "",
         customer_location: custLoc,
-        customer_notes: custNotes
+        customer_notes: custNotes,
+        lock_owner: lockOwner
       });
       lastSale = sale;
       cart = [];
@@ -539,6 +581,12 @@
     } catch (err) {
       flash("✗ " + (err.message || "Sale failed"), false);
       beep(false);
+      if (Number(err.status) === 409) {
+        try { await DB.releaseInventoryLockOwner(lockOwner); } catch (e) {}
+        cart = [];
+        renderCart();
+      }
+      try { await DB.pullOperationalData(); } catch (e) {}
       refreshProducts();                 // reconcile stock (someone else may have sold it)
       closeTender();
     } finally {
@@ -676,6 +724,7 @@
   const intakeBox = $("#intakeBox");
   let intakeTerm = "";
   let intakeImageState = { image_url: "" };
+  let availableStockLots = [];
 
   const openIntake = () => { intakeTerm = ""; openIntakeList(); };
   const closeIntake = () => intakeBackdrop.classList.remove("open");
@@ -710,8 +759,16 @@
     });
   }
 
-  function openIntakeEditor(id) {
+  async function openIntakeEditor(id) {
     const p = id ? DB.getProduct(id) : null;
+    if (!p) {
+      try {
+        const data = await DB.financeRequest("stock-lots", { method: "GET" });
+        availableStockLots = (data.stock_lots || []).filter(lot => lot.remaining_count > 0);
+      } catch (e) {
+        availableStockLots = [];
+      }
+    }
     intakeImageState = { image_url: p ? (p.image_url || "") : "" };
     intakeBox.innerHTML = `
       <div class="intake-head"><h3>${p ? "Edit item" : "New item"}</h3><button class="btn sm ghost" data-intake-close>✕</button></div>
@@ -726,6 +783,7 @@
         <div><label class="fld-label">Demographic</label><select class="in" data-f-demo>${DB.DEMOGRAPHICS.map(d => `<option ${p && p.demographic === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
         <div><label class="fld-label">Size</label><input class="in" data-f-size value="${p ? esc(p.size) : ""}" placeholder="M / 42 / -" /></div>
         <div><label class="fld-label">Condition / grade</label><select class="in" data-f-cond>${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
+        ${p ? "" : `<div><label class="fld-label">Stock lot / bale allocation</label><select class="in" data-f-lot><option value="">No registered lot</option>${availableStockLots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left · ${DB.ugx(lot.unit_cost)}/item</option>`).join("")}</select></div>`}
         <div><label class="fld-label">Cost (UGX)</label><input class="in" type="number" min="0" data-f-cost value="${p ? p.cost_price : ""}" /></div>
         <div><label class="fld-label">Selling (UGX)</label><input class="in" type="number" min="0" data-f-sell value="${p ? p.selling_price : ""}" /></div>
         <div><label class="fld-label">Compare-at (UGX)</label><input class="in" type="number" min="0" data-f-compare value="${p ? p.compare_price : ""}" /></div>
@@ -737,6 +795,12 @@
         <button class="btn primary" data-intake-save="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item to stock"}</button>
       </div>`;
     Intake.bindImageEditor(intakeBox, intakeImageState);
+    const lotSelect = intakeBox.querySelector("[data-f-lot]");
+    if (lotSelect) lotSelect.addEventListener("change", () => {
+      const option = lotSelect.options[lotSelect.selectedIndex];
+      const cost = intakeBox.querySelector("[data-f-cost]");
+      if (option && option.dataset.unitCost && cost) cost.value = option.dataset.unitCost;
+    });
   }
 
   intakeBox.addEventListener("click", async e => {

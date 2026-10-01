@@ -35,14 +35,14 @@
       "name": "Catalog Intake",
       "short_name": "Intake",
       "description": "Intake new vintage items & photos",
-      "url": "/admin.html#intake",
+      "url": "/admin.html?view=intake",
       "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
     },
     {
       "name": "Fulfillment & Orders",
       "short_name": "Orders",
       "description": "Manage order fulfillment & boda riders",
-      "url": "/admin.html#sales",
+      "url": "/admin.html?view=sales",
       "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
     }
   ]
