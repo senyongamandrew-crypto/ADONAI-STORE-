@@ -32,15 +32,15 @@
 
     <nav class="nav" id="posNavList">
       <a class="nav-item active" href="pos.html" title="Open the cashier register"><span class="nav-ico">📥</span><span>POS Register</span></a>
-      <a class="nav-item" href="admin.html#sales"><span class="nav-ico">📦</span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
-      <a class="nav-item" href="admin.html#inventory"><span class="nav-ico">🔖</span><span>Inventory Rack</span></a>
-      <a class="nav-item" href="admin.html#intake"><span class="nav-ico">➕</span><span>Catalog Intake</span></a>
-      <a class="nav-item" href="admin.html#customers"><span class="nav-ico">👥</span><span>Customer Book</span></a>
-      <a class="nav-item" href="admin.html#dispatch"><span class="nav-ico">🛵</span><span>Boda Riders &amp; Dispatch</span></a>
-      <a class="nav-item" href="admin.html#overview"><span class="nav-ico">📊</span><span>Sales Analytics</span></a>
-      <a class="nav-item" href="admin.html#payments"><span class="nav-ico">📒</span><span>Financial Ledger</span></a>
-      <a class="nav-item" href="admin.html#staff"><span class="nav-ico">🔑</span><span>Staff &amp; Permissions</span></a>
-      <a class="nav-item" href="admin.html#settings"><span class="nav-ico">⚙️</span><span>Store Settings</span></a>
+      <a class="nav-item" href="admin.html?view=sales" data-console-view="sales"><span class="nav-ico">📦</span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
+      <a class="nav-item" href="admin.html?view=inventory" data-console-view="inventory"><span class="nav-ico">🔖</span><span>Inventory Rack</span></a>
+      <a class="nav-item" href="admin.html?view=intake" data-console-view="intake"><span class="nav-ico">➕</span><span>Catalog Intake</span></a>
+      <a class="nav-item" href="admin.html?view=customers" data-console-view="customers"><span class="nav-ico">👥</span><span>Customer Book</span></a>
+      <a class="nav-item" href="admin.html?view=dispatch" data-console-view="dispatch"><span class="nav-ico">🛵</span><span>Boda Riders &amp; Dispatch</span></a>
+      <a class="nav-item" href="admin.html?view=overview" data-console-view="overview"><span class="nav-ico">📊</span><span>Sales Analytics</span></a>
+      <a class="nav-item" href="admin.html?view=payments" data-console-view="payments"><span class="nav-ico">📒</span><span>Financial Ledger</span></a>
+      <a class="nav-item" href="admin.html?view=staff" data-console-view="staff"><span class="nav-ico">🔑</span><span>Staff &amp; Permissions</span></a>
+      <a class="nav-item" href="admin.html?view=settings" data-console-view="settings"><span class="nav-ico">⚙️</span><span>Store Settings</span></a>
       <button class="nav-item store-nav-item" id="btnSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico">🌐</span><span>Open Live Web Storefront ↗</span></button>
     </nav>
 
@@ -78,7 +78,7 @@
     <p class="kicker">IN-STORE POINT OF SALE</p>
     <h1>Cashier Register (UGX)</h1>
     <div class="pos-title-links">
-      <a class="pill" href="admin.html#inventory">👋 Stock Management &amp; Delete →</a>
+      <a class="pill" href="admin.html?view=inventory">👋 Stock Management &amp; Delete →</a>
       <span class="sync-active"><span class="dot"></span>Sync Active</span>
     </div>
   </div>
@@ -244,8 +244,8 @@
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
 <script src="js/db.js?v=2.5"></script>
-<script src="js/auth.js"></script>
+<script src="js/auth.js?v=2.6"></script>
 <script src="js/intake.js"></script>
-<script src="js/pos.js?v=2.5"></script>
+<script src="js/pos.js?v=2.6"></script>
 </body>
 </html>

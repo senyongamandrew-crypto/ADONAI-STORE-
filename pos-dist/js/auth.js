@@ -28,6 +28,17 @@
     try { return location.pathname.split("/").pop() || "index.html"; } catch (e) { return "index.html"; }
   }
 
+  function requestedPage() {
+    try {
+      // Preserve both query routes and legacy fragments through authentication.
+      // Without this, every admin destination returned to the default analytics
+      // view after login, making all POS drawer links appear identical.
+      return page() + (location.search || "") + (location.hash || "");
+    } catch (e) {
+      return page();
+    }
+  }
+
   const Auth = {
     /** current signed-in staff member, or null */
     me() {
@@ -109,7 +120,7 @@
         return me; // free access mode
       }
       if (!me) {
-        location.replace("login.html?next=" + encodeURIComponent(page() + location.search));
+        location.replace("login.html?next=" + encodeURIComponent(requestedPage()));
         return null;
       }
       if (opts.role === "admin" && me.role !== "admin") {
@@ -126,7 +137,7 @@
       authBc.onmessage = ev => {
         if (ev.data && ev.data.type === "SIGN_OUT") {
           if (Auth.locked() && (location.pathname.endsWith("pos.html") || location.pathname.endsWith("admin.html"))) {
-            location.replace("login.html?next=" + encodeURIComponent(page() + location.search));
+            location.replace("login.html?next=" + encodeURIComponent(requestedPage()));
           }
         }
       };

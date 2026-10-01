@@ -5,7 +5,21 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
   const params = new URLSearchParams(location.search);
-  const next = params.get("next") || "pos.html";
+
+  function safeNext(rawTarget) {
+    const fallback = "pos.html";
+    try {
+      const target = new URL(rawTarget || fallback, location.href);
+      if (target.origin !== location.origin) return fallback;
+      const filename = target.pathname.split("/").pop();
+      if (!["pos.html", "admin.html"].includes(filename)) return fallback;
+      return filename + target.search + target.hash;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  const next = safeNext(params.get("next"));
 
   const sessionPane = $("#sessionPane");
   const openPane = $("#openPane");
@@ -33,12 +47,10 @@
 
     const btnSessAdmin = $("#btnSessAdmin");
     if (btnSessAdmin) {
-      if (activeMe.role === "admin") {
-        btnSessAdmin.hidden = false;
-        btnSessAdmin.href = (next && next.includes("admin.html")) ? next : "admin.html";
-      } else {
-        btnSessAdmin.hidden = true;
-      }
+      // The operations console is available to authenticated terminal staff;
+      // protected mutations still require the secondary Admin Master Key.
+      btnSessAdmin.hidden = false;
+      btnSessAdmin.href = next.includes("admin.html") ? next : "admin.html?view=overview";
     }
 
     $("#btnSessSignOut").addEventListener("click", () => {
@@ -121,12 +133,10 @@
     toastHint(`✓ Verified: ${staff.name} (${staff.role.toUpperCase()}) — loading terminal...`, false, true);
 
     setTimeout(() => {
-      // Cashiers always land on pos.html; admins go where they were headed or pos.html
-      if (staff.role === "cashier") {
-        location.replace("pos.html");
-      } else {
-        location.replace(next && next !== "login.html" ? next : "pos.html");
-      }
+      // Return every verified terminal user to the exact drawer destination that
+      // requested authentication (including ?view=...). Administrative changes
+      // inside that screen remain Master-Key protected.
+      location.replace(next);
     }, 350);
   }
 

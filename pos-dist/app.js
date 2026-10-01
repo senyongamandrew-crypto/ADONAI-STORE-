@@ -5,7 +5,10 @@
    ============================================================ */
 (function () {
   "use strict";
-  const me = Auth.guard({ role: "admin" });     // open access until the lock is enabled
+  // Every destination exposed by the POS drawer belongs to this operations
+  // console, so any authenticated terminal user may open it. Destructive and
+  // security-sensitive controls remain protected by the secondary Master Key.
+  const me = Auth.guard({ role: null });
   if (Auth.locked() && !me) return;
 
   const $ = (s, r) => (r || document).querySelector(s);
@@ -207,29 +210,44 @@
 
   /* =============== navigation =============== */
   const VALID_VIEWS = ["overview", "sales", "inventory", "intake", "customers", "dispatch", "payments", "staff", "settings"];
-  function currentHashView() {
-    const h = (location.hash || "").replace(/^#\/?/, "").trim();
-    return VALID_VIEWS.includes(h) ? h : null;
-  }
-  let currentView = currentHashView() || "overview";
 
-  function setView(v, updateHash = true) {
+  function requestedView() {
+    // Query-string routes survive Android WebView navigation and the staff-login
+    // round trip. Continue accepting old #inventory-style links as a fallback.
+    const queryView = new URLSearchParams(location.search).get("view");
+    if (VALID_VIEWS.includes(queryView)) return queryView;
+    const hashView = (location.hash || "").replace(/^#\/?/, "").trim();
+    return VALID_VIEWS.includes(hashView) ? hashView : null;
+  }
+
+  function viewUrl(view) {
+    const url = new URL(location.href);
+    url.searchParams.set("view", view);
+    url.hash = "";
+    return url.pathname + url.search;
+  }
+
+  let currentView = requestedView() || "overview";
+
+  function setView(v, updateUrl = true) {
     if (!VALID_VIEWS.includes(v)) v = "overview";
     currentView = v;
-    if (updateHash) {
-      if (location.hash.replace(/^#\/?/, "") !== v) {
-        history.replaceState(null, "", "#" + v);
-      }
-    }
+    const routeAlreadyActive = new URLSearchParams(location.search).get("view") === v && !location.hash;
+    if (updateUrl && !routeAlreadyActive) history.pushState({ view: v }, "", viewUrl(v));
     $$(".nav-item[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     $$(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
     shell.classList.remove("sb-open");
     render();
   }
+
   $$(".nav-item[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+
+  // Browser/Android back and forward buttons restore the correct console view.
+  window.addEventListener("popstate", () => setView(requestedView() || "overview", false));
+  // Legacy bookmarked hashes still work and are upgraded to the durable route.
   window.addEventListener("hashchange", () => {
-    const hv = currentHashView();
-    if (hv && hv !== currentView) setView(hv, false);
+    const target = requestedView();
+    if (target && target !== currentView) setView(target, true);
   });
   document.body.addEventListener("click", e => {
     const g = e.target.closest("[data-goto]"); if (g) setView(g.dataset.goto);
