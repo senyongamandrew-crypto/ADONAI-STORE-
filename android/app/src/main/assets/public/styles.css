@@ -910,3 +910,47 @@ html[data-pointer="touch"] .lnk { padding: 6px 2px; }
   .journal-filters .field:first-child { grid-column:auto; }
   .date-control { width:100%; justify-content:space-between; }
 }
+
+/* Financial Ledgers visual refresh — v4.1 */
+.console-toolbar { min-height: 42px; justify-content: flex-start; }
+.menu-trigger { background:#fff; box-shadow:0 5px 16px rgba(31,25,19,.06); }
+.store-nav-item {
+  margin-top:8px; border:1px solid rgba(213,151,91,.28); color:#f2c99f;
+  background:linear-gradient(135deg,rgba(177,81,43,.22),rgba(255,255,255,.035));
+}
+.store-nav-item:hover { background:linear-gradient(135deg,rgba(177,81,43,.38),rgba(255,255,255,.08)); color:#fff; }
+.finance-title-row {
+  position:relative; isolation:isolate; overflow:hidden; align-items:center;
+  margin-bottom:16px; padding:clamp(20px,3vw,30px); border:1px solid #dfe9e2;
+  border-radius:22px; background:
+    radial-gradient(circle at 88% 12%,rgba(184,131,50,.18),transparent 32%),
+    linear-gradient(135deg,#fbfdfb 0%,#eef7f1 58%,#f8f1e6 100%);
+  box-shadow:0 14px 34px rgba(23,37,31,.08);
+}
+.finance-title-row::after {
+  content:""; position:absolute; z-index:-1; right:-42px; bottom:-72px;
+  width:210px; height:210px; border:1px solid rgba(31,107,77,.12); border-radius:50%;
+  box-shadow:0 0 0 28px rgba(31,107,77,.035),0 0 0 58px rgba(184,131,50,.025);
+}
+.finance-title-row .kicker { margin:0 0 8px; color:#986333; }
+.finance-title-row h1 { margin:0; font-size:clamp(29px,4vw,42px); line-height:1.03; letter-spacing:-.035em; }
+.finance-title-row .muted { max-width:720px; margin-top:10px; color:#59645d; font-size:13px; line-height:1.55; }
+.finance-title-row .finance-live {
+  flex:0 0 auto; border-color:rgba(31,107,77,.18); background:rgba(255,255,255,.78);
+  box-shadow:0 7px 20px rgba(31,107,77,.08); backdrop-filter:blur(8px);
+}
+.finance-tabs { padding:7px; gap:7px; border-color:#dedbd3; background:rgba(255,255,255,.9); }
+.finance-tab { min-height:48px; border:1px solid transparent; font-weight:750; }
+.finance-tab:not(.active):hover { border-color:#e1ddd4; background:#f6f4ef; }
+.finance-tab.active { background:linear-gradient(135deg,#17251f,#2e5544); }
+
+@media (max-width:700px) {
+  .console-toolbar { margin-bottom:12px; }
+  .finance-title-row { padding:19px 17px; border-radius:18px; gap:15px; }
+  .finance-title-row h1 { font-size:31px; }
+  .finance-title-row .muted { font-size:12.5px; }
+  .finance-title-row .finance-live { width:auto; min-width:0; padding:8px 11px; }
+  .finance-title-row .finance-live small { display:none; }
+  .finance-tabs { position:relative; top:auto; padding:6px; border-radius:14px; }
+  .finance-tab { min-height:44px; padding:9px 12px; }
+}

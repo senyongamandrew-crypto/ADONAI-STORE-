@@ -713,3 +713,12 @@ html[data-device="phone"][data-density="hidpi"] .tile .t-name { line-height: 1.2
 @media (prefers-reduced-motion: reduce) {
   .cart-body, .cart-toggle .ct-chevron, .tile, .pos-sidebar { transition: none !important; }
 }
+
+/* Storefront launcher belongs exclusively in the navigation drawer. */
+.pos-sidebar .store-nav-item {
+  margin-top:8px; border:1px solid rgba(213,151,91,.28); color:#f2c99f;
+  background:linear-gradient(135deg,rgba(177,81,43,.22),rgba(255,255,255,.035));
+}
+.pos-sidebar .store-nav-item:hover {
+  background:linear-gradient(135deg,rgba(177,81,43,.38),rgba(255,255,255,.08)); color:#fff;
+}

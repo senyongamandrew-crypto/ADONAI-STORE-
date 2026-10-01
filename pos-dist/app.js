@@ -156,15 +156,9 @@
     }
   });
 
-  // sync live ticker — Ns since last DB touch, `Auto 5s` cadence label
-  let lastTouch = Date.now();
-  setInterval(() => {
-    const txt = $("#syncText");
-    if (!navigator.onLine) { txt.textContent = "Reconnecting…"; return; }
-    txt.textContent = `Sync Live · ${Math.min(59, Math.floor((Date.now() - lastTouch) / 1000))}s | Auto 5s`;
-  }, 1000);
+  // Connectivity stays automatic and unobtrusive. Navigation no longer repeats
+  // network/storefront pills on every operational dashboard.
   window.addEventListener("online", () => render());
-  window.addEventListener("offline", () => { $("#syncText").textContent = "Reconnecting…"; });
 
   let deferredInstall = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredInstall = e; });
@@ -224,8 +218,6 @@
     }
   };
 
-  const btnAdminOpenWebStore = $("#btnAdminOpenWebStore");
-  if (btnAdminOpenWebStore) btnAdminOpenWebStore.addEventListener("click", openAdminWebStorefront);
   const btnAdminSbOpenWebStore = $("#btnAdminSbOpenWebStore");
   if (btnAdminSbOpenWebStore) btnAdminSbOpenWebStore.addEventListener("click", openAdminWebStorefront);
 
@@ -1805,7 +1797,6 @@
     const webPend = allSales().filter(s => s.channel === "web" && s.status === "pending").length;
     $("#navWebBadge").textContent = webPend || "";
     $("#navStockBadge").textContent = DB.listProducts().filter(p => p.in_stock_count <= 0).length || "";
-    lastTouch = Date.now();
   }
   window.renderAll = render;
   DB.on("*", () => render());

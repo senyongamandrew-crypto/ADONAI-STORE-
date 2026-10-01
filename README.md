@@ -95,7 +95,7 @@ checkout can sync with the live backend.
 
 ## 3. Cross-Navigation (POS to Website Only)
 
-- In the Android POS topbar and sidebar, tap **"🌐 Open Live Web Storefront ↗"**.
+- In the Android POS navigation drawer, tap **"🌐 Open Live Web Storefront ↗"**. The launcher is intentionally kept out of dashboard headers.
 - This launches an external Android Intent (`Intent.ACTION_VIEW`) through the native WebView bridge, opening the live website in the phone's external browser (Chrome / Samsung Internet).
 - The public website contains **no return link** to the POS app. Navigating back to the cashier terminal is done via Android's task manager / app switcher.
 

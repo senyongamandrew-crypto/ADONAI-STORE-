@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=3.4" />
+<link rel="stylesheet" href="styles.css?v=4.1" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="apple-touch-icon" href="assets/favicon.svg" />
 <link rel="manifest" href="manifest.json" />
@@ -63,12 +63,8 @@
   <main class="main">
 
     <!-- shared console topbar -->
-    <header class="ol-topbar">
-      <button class="pill" id="btnMenu">☰ Menu</button>
-      <div class="ol-topbar-right">
-        <span class="pill live" id="syncPill"><span class="live-dot"></span><span id="syncText">Sync Live · 0s | Auto 5s</span></span>
-        <button class="pill store" id="btnAdminOpenWebStore" type="button" title="Launch the live customer website in device browser">🌐 Open Live Web Storefront ↗</button>
-      </div>
+    <header class="ol-topbar console-toolbar">
+      <button class="pill menu-trigger" id="btnMenu" type="button" aria-label="Open operations menu">☰ <span>Menu</span></button>
     </header>
 
     <!-- ==================== SALES ANALYTICS ==================== -->
@@ -446,6 +442,6 @@
 <script src="js/db.js?v=3.0"></script>
 <script src="js/auth.js?v=2.6"></script>
 <script src="js/intake.js?v=3.0"></script>
-<script src="app.js?v=4.0"></script>
+<script src="app.js?v=4.1"></script>
 </body>
 </html>

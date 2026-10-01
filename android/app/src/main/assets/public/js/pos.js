@@ -66,15 +66,8 @@
     }
   });
 
-  function setNet() {
-    const online = navigator.onLine;
-    const pill = $("#netPill");
-    pill.classList.toggle("offline", !online);
-    pill.innerHTML = `<span class="dot"></span>${online ? "Sync Live" : "Reconnecting…"}`;
-  }
-  window.addEventListener("online", setNet);
-  window.addEventListener("offline", setNet);
-  setNet();
+  // Synchronization remains automatic in DB; repeated toolbar status pills are
+  // intentionally omitted so the register stays focused on checkout.
 
   const doExitPos = async () => {
     try { await DB.releaseInventoryLockOwner(lockOwner); } catch (e) {}
@@ -145,8 +138,6 @@
     }
   };
 
-  const btnOpenWebStore = $("#btnOpenWebStore");
-  if (btnOpenWebStore) btnOpenWebStore.addEventListener("click", openLiveWebStorefront);
   const btnSbOpenWebStore = $("#btnSbOpenWebStore");
   if (btnSbOpenWebStore) btnSbOpenWebStore.addEventListener("click", openLiveWebStorefront);
 
