@@ -83,6 +83,28 @@ SECURITY_HEADERS = [
      "script-src 'self' 'unsafe-inline';")
 ]
 
+# The APK serves its bundled UI from WebViewAssetLoader. Its HTTPS-like
+# appassets origin is therefore cross-origin to the live API. Keep this list
+# explicit rather than enabling CORS for every website.
+MOBILE_APP_ORIGINS = {
+    "https://appassets.androidplatform.net",
+    "https://localhost",       # Capacitor Android scheme
+    "capacitor://localhost",  # Older Capacitor projects
+}
+
+
+def api_cors_headers(origin: str) -> list[tuple[str, str]]:
+    """Return CORS headers for the native POS origin, if it is allowed."""
+    if origin not in MOBILE_APP_ORIGINS:
+        return []
+    return [
+        ("Access-Control-Allow-Origin", origin),
+        ("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Terminal-Key, X-Staff-Token"),
+        ("Access-Control-Max-Age", "600"),
+        ("Vary", "Origin"),
+    ]
+
 
 def get_cache_headers(filepath: str) -> list[tuple[str, str]]:
     """Generates optimal caching headers for static assets vs dynamic pages."""
@@ -113,6 +135,16 @@ def wsgi_app(environ, start_response):
 
     # 1. API Route Handling
     if raw_path.startswith("/api/"):
+        origin = environ.get("HTTP_ORIGIN", "")
+        cors = api_cors_headers(origin)
+
+        # WebView fetches with Authorization/X-Terminal-Key trigger a CORS
+        # preflight. It must be answered before the API router reads a body.
+        if method == "OPTIONS":
+            headers = [("Content-Length", "0"), *cors, *SECURITY_HEADERS]
+            start_response("204 No Content", headers)
+            return [b""]
+
         body_bytes = b""
         try:
             content_length = int(environ.get("CONTENT_LENGTH", 0) or 0)
@@ -138,6 +170,7 @@ def wsgi_app(environ, start_response):
             ("Content-Length", str(len(response_body))),
             ("Cache-Control", "no-cache, no-store, must-revalidate")
         ]
+        headers.extend(cors)
         headers.extend(SECURITY_HEADERS)
 
         status_str = f"{status_code} " + ("OK" if status_code == 200 else ("Created" if status_code == 201 else "Error"))
@@ -235,12 +268,25 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
     def do_DELETE(self):
         self.handle_http(head_only=False)
 
+    def do_OPTIONS(self):
+        self.handle_http(head_only=False)
+
     def handle_http(self, head_only=False):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
         # 1. API Endpoint Dispatch
         if path.startswith("/api/"):
+            origin = self.headers.get("Origin", "")
+            cors = api_cors_headers(origin)
+            if self.command == "OPTIONS":
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                for k, v in [*cors, *SECURITY_HEADERS]:
+                    self.send_header(k, v)
+                self.end_headers()
+                return
+
             query_params = urllib.parse.parse_qs(parsed.query)
             body_bytes = b""
             try:
@@ -259,7 +305,7 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(response_body)))
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            for k, v in SECURITY_HEADERS:
+            for k, v in [*cors, *SECURITY_HEADERS]:
                 self.send_header(k, v)
             self.end_headers()
 

@@ -81,7 +81,15 @@
       siteUrl = S.app_url || S.website_url || (window.location.origin.includes("localhost") || window.location.origin.includes("0.0.0.0") || window.location.origin.includes(".app") ? window.location.origin : "https://adonaithrift.ug");
     } catch (e) {}
 
-    // 1. Capacitor Browser Plugin (Native Android intent)
+    // 1. Native Android WebView bridge (the standalone APK shell).
+    // Calling the bridge avoids window.open being swallowed by WebView versions
+    // that do not support multiple windows.
+    if (window.Android && typeof window.Android.openExternal === "function") {
+      window.Android.openExternal(siteUrl);
+      return;
+    }
+
+    // 2. Capacitor Browser Plugin (Native Android intent)
     if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
       try {
         window.Capacitor.Plugins.Browser.open({ url: siteUrl });
@@ -89,7 +97,7 @@
       } catch (err) {}
     }
 
-    // 2. System Browser intent (_system target launches external default browser)
+    // 3. System Browser intent (_system target launches external default browser)
     try {
       const win = window.open(siteUrl, "_system", "location=yes");
       if (!win) window.open(siteUrl, "_blank", "noopener,noreferrer");

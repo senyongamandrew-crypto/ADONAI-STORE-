@@ -1,25 +1,51 @@
-apply plugin: 'com.android.application'
+plugins {
+    id 'com.android.application'
+}
 
 android {
-    namespace "com.adonaithrift.pos"
+    namespace 'com.adonaithrift.pos'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.adonaithrift.pos"
+        applicationId 'com.adonaithrift.pos'
         minSdk 22
         targetSdk 34
         versionCode 20400
-        versionName "2.4.0"
+        versionName '2.4.0'
 
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        aaptOptions {
-             // Files and dirs to omit from the packaged assets inside the APK
-             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    // A debug signing key makes the CI artifact installable without checking a
+    // private production keystore into the repository. Production builds can
+    // override this with RELEASE_STORE_FILE, RELEASE_STORE_PASSWORD,
+    // RELEASE_KEY_ALIAS, and RELEASE_KEY_PASSWORD Gradle properties.
+    def releaseStoreFile = project.findProperty('RELEASE_STORE_FILE') ?: System.getenv('RELEASE_STORE_FILE')
+    def releaseStorePassword = project.findProperty('RELEASE_STORE_PASSWORD') ?: System.getenv('RELEASE_STORE_PASSWORD')
+    def releaseKeyAlias = project.findProperty('RELEASE_KEY_ALIAS') ?: System.getenv('RELEASE_KEY_ALIAS')
+    def releaseKeyPassword = project.findProperty('RELEASE_KEY_PASSWORD') ?: System.getenv('RELEASE_KEY_PASSWORD')
+
+    signingConfigs {
+        release {
+            if (releaseStoreFile) {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword ?: ''
+                keyAlias = releaseKeyAlias ?: ''
+                keyPassword = releaseKeyPassword ?: ''
+            }
         }
     }
 
     buildTypes {
         release {
+            // The default keeps the downloadable APK installable. Supplying a
+            // keystore property above automatically switches to a production
+            // signing key in the same Gradle invocation.
+            signingConfig signingConfigs.debug
+            if (releaseStoreFile) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -32,10 +58,16 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+
+    packagingOptions {
+        resources {
+            excludes += ['/META-INF/LICENSE.md', '/META-INF/LICENSE-notice.md']
+        }
+    }
 }
 
 repositories {
-    flatDir{
+    flatDir {
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }

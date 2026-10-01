@@ -3,7 +3,7 @@
 A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plot 45 Salama Road / Kibuli, Kampala, Uganda) built on a **Dual-Target Architecture**:
 
 1. 🛍️ **Public Web Storefront (Render Deployment)**: Lightweight, mobile-responsive, customer-facing e-commerce application served at `/` on Render. Public storefront contains **zero POS/admin links or authentication triggers**.
-2. 📱 **Android POS App (Native APK / Capacitor)**: Standalone cashier register and catalog intake terminal packaged into an installable Android APK (`com.adonai.store.pos`).
+2. 📱 **Android POS App (Native APK shell)**: Standalone cashier register and catalog intake terminal packaged into a real, signed Android APK (`com.adonaithrift.pos`).
 3. 🌐 **Cross-Navigation (POS to Website Only)**: The Android POS app includes a **"🌐 Open Live Web Storefront ↗"** button that triggers an external Android intent to open the live Render site in the phone's default browser. The public website has no return mechanism to the POS app.
 4. 🔒 **Real-Time Data Sync & Endpoint Security**: Atomically decrements database stock across both channels. POS backend endpoints are secured via JWT and Staff Terminal Keys (`STAFF_TERMINAL_KEY` / `ADMIN_ACCESS_PIN`).
 
@@ -51,33 +51,52 @@ A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plo
 
 ## 2. Android POS App (Native APK Setup)
 
-### Quick Install (Pre-built APK)
-The installable Android APK is available at:
+### Quick Install (CI-built APK)
+The installable APK is produced by the GitHub Actions `build-pos-apk` job and
+is available as the `adonai-pos-v2-apk` workflow artifact (or in a tagged
+release). A local build writes:
 - `dist/adonai-pos-v2.apk`
 - `android/app/build/outputs/apk/release/adonai-pos-release.apk`
 
-Transfer `dist/adonai-pos-v2.apk` to any Android phone or tablet register, enable **Install Unknown Apps**, and install.
+Transfer the verified APK to any Android phone or tablet register, enable
+**Install Unknown Apps**, and install. The repository no longer includes the
+old invalid ZIP-with-an-`.apk`-extension artifact.
 
 ### Build APK from Source
+The builder uses the Android Gradle Plugin; it does not rename a ZIP archive to `.apk`.
+Install **JDK 17**, **Android SDK platform 34/build-tools**, and **Gradle 8.2+**, then run:
+
 ```bash
+npm install
 ./build-apk.sh
 # or
 npm run build:apk
 ```
 
-### Open & Run in Android Studio (Capacitor)
+The command bundles the web assets, runs `:app:assembleRelease`, verifies the
+manifest, DEX, compiled resources, and signature, then writes the installable
+APK to `dist/adonai-pos-v2.apk`. The default CI/local artifact uses the Android
+debug signing key so it can be installed immediately. For production releases,
+pass `RELEASE_STORE_FILE`, `RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, and
+`RELEASE_KEY_PASSWORD` as Gradle properties.
+
+### Open & Run in Android Studio
 ```bash
 npm install
 npm run bundle:pos
-npx cap open android
+gradle -p android :app:assembleRelease
 ```
+
+The native shell serves its bundled files through `WebViewAssetLoader`; the
+POS API CORS allowlist includes that app origin so login, inventory intake, and
+checkout can sync with the live backend.
 
 ---
 
 ## 3. Cross-Navigation (POS to Website Only)
 
 - In the Android POS topbar and sidebar, tap **"🌐 Open Live Web Storefront ↗"**.
-- This launches an external Android Intent (`Intent.ACTION_VIEW` or Capacitor `Browser.open`), opening the live website in the phone's external browser (Chrome / Samsung Internet).
+- This launches an external Android Intent (`Intent.ACTION_VIEW`) through the native WebView bridge, opening the live website in the phone's external browser (Chrome / Samsung Internet).
 - The public website contains **no return link** to the POS app. Navigating back to the cashier terminal is done via Android's task manager / app switcher.
 
 ---
