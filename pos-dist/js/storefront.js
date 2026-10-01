@@ -255,18 +255,32 @@
     renderGrid();
   });
 
-  /* ---------- social proof star rating ---------- */
+  /* ---------- verified social proof only ---------- */
   function ratingHTML(p) {
-    const seed = (p.id.split("").reduce((a, c) => a + c.charCodeAt(0), 0) % 5) + 4.6;
-    const rating = Math.min(5.0, Number(seed.toFixed(1)));
-    const reviews = ((p.id.split("").reduce((a, c) => a + c.charCodeAt(0), 10) * 37) % 3500) + 480;
-    return `
-      <div class="star-rating" aria-label="Rated ${rating} out of 5 stars with ${reviews.toLocaleString()} reviews">
-        <span class="stars" aria-hidden="true">★★★★★</span>
-        <span class="rating-num">${rating.toFixed(1)}</span>
-        <span class="review-count">(${reviews.toLocaleString()})</span>
-      </div>`;
+    const reviews = Math.max(0, Number(p.review_count || 0));
+    const rating = Number(p.average_rating);
+    const sold = Math.max(0, Number(p.sales_count || 0));
+    if (reviews > 0 && Number.isFinite(rating) && rating >= 0 && rating <= 5) {
+      const filled = Math.round(rating);
+      return `
+        <div class="star-rating" aria-label="Rated ${rating.toFixed(1)} out of 5 from ${reviews} verified reviews">
+          <span class="stars" aria-hidden="true">${"★".repeat(filled)}${"☆".repeat(5 - filled)}</span>
+          <span class="rating-num">${rating.toFixed(1)}</span>
+          <span class="review-count">(${reviews.toLocaleString()} verified)</span>
+        </div>`;
+    }
+    return sold > 0
+      ? `<div class="star-rating" aria-label="${sold} completed sales"><span class="review-count">${sold.toLocaleString()} sold</span></div>`
+      : `<div class="star-rating" aria-label="No customer reviews yet"><span class="review-count">New arrival · No reviews yet</span></div>`;
   }
+
+  const discountPercent = p => {
+    const original = Number(p.compare_price || 0);
+    const selling = Number(p.selling_price || 0);
+    return original > 0 && selling >= 0 && selling < original
+      ? Math.round(((original - selling) / original) * 100)
+      : 0;
+  };
 
   /* ---------- product card with multi-angle preview ---------- */
   function mediaHTML(p, photos, disc) {
@@ -285,7 +299,7 @@
 
   function cardHTML(p) {
     const sold = p.in_stock_count <= 0;
-    const disc = p.compare_price > p.selling_price ? Math.round(((p.compare_price - p.selling_price) / p.compare_price) * 100) : 0;
+    const disc = discountPercent(p);
     const photos = getProductImages(p);
     return `
     <article class="pcard ${sold ? "sold" : ""}" data-card="${esc(p.id)}" tabindex="0" role="button" aria-label="View details and photo views for ${esc(p.name)}">
@@ -393,7 +407,7 @@
   function renderProductModal(p) {
     const photos = getProductImages(p);
     const sold = p.in_stock_count <= 0;
-    const disc = p.compare_price > p.selling_price ? Math.round((1 - p.selling_price / p.compare_price) * 100) : 0;
+    const disc = discountPercent(p);
     const totalPhotos = photos.length;
     if (activeModalPhotoIdx >= totalPhotos) activeModalPhotoIdx = Math.max(0, totalPhotos - 1);
     const activePhoto = photos[activeModalPhotoIdx] || "";
@@ -465,7 +479,7 @@
 
         <div class="pmodal-actions">
           <button class="pmodal-claim-btn" id="pmodalClaimBtn" data-modal-claim="${esc(p.id)}" ${sold ? "disabled" : ""}>
-            ${sold ? "Sold" : `${ICONS.message.replace("<svg ", "<svg width='18' height='18' ")} Claim Piece &amp; Add to Bag`}
+            ${sold ? "Sold" : `${ICONS.message.replace("<svg ", "<svg width='18' height='18' ")} Add Piece to Cart`}
           </button>
           <a class="pmodal-wa-btn" href="https://wa.me/${esc(S.whatsapp)}?text=${encodeURIComponent(`Hello Adonai Thrift Store, I would like to ask about: ${p.name} (${p.sku || p.barcode_id}, ${DB.ugx(p.selling_price)}, Size: ${p.size}). Is it still on the shelf?`)}" target="_blank" rel="noopener">
             ${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Inquire on WhatsApp directly
@@ -529,7 +543,7 @@
     if ((line ? line.qty : 0) + 1 > p.in_stock_count) return toast(`Only ${p.in_stock_count} in stock`);
     if (line) line.qty++; else cart.push({ product_id: id, qty: 1 });
     saveCart(); renderCart();
-    toast(`${p.name} added to your bag`);
+    toast(`${p.name} added to your cart`);
     if (window.AdonaiAnalytics) {
       window.AdonaiAnalytics.trackAddToCart(p, 1);
     }
@@ -540,16 +554,16 @@
   function buildDeliveryAreas() {
     const base = Math.max(0, Number(S.base_delivery_fee != null ? S.base_delivery_fee : S.boda_base_fee) || 7000);
     return [
-      { name: "Kampala Central / Nakasero", fee: base },
-      { name: "Kololo / Kamwokya / Bukoto", fee: base },
-      { name: "Ntinda / Naguru / Kiwatule", fee: base },
-      { name: "Bugolobi / Mbuya / Mutungo", fee: base },
-      { name: "Muyenga / Kansanga / Ggaba", fee: base },
-      { name: "Kibuli / Nsambya / Makindye", fee: base },
-      { name: "Rubaga / Mengo / Namirembe", fee: base },
-      { name: "Bwaise / Kawempe / Kisaasi", fee: base },
-      { name: "Entebbe Road & Corridor", fee: base + 5000 },
-      { name: "Mukono / Seeta Corridor", fee: base + 5000 },
+      { name: "Kampala Central / Nakasero", fee: base, lat: 0.3476, lng: 32.5825, radiusKm: 7 },
+      { name: "Kololo / Kamwokya / Bukoto", fee: base, lat: 0.3500, lng: 32.5950, radiusKm: 6 },
+      { name: "Ntinda / Naguru / Kiwatule", fee: base, lat: 0.3650, lng: 32.6160, radiusKm: 8 },
+      { name: "Bugolobi / Mbuya / Mutungo", fee: base, lat: 0.3180, lng: 32.6280, radiusKm: 8 },
+      { name: "Muyenga / Kansanga / Ggaba", fee: base, lat: 0.2740, lng: 32.6160, radiusKm: 11 },
+      { name: "Kibuli / Nsambya / Makindye", fee: base, lat: 0.3000, lng: 32.5880, radiusKm: 9 },
+      { name: "Rubaga / Mengo / Namirembe", fee: base, lat: 0.3070, lng: 32.5520, radiusKm: 9 },
+      { name: "Bwaise / Kawempe / Kisaasi", fee: base, lat: 0.3890, lng: 32.5750, radiusKm: 11 },
+      { name: "Entebbe Road & Corridor", fee: base + 5000, lat: 0.1400, lng: 32.5000, radiusKm: 25 },
+      { name: "Mukono / Seeta Corridor", fee: base + 5000, lat: 0.3530, lng: 32.7550, radiusKm: 22 },
       { name: "Upcountry Express Parcel (Jinja, Mbarara, Mbale)", fee: base + 8000 }
     ];
   }
@@ -562,8 +576,70 @@
     name: "",
     phone: "",
     address: "",
-    notes: ""
+    dropoff: "",
+    notes: "",
+    detectedLocation: null,
+    locationPricingReviewed: false,
+    locationStatus: "Location will be detected when you confirm the order."
   };
+
+  function distanceKm(lat1, lng1, lat2, lng2) {
+    const rad = value => value * Math.PI / 180;
+    const dLat = rad(lat2 - lat1), dLng = rad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function allocateDetectedArea(latitude, longitude, accuracy) {
+    DELIVERY_AREAS = DELIVERY_AREAS.filter(area => !area.detected);
+    let nearest = null;
+    DELIVERY_AREAS.forEach((area, index) => {
+      if (!Number.isFinite(area.lat) || !Number.isFinite(area.lng)) return;
+      const distance = distanceKm(latitude, longitude, area.lat, area.lng);
+      if (!nearest || distance < nearest.distance) nearest = { area, index, distance };
+    });
+    const matched = nearest && nearest.distance <= nearest.area.radiusKm;
+    if (matched) {
+      selectedAreaIndex = nearest.index;
+    } else {
+      const fallbackFee = DELIVERY_AREAS[DELIVERY_AREAS.length - 1].fee;
+      DELIVERY_AREAS.push({
+        name: `Detected current location (${latitude.toFixed(5)}, ${longitude.toFixed(5)})`,
+        fee: fallbackFee,
+        detected: true
+      });
+      selectedAreaIndex = DELIVERY_AREAS.length - 1;
+    }
+    const allocatedArea = DELIVERY_AREAS[selectedAreaIndex];
+    formState.detectedLocation = {
+      latitude, longitude, accuracy: Math.round(Number(accuracy) || 0),
+      area: allocatedArea.name,
+      map_url: `https://maps.google.com/?q=${latitude.toFixed(6)},${longitude.toFixed(6)}`
+    };
+    formState.locationStatus = `Current location allocated to ${allocatedArea.name}${matched ? "" : " (outside listed Kampala zones)"}.`;
+  }
+
+  function detectCurrentLocation() {
+    if (deliveryType !== "boda") return Promise.resolve(null);
+    if (formState.detectedLocation) return Promise.resolve(formState.detectedLocation);
+    if (!navigator.geolocation) {
+      formState.locationStatus = "Automatic location is unavailable in this browser; your selected area will be used.";
+      return Promise.resolve(null);
+    }
+    formState.locationStatus = "Detecting your current location…";
+    return new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(position => {
+        allocateDetectedArea(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+        resolve(formState.detectedLocation);
+      }, error => {
+        formState.detectedLocation = null;
+        formState.locationStatus = error && error.code === 1
+          ? "Location permission was not granted; your selected destination area will be used."
+          : "Current location could not be detected; your selected destination area will be used.";
+        resolve(null);
+      }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 });
+    });
+  }
 
   function openCart() {
     document.body.classList.add("cart-open");
@@ -607,15 +683,7 @@
             <span class="due-val">${DB.ugx(orderResult.total)}</span>
           </div>
 
-          <p class="wa-instruct">WhatsApp should have opened with your order summary. If not, tap below to message our Kampala desk:</p>
-
-          <a class="open-wa-btn" id="openWaMsg" href="${esc(orderResult.waUrl)}" target="_blank" rel="noopener">
-            Open WhatsApp Order Message →
-          </a>
-
-          <div class="wa-msg-preview-box">
-            <pre>${esc(orderResult.rawMessage)}</pre>
-          </div>
+          <p class="wa-instruct"><strong>Status: Unfulfilled</strong><br />Your order has synced directly to our POS fulfillment dashboard. Our team will contact the phone number you supplied with confirmation and status updates.</p>
         </div>`;
       $("#cartFoot").innerHTML = `
         <button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`;
@@ -624,7 +692,7 @@
     }
 
     if (!lines.length) {
-      $("#cartBody").innerHTML = `<p class="empty">Your bag is empty.<br/>Have a look at today's rail.</p>`;
+      $("#cartBody").innerHTML = `<p class="empty">Your cart is empty.<br/>Have a look at today's rail.</p>`;
       $("#cartFoot").innerHTML = "";
       return;
     }
@@ -661,7 +729,10 @@
           <select class="claim-select" id="coArea">
             ${DELIVERY_AREAS.map((a, idx) => `<option value="${idx}" ${idx === selectedAreaIndex ? 'selected' : ''}>${esc(a.name)} (${DB.ugx(a.fee)})</option>`).join("")}
           </select>
+          <p class="location-allocation-status" id="locationAllocationStatus" aria-live="polite">📍 ${esc(formState.locationStatus)}</p>
           <input class="claim-input" id="coAddress" placeholder="Street, Building, Flat or Landmark Details *" value="${esc(formState.address)}" />
+          <label class="claim-field-label" for="coDropoff">Exact drop-off override (optional):</label>
+          <input class="claim-input" id="coDropoff" placeholder="Put the exact dropoff point if you are not there at the present moment" value="${esc(formState.dropoff)}" />
         </div>
 
         <textarea class="claim-textarea" id="coNotes" placeholder="Delivery notes or sizing question (optional)..." rows="2">${esc(formState.notes)}</textarea>
@@ -674,15 +745,16 @@
         <div class="sum-line"><span>Rider Delivery:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
-      <button class="claim-confirm-btn" id="waCheckout">Confirm Claim on WhatsApp (${DB.ugx(grandTotal)})</button>
+      <button class="claim-confirm-btn" id="waCheckout">Confirm order (${DB.ugx(grandTotal)})</button>
       <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
     `;
 
     // Bind form inputs
-    const elName = $("#coName"), elPhone = $("#coPhone"), elAddr = $("#coAddress"), elNotes = $("#coNotes"), elArea = $("#coArea");
+    const elName = $("#coName"), elPhone = $("#coPhone"), elAddr = $("#coAddress"), elDropoff = $("#coDropoff"), elNotes = $("#coNotes"), elArea = $("#coArea");
     if (elName) elName.addEventListener("input", e => { formState.name = e.target.value; });
     if (elPhone) elPhone.addEventListener("input", e => { formState.phone = e.target.value; });
     if (elAddr) elAddr.addEventListener("input", e => { formState.address = e.target.value; });
+    if (elDropoff) elDropoff.addEventListener("input", e => { formState.dropoff = e.target.value; });
     if (elNotes) elNotes.addEventListener("input", e => { formState.notes = e.target.value; });
     if (elArea) elArea.addEventListener("change", e => {
       selectedAreaIndex = Number(e.target.value);
@@ -710,7 +782,7 @@
     }
   });
 
-  /* ---------- WhatsApp checkout ---------- */
+  /* ---------- direct storefront checkout ---------- */
   async function checkout() {
     const btn = $("#waCheckout");
     const hpCompany = $("#hp_company") ? $("#hp_company").value.trim() : "";
@@ -723,6 +795,7 @@
     const name = formState.name.trim();
     const phone = formState.phone.trim();
     const address = formState.address.trim();
+    const dropoff = formState.dropoff.trim();
     const notes = formState.notes.trim();
 
     if (!name || name.length < 2) {
@@ -735,73 +808,68 @@
       const el = $("#coPhone"); if (el) el.focus();
       return;
     }
-    if (deliveryType === "boda" && !address) {
-      toast("Please enter your landmark or street details");
+    if (deliveryType === "boda" && !address && !dropoff) {
+      toast("Please enter your landmark or exact drop-off point");
       const el = $("#coAddress"); if (el) el.focus();
       return;
     }
     if (cart.length === 0) return;
 
-    const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
-    const deliveryFee = deliveryType === "pickup" ? 0 : areaObj.fee;
-    const pickupAddress = S.address || "Kampala, Uganda";
-    const areaName = deliveryType === "pickup" ? `Store Pickup (${pickupAddress})` : areaObj.name;
-
     btn.disabled = true;
-    btn.textContent = "Reserving your pieces…";
+    btn.textContent = deliveryType === "boda" ? "Detecting your location…" : "Confirming your order…";
 
     try {
+      // Geolocation is requested only after the customer actively confirms.
+      // Permission denial never blocks checkout; the selected area remains the fallback.
+      const previousAreaIndex = selectedAreaIndex;
+      const previousArea = DELIVERY_AREAS[previousAreaIndex] || DELIVERY_AREAS[0];
+      await detectCurrentLocation();
+      const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
+      if (formState.detectedLocation && !formState.locationPricingReviewed &&
+          (previousAreaIndex !== selectedAreaIndex || previousArea.fee !== areaObj.fee)) {
+        formState.locationPricingReviewed = true;
+        renderCart();
+        toast("Location allocated. Please review the updated delivery total and confirm again.");
+        return;
+      }
+      const deliveryFee = deliveryType === "pickup" ? 0 : areaObj.fee;
+      const pickupAddress = S.address || "Kampala, Uganda";
+      const areaName = deliveryType === "pickup" ? `Store Pickup (${pickupAddress})` : areaObj.name;
+      const deliveryAddress = dropoff || address;
+      const locationAudit = formState.detectedLocation
+        ? `Ordering GPS: ${formState.detectedLocation.latitude.toFixed(6)}, ${formState.detectedLocation.longitude.toFixed(6)} (±${formState.detectedLocation.accuracy}m) · ${formState.detectedLocation.map_url}`
+        : "";
+      const overrideAudit = dropoff
+        ? [address ? `Customer-entered location: ${address}` : "", `Exact drop-off override: ${dropoff}`].filter(Boolean).join(" · ")
+        : "";
+      const deliveryNotes = [notes, overrideAudit, locationAudit].filter(Boolean).join(" | ");
+      btn.textContent = "Reserving your pieces…";
+
       const order = await DB.createWebOrder({
         customer_name: name,
         customer_phone: phone,
         delivery_type: deliveryType,
         delivery_area: areaName,
-        delivery_address: address,
+        delivery_address: deliveryAddress,
         delivery_fee: deliveryFee,
-        delivery_notes: notes,
+        delivery_notes: deliveryNotes,
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
 
       if (window.AdonaiAnalytics) {
-        window.AdonaiAnalytics.trackPurchaseViaWhatsApp(order);
+        window.AdonaiAnalytics.trackPurchaseViaWhatsApp(order); // legacy analytics event name
       }
-
-      const totalItems = order.items.reduce((a, b) => a + b.qty, 0);
-      const deliveryLocStr = deliveryType === "pickup"
-        ? `Store Pickup (${pickupAddress})`
-        : (address ? `${areaName} - ${address}` : areaName);
-
-      const msgLines = [
-        `👕 *${String(S.store_name || "ADONAI THRIFT STORE").toUpperCase()} (UGANDA)*`,
-        `*Order Ref:* ${order.id}`,
-        "-----------------------------------",
-        ...order.items.map(i => `• ${i.name} — ${DB.ugx(i.line_total)}`),
-        "-----------------------------------",
-        `*Subtotal (${totalItems} items):* ${DB.ugx(order.subtotal)}`,
-        `*Rider Delivery:* ${deliveryFee > 0 ? DB.ugx(deliveryFee) : "Free (Store Pickup)"}`,
-        `*TOTAL DUE:* ${DB.ugx(order.total)}`,
-        "-----------------------------------",
-        `*Delivery Address:* ${deliveryLocStr}`,
-        notes ? `*Notes:* ${notes}` : "",
-        `*Customer:* ${order.customer_name} (${order.customer_phone})`
-      ].filter(Boolean);
-
-      const fullMsg = msgLines.join("\n");
-      const waNumber = (DB.getSettings().whatsapp || "256758873398").replace(/[^0-9]/g, "");
-      const waUrl = `https://wa.me/${waNumber}?text=${encodeURIComponent(fullMsg)}`;
 
       orderResult = {
         id: order.id,
         total: order.total,
-        waUrl,
-        rawMessage: fullMsg
+        status: order.dispatch_status || "Unfulfilled"
       };
 
       cart = [];
       saveCart();
       renderCart();
       refreshProducts();
-      window.open(waUrl, "_blank");
     } catch (err) {
       toast(err.message || "Something went wrong — please try again");
       refreshProducts();

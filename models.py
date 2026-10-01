@@ -170,8 +170,8 @@ class Order(Base):
 
     id = Column(String(50), primary_key=True)  # AT-1841, etc.
     channel = Column(String(50), default="web", index=True)  # 'web' or 'pos'
-    status = Column(String(50), default="completed", index=True)  # 'completed', 'cancelled', 'held'
-    dispatch_status = Column(String(50), default="Pending", index=True)  # 'Pending', 'Packed', 'With rider', 'Handed over', 'Delivered'
+    status = Column(String(50), default="unfulfilled", index=True)  # unfulfilled, processing, completed, cancelled
+    dispatch_status = Column(String(50), default="Unfulfilled", index=True)  # Unfulfilled → In Assembly → Ready for Pickup/Dispatched → Completed
     customer_name = Column(String(255), nullable=True, index=True)
     customer_phone = Column(String(50), nullable=True, index=True)
     customer_address = Column(Text, nullable=True)

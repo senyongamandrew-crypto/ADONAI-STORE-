@@ -94,7 +94,7 @@
               <span class="poll-dot" id="pollDot"></span>
               <span class="poll-tag">Live Order Polling</span>
             </div>
-            <p id="pollText">No pending WhatsApp orders right now. The poller is watching every 5 seconds.</p>
+            <p id="pollText">No unfulfilled web orders right now. The poller is watching every 5 seconds.</p>
           </div>
           <button class="dark-card-btn" data-goto="sales">View All Orders &amp; Deliveries →</button>
         </div>
@@ -119,7 +119,7 @@
 
       <div class="card" style="margin-top:18px">
         <div class="card-head"><h3>Recent Transactions</h3><button class="btn ghost sm" data-goto="sales">All Orders &amp; Invoices →</button></div>
-        <p class="muted small" style="margin:-6px 0 10px">Latest in-store and WhatsApp checkouts</p>
+        <p class="muted small" style="margin:-6px 0 10px">Latest in-store and web storefront checkouts</p>
         <div id="recentTx"></div>
       </div>
     </section>
@@ -207,7 +207,7 @@
             <select id="inStatus" class="sel-full"><option value="1">Available</option><option value="0">Sold</option></select></div>
           <div class="field full"><label>Channel visibility</label>
             <select id="inVis" class="sel-full">
-              <option>Online WhatsApp &amp; In-Store POS</option><option>In-Store POS Only</option><option>Online Only</option>
+              <option>Web Storefront &amp; In-Store POS</option><option>In-Store POS Only</option><option>Online Only</option>
             </select></div>
         </div>
 
@@ -409,7 +409,7 @@
       <div class="card" style="max-width:860px">
         <div class="fgrid">
           <div class="field full"><label>Store name</label><input class="sel-full" id="setName" /></div>
-          <div class="field"><label>WhatsApp order line (raw digits)<span class="fhint">e.g. 256758873398</span></label><input class="sel-full" id="setWaRaw" /></div>
+          <div class="field"><label>WhatsApp customer notification line (raw digits)<span class="fhint">e.g. 256758873398</span></label><input class="sel-full" id="setWaRaw" /></div>
           <div class="field"><label>WhatsApp display format<span class="fhint">e.g. +256 7588 73398</span></label><input class="sel-full" id="setWaDisp" /></div>
           <div class="field"><label>Call / toll line<span class="fhint">e.g. +256 7656 52403</span></label><input class="sel-full" id="setHotline" /></div>
           <div class="field"><label>Official email address<span class="fhint">e.g. adonaithriftstore@gmail.com</span></label><input class="sel-full" id="setEmail" /></div>

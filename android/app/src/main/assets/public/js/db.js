@@ -32,7 +32,7 @@
   const DEMOGRAPHICS  = ["Men", "Women", "Children"];
   const CAT_CODES     = { "Outerwear & Jackets": "JKT", "Tops & Shirts": "TOP", "Dresses & Skirts": "DRS", "Pants & Jeans": "PNT", "Shoes": "SHO", "Accessories": "ACC", "Children Wear": "CHD" };
   const TENDER_TYPES  = ["cash", "mtn", "airtel"];
-  const DISPATCH_STATUSES = ["Pending", "Packed", "With rider", "Handed over", "Delivered"];
+  const DISPATCH_STATUSES = ["Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed"];
   const RIDER_STATUSES    = ["Available", "On delivery", "Offline"];
   const STAFF_ROLES = ["admin", "manager", "cashier", "rider"];
   const ROLE_LABELS = {
@@ -49,14 +49,12 @@
     adjustment: "Adjustment (Drawer Recount / Correction)"
   };
   const orderLanes = s => {
-    if (s.status === "cancelled") return "completed";
-    if (s.status === "completed" && s.channel === "pos") return "completed";
-    const d = s.dispatch_status || "Pending";
-    if (d === "With rider") return "rider";
-    if (d === "Handed over") return "handed";
-    if (d === "Delivered") return "completed";
-    if (d === "Incoming") return "incoming";
-    return "fulfillment";
+    if (s.status === "cancelled" || s.dispatch_status === "Cancelled") return "completed";
+    const d = s.dispatch_status || (s.channel === "web" ? "Unfulfilled" : "Completed");
+    if (d === "Unfulfilled" || d === "Pending" || d === "Incoming") return "incoming";
+    if (d === "In Assembly" || d === "Packed") return "fulfillment";
+    if (d === "Ready for Pickup" || d === "Dispatched" || d === "With rider" || d === "Handed over") return "ready";
+    return "completed";
   };
   const DEFAULT_MASTER_KEY = "ADONAI-MASTER-2026";  // sandbox default per onboarding sheet — rotate in System Parameters
   // Live Render deployment — the public storefront and the API are served by the
@@ -360,6 +358,7 @@
         if (!document.hidden) {
           pullStoreSettings();
           if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
+          else pullOperationalData();
         }
       }, 5000);
 
@@ -433,7 +432,7 @@
     const n = ++st.counters.ledger;
     st.ledger.push({
       id: "LED-" + n, kind: "sale", amount: sale.total,
-      label: `${sale.channel === "web" ? "WhatsApp order" : "Register sale"} ${sale.id} · ${sale.items[0] ? sale.items[0].name : "items"}${sale.items.length > 1 ? " +" + (sale.items.length - 1) + " more" : ""}`,
+      label: `${sale.channel === "web" ? "Web storefront order" : "Register sale"} ${sale.id} · ${sale.items[0] ? sale.items[0].name : "items"}${sale.items.length > 1 ? " +" + (sale.items.length - 1) + " more" : ""}`,
       note: `Logged by ${cashierName || (sale.cashier && sale.cashier.name) || "Console"} · ${tenderLabel(sale.tender)}`,
       channel: (sale.tender && sale.tender.type) || "cash",
       by: cashierName || (sale.cashier && sale.cashier.name) || "Console",
@@ -846,8 +845,8 @@
           delivery_address: String(delivery_address || "").trim(),
           delivery_fee: fee,
           delivery_notes: String(delivery_notes || "").trim(),
-          status: "pending",
-          dispatch_status: "Pending"
+          status: "unfulfilled",
+          dispatch_status: "Unfulfilled"
         })
       }, false);
       const remote = data.order;
@@ -905,46 +904,38 @@
         return JSON.parse(JSON.stringify(s));
       });
     },
-    cancelWebOrder(id) {
+    async updateOrderFulfillment(id, fulfillment_status, extra) {
+      const data = await apiRequest("/api/orders/" + encodeURIComponent(id), {
+        method: "PATCH",
+        body: JSON.stringify(Object.assign({ fulfillment_status }, extra || {}))
+      }, true);
+      if (!data.order) throw new Error("The server did not return the updated order");
       return tx("sales", st => {
-        const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
-        if (s.status === "cancelled") return JSON.parse(JSON.stringify(s));
-        s.items.forEach(it => { const p = byId(st.products, it.product_id); if (p) p.in_stock_count += it.qty; });
-        s.status = "cancelled";
-        s.dispatch_status = "Cancelled";
-        if (s.assigned_rider_id) {
-          const r = byId(st.riders, s.assigned_rider_id);
-          if (r && r.status === "On delivery") r.status = "Available";
-        }
-        return JSON.parse(JSON.stringify(s));
+        const local = byId(st.sales, id);
+        if (local) Object.assign(local, data.order, {
+          delivery_address: data.order.customer_address || local.delivery_address || ""
+        });
+        else st.sales.push(data.order);
+        return JSON.parse(JSON.stringify(data.order));
       });
     },
+    cancelWebOrder(id) {
+      return this.updateOrderFulfillment(id, "Cancelled");
+    },
     assignRiderToOrder(orderId, riderId) {
-      return tx("sales", st => {
-        const s = byId(st.sales, orderId); if (!s) throw new Error("Order not found");
-        const r = byId(st.riders, riderId);
-        if (r) {
-          s.assigned_rider_id = r.id;
-          s.assigned_rider_name = r.name;
-          s.dispatch_status = "With rider";
-          r.status = "On delivery";
-        }
-        return JSON.parse(JSON.stringify(s));
+      const rider = this.listRiders().find(r => r.id === riderId);
+      return this.updateOrderFulfillment(orderId, "Dispatched", {
+        rider_id: rider ? rider.id : riderId,
+        rider_name: rider ? rider.name : ""
       });
     },
     listSales() { reload(); return state.sales.map(s => JSON.parse(JSON.stringify(s))).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     getSale(id) { reload(); const s = byId(state.sales, id); return s ? JSON.parse(JSON.stringify(s)) : null; },
     setDispatchStatus(id, dispatch_status) {
-      return tx("sales", st => {
-        const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
-        if (!DISPATCH_STATUSES.includes(dispatch_status) && dispatch_status !== "Cancelled") throw new Error("Unknown dispatch stage");
-        s.dispatch_status = dispatch_status;
-        if (dispatch_status === "Delivered" && s.assigned_rider_id) {
-          const r = byId(st.riders, s.assigned_rider_id);
-          if (r && r.status === "On delivery") r.status = "Available";
-        }
-        return JSON.parse(JSON.stringify(s));
-      });
+      if (!DISPATCH_STATUSES.includes(dispatch_status) && dispatch_status !== "Cancelled") {
+        return Promise.reject(new Error("Unknown fulfillment stage"));
+      }
+      return this.updateOrderFulfillment(id, dispatch_status);
     },
 
     /* ----- guest book ----- */

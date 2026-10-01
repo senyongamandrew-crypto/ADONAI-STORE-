@@ -461,12 +461,26 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         .all()
                     )
                     held = {product_id: int(quantity or 0) for product_id, quantity in rows}
+                # Social proof must come from real commerce data.  Never invent
+                # reviews or a five-star score: expose completed-unit counts and
+                # leave review fields empty until verified reviews exist.
+                sold_rows = (
+                    session.query(OrderItem.product_id, func.sum(OrderItem.qty))
+                    .join(Order, Order.id == OrderItem.order_id)
+                    .filter(Order.status == "completed")
+                    .group_by(OrderItem.product_id)
+                    .all()
+                )
+                sold_counts = {product_id: int(quantity or 0) for product_id, quantity in sold_rows}
                 prods = []
                 for product in products:
                     data = product.to_dict()
                     data["authoritative_stock_count"] = data["in_stock_count"]
                     data["in_stock_count"] = max(0, data["in_stock_count"] - held.get(product.id, 0))
                     data["available_count"] = data["in_stock_count"]
+                    data["sales_count"] = sold_counts.get(product.id, 0)
+                    data["average_rating"] = None
+                    data["review_count"] = 0
                     prods.append(data)
                 return json_response({"count": len(prods), "products": prods, "as_of": datetime.utcnow().isoformat() + "Z"})
 
@@ -706,6 +720,58 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 orders = [o.to_dict() for o in q.order_by(Order.created_at.desc()).all()]
                 return json_response({"count": len(orders), "orders": orders})
 
+        if clean_path.startswith("/api/orders/") and method in ("PUT", "PATCH"):
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            order_id = clean_path.split("/")[-1]
+            lifecycle = {"Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed", "Cancelled"}
+            with get_db() as session:
+                order = session.query(Order).filter_by(id=order_id).with_for_update().first()
+                if not order:
+                    return json_response({"ok": False, "error": "Order not found"}, status=404)
+
+                next_stage = body.get("fulfillment_status") or body.get("dispatch_status")
+                if next_stage is not None:
+                    next_stage = str(next_stage).strip()
+                    if next_stage not in lifecycle:
+                        return json_response({"ok": False, "error": "Unknown fulfillment status"}, status=400)
+                    current = order.dispatch_status or "Unfulfilled"
+                    allowed = {
+                        "Pending": {"Unfulfilled", "In Assembly", "Cancelled"},
+                        "Unfulfilled": {"In Assembly", "Cancelled"},
+                        "In Assembly": {"Ready for Pickup", "Dispatched", "Cancelled"},
+                        "Ready for Pickup": {"Completed", "Cancelled"},
+                        "Dispatched": {"Completed", "Cancelled"},
+                        "Completed": set(),
+                        "Cancelled": set(),
+                    }
+                    if next_stage != current and next_stage not in allowed.get(current, set()):
+                        return json_response({"ok": False, "error": f"Cannot move order from {current} to {next_stage}"}, status=409)
+                    if next_stage == "Cancelled" and current != "Cancelled":
+                        for item in order.items:
+                            product = session.query(Product).filter_by(id=item.product_id).with_for_update().first()
+                            if product:
+                                product.in_stock_count = int(product.in_stock_count or 0) + int(item.qty or 0)
+                                if product.inventory_status == "SOLD":
+                                    product.inventory_status = "AVAILABLE"
+                    order.dispatch_status = next_stage
+                    order.status = (
+                        "completed" if next_stage == "Completed"
+                        else "cancelled" if next_stage == "Cancelled"
+                        else "unfulfilled" if next_stage == "Unfulfilled"
+                        else "processing"
+                    )
+
+                if "rider_id" in body or "rider_name" in body:
+                    order.rider_id = str(body.get("rider_id") or "").strip() or None
+                    order.rider_name = str(body.get("rider_name") or "").strip() or None
+                if "payment_method" in body:
+                    order.tender_type = str(body.get("payment_method") or "cash").strip().lower()
+                order.updated_at = datetime.utcnow()
+                session.flush()
+                return json_response({"ok": True, "order": order.to_dict()})
+
         if clean_path == "/api/orders" and method == "POST":
             channel = str(body.get("channel", "web")).lower()
             lock_owner = str(body.get("lock_owner") or "").strip()[:100]
@@ -813,8 +879,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order = Order(
                     id=order_id,
                     channel=channel,
-                    status=body.get("status", "completed" if channel == "pos" else "pending"),
-                    dispatch_status=body.get("dispatch_status", "Pending" if channel != "pos" else "Delivered"),
+                    # Web orders enter the POS fulfillment queue directly. They
+                    # are not WhatsApp orders and always start unfulfilled.
+                    status=("completed" if channel == "pos" else "unfulfilled"),
+                    dispatch_status=("Completed" if channel == "pos" else "Unfulfilled"),
                     customer_name=body.get("customer_name", "Walk-in Customer" if channel == "pos" else "Online Shopper"),
                     customer_phone=body.get("customer_phone", ""),
                     customer_address=body.get("customer_address") or body.get("delivery_address", ""),

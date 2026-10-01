@@ -51,9 +51,9 @@
     </a>
     <div class="head-actions">
       <button class="head-pill" id="installBtn">Install App</button>
-      <button class="bag-btn" id="cartBtn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 8h11l1 12.1a1.9 1.9 0 0 1-2 1.9h-9a1.9 1.9 0 0 1-2-1.9L6.5 8Z"/><path d="M9 11V6a3 3 0 0 1 6 0v5"/></svg>
-        Bag <span class="bag-count" id="cartCount">0</span>
+      <button class="cart-btn" id="cartBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6"/></svg>
+        Cart <span class="cart-count" id="cartCount">0</span>
       </button>
     </div>
   </div>
@@ -185,7 +185,7 @@
 <div class="consent" id="consent" hidden>
   <div class="consent-body">
     <strong>🍪 We respect your privacy</strong>
-    <p>Adonai Thrift Store uses essential session data to remember your bag items, reserved WhatsApp holds, and store preferences. We never sell your personal shopping data.</p>
+    <p>Adonai Thrift Store uses essential session data to remember your cart items, storefront orders, and store preferences. We never sell your personal shopping data.</p>
   </div>
   <div class="consent-actions">
     <button class="c-btn ghost" data-consent="custom">Customize</button>
@@ -202,13 +202,13 @@
 
 <!-- ============ CART DRAWER ============ -->
 <div class="drawer-backdrop" id="drawerBackdrop"></div>
-<aside class="drawer" id="cartDrawer" aria-label="Shopping bag">
+<aside class="drawer" id="cartDrawer" aria-label="Shopping cart">
   <div class="drawer-head">
     <div>
       <h3>Your Claimed Pieces</h3>
       <p class="drawer-sub">1-of-1 reservation</p>
     </div>
-    <button class="drawer-close-btn" id="closeCart" aria-label="Close bag">✕ Close</button>
+    <button class="drawer-close-btn" id="closeCart" aria-label="Close cart">✕ Close</button>
   </div>
   <div class="drawer-body" id="cartBody"></div>
   <div class="drawer-foot" id="cartFoot"></div>

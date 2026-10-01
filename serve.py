@@ -75,7 +75,7 @@ SECURITY_HEADERS = [
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "SAMEORIGIN"),
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
-    ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
+    ("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)"),
     ("Content-Security-Policy",
      "default-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com https://images.unsplash.com https://wa.me; "
      "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https://wa.me; "
