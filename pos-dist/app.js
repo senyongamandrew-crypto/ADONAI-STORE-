@@ -144,12 +144,6 @@
 
   let deferredInstall = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredInstall = e; });
-  const tryInstall = () => {
-    if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; }
-    else toast("Open browser menu → “Add to Home screen” to install the POS app");
-  };
-  $("#btnInstallTop").addEventListener("click", tryInstall);
-  $("#sidebarInstall").addEventListener("click", tryInstall);
 
   // staff identity in sidebar
   const whoName = me ? me.name : "Open access";
@@ -265,9 +259,10 @@
     const [cls, txt] = map[d || "Pending"] || ["pend", d];
     return `<span class="stat-chip ${cls}">${txt}</span>`;
   };
-  function kpiCard(label, value, sub) {
-    return `<div class="kpi-card">
-      <div class="kpi-lab">${esc(label)}</div>
+  /* KPI stat card — icon chip + accent tone + fluid responsive grid */
+  function kpiCard(label, value, sub, tone, icon) {
+    return `<div class="kpi-card kpi-${tone || "rust"}">
+      <div class="kpi-top"><span class="kpi-ico">${icon || "📈"}</span><span class="kpi-lab">${esc(label)}</span></div>
       <div class="kpi-val">${value}</div>
       ${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ""}
     </div>`;
@@ -280,7 +275,9 @@
     const staff = DB.listStaff();
     const admin = staff.find(s => s.role === "admin");
     const name = (me && me.name) || (admin && admin.name) || "Adonai";
-    $("#greetingH").textContent = "Good evening, " + name.split(" ")[0];
+    const hr = new Date().getHours();
+    const partOfDay = hr < 12 ? "Good morning" : hr < 17 ? "Good afternoon" : "Good evening";
+    $("#greetingH").textContent = partOfDay + ", " + name.split(" ")[0];
     $("#dateLine").textContent = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }).toUpperCase() + " · KAMPALA, UGANDA";
 
     const sales = allSales();
@@ -293,10 +290,10 @@
     const onRack = DB.listProducts().filter(p => p.in_stock_count > 0).length;
 
     $("#kpiCards").innerHTML =
-      kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales") +
-      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & WhatsApp reservations") +
-      kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider") +
-      kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`);
+      kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales", "green", "💰") +
+      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & WhatsApp reservations", "rust", "🧾") +
+      kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", "📦") +
+      kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", "🔖");
 
     /* ---- hourly + weekly chart ---- */
     const cv = $("#hourlyChart");
@@ -340,33 +337,52 @@
     const soldQty = done.reduce((a, s) => a + s.items.reduce((b, i) => b + i.qty, 0), 0);
     const rackTotal = Math.max(1, onRack + reserved + soldQty);
     $("#rackBars").innerHTML = [
-      ["Available for Sale", onRack, "var(--rgreen)"],
-      ["Reserved in Orders", reserved, "var(--ramber)"],
+      ["Available for Sale", onRack, "var(--green)"],
+      ["Reserved in Orders", reserved, "var(--amber)"],
       ["Sold & Closed", soldQty, "#B8AC9E"]
     ].map(([lbl, v, c]) => `
-      <div class="rack-row"><span class="rack-lbl">${lbl}</span><span class="rack-val">${v}</span>
+      <div class="rack-row">
+        <div class="rack-top"><span class="rack-lbl">${lbl}</span><span class="rack-val">${v} <em>${Math.round(v / rackTotal * 100)}%</em></span></div>
         <div class="rack-track"><div style="width:${Math.round(v / rackTotal * 100)}%;background:${c}"></div></div>
       </div>`).join("");
 
-    /* ---- channels ---- */
+    /* ---- channels (with share bars) ---- */
     const revPos = done.filter(s => s.channel === "pos").reduce((a, s) => a + s.total, 0);
     const revWeb = done.filter(s => s.channel === "web").reduce((a, s) => a + s.total, 0);
     const cashTot = done.filter(s => s.tender && s.tender.type === "cash").reduce((a, s) => a + s.total, 0);
+    const revAll = Math.max(1, revPos + revWeb);
     $("#channelRows").innerHTML = [
-      ["Register", revPos], ["WhatsApp", revWeb], ["Catalog", 0]
-    ].map(([lbl, v]) => `<div class="ch-row"><span>${lbl}</span><strong>${ugx(v)}</strong></div>`).join("")
-      + `<span class="cash-pill">Cash ${ugx(cashTot)}</span>`;
+      ["🏪 Register", revPos, "var(--rust)"], ["💬 WhatsApp", revWeb, "var(--green)"], ["🖼️ Catalog", 0, "var(--blue)"]
+    ].map(([lbl, v, color]) => `
+      <div class="ch-row ch-stack">
+        <div class="ch-info"><span>${lbl}</span><strong>${ugx(v)}</strong></div>
+        <div class="ch-bar"><i style="width:${Math.round(v / revAll * 100)}%;background:${color}"></i></div>
+      </div>`).join("")
+      + `<span class="cash-pill">💵 Cash collected ${ugx(cashTot)}</span>`;
 
     /* ---- boda pool ---- */
-    $("#riderPool").innerHTML = DB.listRiders().slice(0, 3).map(r => `
-      <div class="ch-row"><div><strong class="serif">${esc(r.name)}</strong><div class="muted small">${esc(r.zone)}</div></div>
-      ${riderStatusChip(r.status)}</div>`).join("");
+    $("#riderPool").innerHTML = DB.listRiders().slice(0, 3).map(r => {
+      const active = allSales().filter(s => s.assigned_rider_id === r.id && s.dispatch_status === "With rider").length;
+      return `
+      <div class="ch-row">
+        <div class="rider-mini">
+          <span class="avatar" style="background:${avColor(r.name)}">${initials(r.name)}</span>
+          <div><strong class="serif">${esc(r.name)}</strong><div class="muted small">${esc(r.zone)}</div></div>
+        </div>
+        <span class="ch-right">${riderStatusChip(r.status)}${active ? ` <span class="stat-chip blue">${active} EN ROUTE</span>` : ""}</span>
+      </div>`;
+    }).join("") || `<p class="muted small" style="padding:8px 0">No riders on the roster yet.</p>`;
 
     /* ---- recent transactions ---- */
     $("#recentTx").innerHTML = sales.slice(0, 5).map(s => `
       <button class="tx-row" data-view-sale="${esc(s.id)}">
-        <div><strong class="serif">${esc(s.id)}</strong> ${esc(s.customer_name)}<div class="muted small">${ago(s.created_at)}</div></div>
-        <span class="tx-right">${statusChip(s)} <strong>${ugx(s.total)}</strong></span>
+        <span class="tx-ava" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "G")}</span>
+        <div class="grow">
+          <div class="tx-title"><strong>${esc(s.customer_name || "Walk-in Guest")}</strong>
+            <span class="stat-chip ${s.channel === "web" ? "web" : "pos"}">${s.channel === "web" ? "WHATSAPP" : "REGISTER"}</span></div>
+          <div class="muted small">${esc(s.id)} · ${ago(s.created_at)} · ${esc((s.items || []).length)} item(s)</div>
+        </div>
+        <span class="tx-right">${statusChip(s)} <strong class="serif">${ugx(s.total)}</strong></span>
       </button>`).join("") || `<p class="muted">No transactions yet.</p>`;
   }
 
@@ -484,12 +500,17 @@
         ${s.status === "pending" ? `<span class="stat-chip pend">PENDING</span>` : s.status === "completed" ? `<span class="stat-chip ok">COMPLETED</span>` : `<span class="stat-chip bad">CANCELLED</span>`}
         ${paid ? `<span class="stat-chip ok">PAID</span>` : `<span class="stat-chip pend">UNPAID</span>`}
         ${s.status === "completed" && s.channel === "web" ? laneChip(s.dispatch_status) : ""}
-        <span class="muted small" style="margin-left:auto">${ago(s.created_at)}</span>
+        <span class="muted small oc-when">${ago(s.created_at)}</span>
       </div>
       <div class="oc-body">
-        <div><strong>${esc(s.customer_name)}</strong> <span class="muted small">${esc(s.customer_phone || "")}</span>
-          <div class="muted small">${esc(itemsSummary(s))}</div></div>
-        <strong class="oc-total">${ugx(s.total)}</strong>
+        <div class="oc-customer">
+          <span class="avatar oc-ava" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "G")}</span>
+          <div class="grow">
+            <div class="oc-name">${esc(s.customer_name)}${s.customer_phone ? ` <a class="lnk oc-tel" href="tel:${esc(String(s.customer_phone).replace(/[^+0-9]/g, ""))}">📞 ${esc(s.customer_phone)}</a>` : ""}</div>
+            <div class="muted small">${esc(itemsSummary(s))}</div>
+          </div>
+        </div>
+        <strong class="oc-total serif">${ugx(s.total)}</strong>
       </div>
       ${acts.join("")}
     </div>`;
@@ -823,20 +844,31 @@
 
     $("#invList").innerHTML = list.length ? list.map(p => {
       const off = p.compare_price > p.selling_price ? Math.round((p.compare_price - p.selling_price) / p.compare_price * 100) : 0;
+      const inStock = p.in_stock_count > 0;
       return `<div class="stock-row">
         <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "🧥"}</span>
         <div class="stock-main">
-          <div class="stock-name">${esc(p.name)}</div>
-          <div class="stock-sku">${esc(p.sku)}</div>
-          <div class="muted small">${esc(p.brand)} · Size: ${esc(p.size)} · ${esc(p.condition)}</div>
-          <div class="muted small serif" style="margin-top:2px">${esc(p.demographic)}</div>
-          <div class="muted small">${esc(p.category)}</div>
-          <div class="stock-price">${ugx(p.selling_price)}</div>
-          <div class="muted small">${p.compare_price ? `<s>${ugx(p.compare_price)}</s> <span class="off">-${off}%</span>` : ""}</div>
-          <div class="muted small">Cost: ${ugx(p.cost_price)}</div>
+          <div class="stock-title-row">
+            <div class="grow">
+              <div class="stock-name">${esc(p.name)}</div>
+              <div class="stock-sku">${esc(p.sku || p.barcode_id || "")}</div>
+            </div>
+            ${inStock ? `<span class="stat-chip ok">AVAILABLE</span>` : `<span class="stat-chip bad">SOLD</span>`}
+          </div>
+          <div class="stock-tags">
+            <span class="itag">${esc(p.demographic)}</span>
+            <span class="itag">${esc(p.category)}</span>
+            <span class="itag">📏 ${esc(p.size)}</span>
+            <span class="itag">${esc(p.condition)}</span>
+            ${p.brand ? `<span class="itag">🏷️ ${esc(p.brand)}</span>` : ""}
+          </div>
+          <div class="stock-price-row">
+            <span class="stock-price">${ugx(p.selling_price)}</span>
+            ${p.compare_price ? `<s class="stock-strike">${ugx(p.compare_price)}</s><span class="off">-${off}%</span>` : ""}
+            <span class="stock-cost">Cost ${ugx(p.cost_price)}</span>
+          </div>
           <div class="stock-foot">
-            ${p.in_stock_count > 0 ? `<span class="stat-chip ok">AVAILABLE</span>` : `<span class="stat-chip bad">SOLD</span>`}
-            <span class="micro-cap">ONLINE + IN-STORE</span>
+            <span class="micro-cap">${inStock ? `${p.in_stock_count} IN STOCK · ONLINE + IN-STORE` : "ARCHIVED PIECE"}</span>
           </div>
         </div>
         <div class="stock-actions">
@@ -1017,7 +1049,13 @@
     initIntakeForm();
     paintTag();
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
-      <div class="ch-row"><div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div><strong>${ugx(p.selling_price)}</strong></div>`).join("");
+      <div class="ch-row">
+        <div class="rider-mini">
+          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "🏷️"}</span>
+          <div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div>
+        </div>
+        <strong class="serif">${ugx(p.selling_price)}</strong>
+      </div>`).join("");
   }
 
   /* ============================================================
@@ -1030,12 +1068,23 @@
     if (guestTerm) list = list.filter(g => [g.name, g.phone, g.neighborhood].some(x => String(x || "").toLowerCase().includes(guestTerm)));
     $("#guestList").innerHTML = list.length ? list.map(g => `
       <div class="guest-card">
-        <div class="gc-actions"><button class="lnk" data-edit-guest="${esc(g.id)}">Edit</button><button class="lnk dim" data-del-guest="${esc(g.id)}">Remove</button></div>
-        <div class="guest-name">${esc(g.name)}</div>
-        <div class="guest-phone">${esc(g.phone)}</div>
-        ${g.address ? `<div class="muted small">${esc(g.address)}${g.neighborhood ? `, ${esc(g.neighborhood)}` : ""}</div>` : (g.neighborhood ? `<div class="muted small">${esc(g.neighborhood)}</div>` : "")}
-        ${g.email ? `<div class="muted small">${esc(g.email)}</div>` : ""}
-        ${g.notes ? `<div class="guest-notes">${esc(g.notes)}</div>` : ""}
+        <div class="guest-top">
+          <span class="avatar" style="background:${avColor(g.name)}">${initials(g.name)}</span>
+          <div class="grow">
+            <div class="guest-name">${esc(g.name)}</div>
+            ${g.phone ? `<a class="guest-phone" href="tel:${esc(String(g.phone).replace(/[^+0-9]/g, ""))}">📞 ${esc(g.phone)}</a>` : ""}
+          </div>
+          <div class="gc-actions">
+            <button class="lnk" data-edit-guest="${esc(g.id)}">Edit</button>
+            <button class="lnk dim" data-del-guest="${esc(g.id)}">Remove</button>
+          </div>
+        </div>
+        ${(g.address || g.neighborhood || g.email) ? `<div class="guest-tags">
+          ${g.neighborhood ? `<span class="itag">📍 ${esc(g.neighborhood)}</span>` : ""}
+          ${g.address ? `<span class="itag">${esc(g.address)}</span>` : ""}
+          ${g.email ? `<span class="itag">✉️ ${esc(g.email)}</span>` : ""}
+        </div>` : ""}
+        ${g.notes ? `<div class="guest-notes">📝 ${esc(g.notes)}</div>` : ""}
       </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No guests match — add the first one.</p></div>`;
   }
   function guestModal(id) {
@@ -1053,20 +1102,28 @@
      BODA RIDERS & DISPATCH
      ============================================================ */
   function renderRiders() {
-    $("#riderList").innerHTML = DB.listRiders().map(r => `
+    const all = allSales();
+    $("#riderList").innerHTML = DB.listRiders().map(r => {
+      const active = all.filter(s => s.assigned_rider_id === r.id && s.dispatch_status === "With rider").length;
+      const delivered = all.filter(s => s.assigned_rider_id === r.id && s.dispatch_status === "Delivered").length;
+      return `
       <div class="rider-card">
         <div class="rc-top">
           <span class="avatar" style="background:${avColor(r.name)}">${initials(r.name)}</span>
           <div class="grow"><div class="guest-name" style="margin:0">${esc(r.name)}</div>
-            <div class="muted small">${esc(r.vehicle)} · ${esc(r.zone)}</div></div>
-          <span class="lane-count">${0} active</span>
+            <div class="rider-tags"><span class="itag">🛵 ${esc(r.vehicle)}</span><span class="itag">📍 ${esc(r.zone)}</span></div></div>
+          <div class="rc-stats">
+            <div><strong class="serif">${active}</strong><span class="micro-cap">EN ROUTE</span></div>
+            <div><strong class="serif">${delivered}</strong><span class="micro-cap">DONE</span></div>
+          </div>
         </div>
-        <div class="rc-chip">${riderStatusChip(r.status)}</div>
+        <div class="rc-chip">${riderStatusChip(r.status)}${r.phone ? `<a class="stat-chip mut" href="tel:${esc(String(r.phone).replace(/[^+0-9]/g, ""))}">📞 CALL</a>` : ""}</div>
         <div class="rc-btns">
           ${DB.RIDER_STATUSES.map(st => `<button class="lane-tab ${r.status === st ? "active" : ""}" data-rider-st="${esc(r.id)}" data-st="${st}">${st.toUpperCase()}</button>`).join("")}
         </div>
         <button class="lnk" data-edit-rider="${esc(r.id)}">Edit route details</button>
-      </div>`).join("");
+      </div>`;
+    }).join("");
   }
   function riderModal(id) {
     const r = DB.listRiders().find(x => x.id === id);
@@ -1085,25 +1142,31 @@
      FINANCIAL LEDGER
      ============================================================ */
   let ledgerFilter = "all";
+  const LEDGER_ICONS = { sale: "💰", expense: "📤", refund: "↩️", adjustment: "⚖️" };
   function renderLedger() {
     const sum = DB.ledgerSummary();
     $("#ledgerKpis").innerHTML =
-      kpiCard("TODAY'S SALES", ugx(sum.todaySales)) +
-      kpiCard("ALL-TIME REVENUE", ugx(sum.revenue)) +
-      kpiCard("TOTAL OUTFLOW", "UGX " + sum.outflow.toLocaleString("en-US")) +
-      kpiCard("NET BALANCE", ugx(sum.revenue + sum.outflow));
+      kpiCard("TODAY'S SALES", ugx(sum.todaySales), "Money in since midnight", "green", "💰") +
+      kpiCard("ALL-TIME REVENUE", ugx(sum.revenue), "Every completed sale", "rust", "📈") +
+      kpiCard("TOTAL OUTFLOW", "− " + ugx(Math.abs(sum.outflow)), "Expenses, refunds & payouts", "red", "📤") +
+      kpiCard("NET BALANCE", ugx(sum.revenue + sum.outflow), "Revenue minus outflow", "blue", "⚖️");
     $("#ledgerPills").innerHTML = ["all", ...DB.LEDGER_KINDS].map(k =>
-      `<button class="lane-tab ${ledgerFilter === k ? "active" : ""}" data-kf="${k}">${k.toUpperCase()}</button>`).join("");
+      `<button class="lane-tab ${ledgerFilter === k ? "active" : ""}" data-kf="${k}">${k === "all" ? "ALL ENTRIES" : (LEDGER_ICONS[k] || "") + " " + k.toUpperCase()}</button>`).join("");
     $$("#ledgerPills .lane-tab").forEach(b => b.addEventListener("click", () => { ledgerFilter = b.dataset.kf; renderLedger(); }));
     let list = DB.listLedger();
     if (ledgerFilter !== "all") list = list.filter(e => e.kind === ledgerFilter);
     $("#ledgerRows").innerHTML = list.length ? list.map(e => `
       <div class="ledger-row">
-        <div class="grow"><strong>${esc(e.label)}</strong>
-          <div class="muted small">${ago(e.created_at)} · ${esc(e.note)}</div></div>
-        <span class="stat-chip ${e.kind === "sale" ? "ok" : e.kind === "expense" ? "bad" : "pend"}">${e.kind.toUpperCase()}</span>
-        <strong class="${e.amount >= 0 ? "amt-pos" : "amt-neg"}">${e.amount >= 0 ? "" : "-"}${ugx(Math.abs(e.amount))}</strong>
-        ${e.kind !== "sale" ? `<button class="lnk dim" data-del-entry="${esc(e.id)}">Delete</button>` : ""}
+        <span class="lg-ico lg-${esc(e.kind)}">${LEDGER_ICONS[e.kind] || "📒"}</span>
+        <div class="grow">
+          <div class="lg-title">${esc(e.label)}</div>
+          <div class="lg-meta">${ago(e.created_at)}${e.note ? ` · ${esc(e.note)}` : ""}</div>
+        </div>
+        <div class="lg-side">
+          <span class="stat-chip ${e.kind === "sale" ? "ok" : e.kind === "expense" ? "bad" : "pend"}">${e.kind.toUpperCase()}</span>
+          <strong class="serif ${e.amount >= 0 ? "amt-pos" : "amt-neg"}">${e.amount >= 0 ? "+" : "−"} ${ugx(Math.abs(e.amount))}</strong>
+          ${e.kind !== "sale" ? `<button class="lnk dim lg-del" data-del-entry="${esc(e.id)}">Delete</button>` : ""}
+        </div>
       </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">The book is empty for this filter.</p></div>`;
   }
   function ledgerModal() {

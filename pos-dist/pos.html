@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=2.4" />
+<link rel="stylesheet" href="css/pos.css?v=2.5" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="apple-touch-icon" href="assets/favicon.svg" />
 <link rel="manifest" href="manifest-pos.json" />
@@ -27,7 +27,7 @@
     </div>
     <div class="brand-meta">
       <span>Kampala, Uganda</span>
-      <span class="ver-chip">POS v2.4</span>
+      <span class="ver-chip">POS v2.5</span>
     </div>
 
     <nav class="nav" id="posNavList">
@@ -45,10 +45,6 @@
     </nav>
 
     <div class="sidebar-foot">
-      <div class="install-card" id="posSidebarInstall">
-        <span class="nav-ico">⬇️</span>
-        <div><strong>Install POS App on Phone</strong><span>Add to home screen</span></div>
-      </div>
       <div class="me-card">
         <span class="me-avatar" id="posMeAvatar">S</span>
         <div>
@@ -58,7 +54,7 @@
       </div>
       <div class="foot-actions">
         <a class="mini-link" href="admin.html">Operations Console →</a>
-        <button class="mini-link" id="btnPosSbExit" type="button">Exit POS</button>
+        <button class="mini-link" id="btnPosSbExit" type="button">Sign out</button>
       </div>
     </div>
   </aside>
@@ -71,11 +67,9 @@
     </div>
     <div class="head-right">
       <span class="pill live" id="netPill"><span class="dot"></span>Sync Live</span>
-      <button class="pill" id="btnInstall">⬇ Install Mobile App</button>
       <button class="pill store" id="btnOpenWebStore" type="button" title="Launch the live customer website in device browser">🌐 Open Live Web Storefront ↗</button>
       <button class="btn ghost dark" id="btnIntake" title="Add items & photos to inventory">📥 Intake</button>
       <span class="me-pill" id="mePill"><span class="avatar">S</span><span id="meName">Staff</span><span class="role" id="meRole">open access</span></span>
-      <button class="btn exit" id="btnExit">⏻ Exit POS</button>
     </div>
   </header>
 
@@ -109,28 +103,36 @@
       <div class="tiles" id="tileGrid"></div>
     </section>
 
-    <!-- ============ RIGHT: live cart register ============ -->
-    <aside class="cart">
-      <div class="cart-head">
-        <h3>Current Sale</h3>
-        <div class="cart-head-actions">
-          <button class="btn sm ghost" id="btnReprint" title="Reprint last receipt">🖨 Last</button>
-          <button class="btn sm ghost" id="btnClear">Clear</button>
+    <!-- ============ RIGHT: live cart register (docks to bottom sheet on phones) ============ -->
+    <aside class="cart" id="posCart">
+      <button class="cart-toggle" id="cartToggle" type="button" aria-expanded="false">
+        <span class="ct-count" id="ctCount">0</span>
+        <span class="ct-label">Current Sale</span>
+        <span class="ct-total" id="ctTotal">UGX 0</span>
+        <span class="ct-chevron" id="ctChevron" aria-hidden="true">▾</span>
+      </button>
+      <div class="cart-body">
+        <div class="cart-head">
+          <h3>Current Sale</h3>
+          <div class="cart-head-actions">
+            <button class="btn sm ghost" id="btnReprint" title="Reprint last receipt">🖨 Last</button>
+            <button class="btn sm ghost" id="btnClear">Clear</button>
+          </div>
         </div>
-      </div>
 
-      <div class="cart-lines" id="cartLines">
-        <p class="cart-empty">Cart is empty.<br />Scan a barcode or tap an item. 🧾</p>
-      </div>
+        <div class="cart-lines" id="cartLines">
+          <p class="cart-empty">Cart is empty.<br />Scan a barcode or tap an item. 🧾</p>
+        </div>
 
-      <div class="cart-summary">
-        <div class="sum-row">
-          <span>Items</span><span id="sumItems">0</span>
+        <div class="cart-summary">
+          <div class="sum-row">
+            <span>Items</span><span id="sumItems">0</span>
+          </div>
+          <div class="sum-row total">
+            <span>Total due</span><span id="sumTotal">UGX 0</span>
+          </div>
+          <button class="charge-btn" id="btnCharge" disabled>Charge · UGX 0</button>
         </div>
-        <div class="sum-row total">
-          <span>Total due</span><span id="sumTotal">UGX 0</span>
-        </div>
-        <button class="charge-btn" id="btnCharge" disabled>Charge · UGX 0</button>
       </div>
     </aside>
   </main>
@@ -169,7 +171,6 @@
             <input id="posCustNotes" class="in" type="text" placeholder="e.g. Regular VIP client" />
           </div>
         </div>
-      </div>
       </div>
 
       <div class="tender-tabs">
@@ -241,9 +242,10 @@
 <div id="receiptSheet"></div>
 
 <script src="js/analytics.js"></script>
+<script src="js/adaptive.js?v=1.0"></script>
 <script src="js/db.js?v=2.5"></script>
 <script src="js/auth.js"></script>
 <script src="js/intake.js"></script>
-<script src="js/pos.js?v=2.4"></script>
+<script src="js/pos.js?v=2.5"></script>
 </body>
 </html>
