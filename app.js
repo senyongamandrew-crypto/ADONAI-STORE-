@@ -280,16 +280,25 @@
     if (s < 9 * 86400) return Math.floor(s / 86400) + "d ago";
     return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   }
-  const statusChip = s => {
-    const map = { pending: ["pend", "PENDING"], completed: ["ok", "COMPLETED"], cancelled: ["bad", "CANCELLED"] };
-    const [cls, txt] = map[s.status] || ["pend", s.status.toUpperCase()];
-    return `<span class="stat-chip ${cls}">${txt}</span>`;
-  };
+  const fulfillmentStage = s => s.dispatch_status || (s.channel === "web" ? "Unfulfilled" : "Completed");
+  const statusChip = s => laneChip(fulfillmentStage(s));
   const laneChip = d => {
-    const map = { "With rider": ["blue", "WITH RIDER"], "Handed over": ["amber", "HANDED OVER"], "Delivered": ["ok", "DELIVERED"], "Packed": ["pend", "PACKED"], "Pending": ["pend", "IN QUEUE"] };
-    const [cls, txt] = map[d || "Pending"] || ["pend", d];
+    const map = {
+      "Unfulfilled": ["pend", "UNFULFILLED"], "Pending": ["pend", "UNFULFILLED"],
+      "In Assembly": ["blue", "IN ASSEMBLY"], "Ready for Pickup": ["amber", "READY FOR PICKUP"],
+      "Dispatched": ["blue", "DISPATCHED"], "Completed": ["ok", "COMPLETED"],
+      "Cancelled": ["bad", "CANCELLED"]
+    };
+    const [cls, txt] = map[d || "Unfulfilled"] || ["pend", String(d || "Unfulfilled").toUpperCase()];
     return `<span class="stat-chip ${cls}">${txt}</span>`;
   };
+  const isOpenWebOrder = s => s.channel === "web" && !["completed", "cancelled"].includes(String(s.status || "").toLowerCase());
+  const customerWhatsAppNumber = value => {
+    let digits = String(value || "").replace(/\D/g, "");
+    if (digits.startsWith("0")) digits = "256" + digits.slice(1);
+    return digits;
+  };
+  const customerStatusMessage = s => `Hello ${s.customer_name || "Customer"}, your Adonai Store order ${s.id} is confirmed. Current status: ${fulfillmentStage(s)}. Total: ${ugx(s.total)}. We will keep you updated as it moves through fulfillment.`;
   /* KPI stat card — icon chip + accent tone + fluid responsive grid */
   function kpiCard(label, value, sub, tone, icon) {
     return `<div class="kpi-card kpi-${tone || "rust"}">
@@ -314,7 +323,7 @@
     const sales = allSales();
     const done = validSales();
     const t0 = todayMid().getTime();
-    const webPend = sales.filter(s => s.channel === "web" && s.status === "pending");
+    const webPend = sales.filter(isOpenWebOrder);
     const reserved = webPend.reduce((a, s) => a + s.items.reduce((b, i) => b + i.qty, 0), 0);
     const todayDone = done.filter(s => new Date(s.created_at).getTime() >= t0);
     const todayRev = todayDone.reduce((a, s) => a + s.total, 0);
@@ -360,8 +369,8 @@
 
     /* ---- dark polling card ---- */
     $("#pollText").textContent = webPend.length
-      ? `${webPend.length} WhatsApp order(s) waiting for confirmation — the poller picked them up.`
-      : "No pending WhatsApp orders right now. The poller is watching every 5 seconds.";
+      ? `${webPend.length} web order(s) waiting for processing — the poller picked them up.`
+      : "No unfulfilled web orders right now. The poller is watching every 5 seconds.";
     $("#pollDot").classList.toggle("hot", webPend.length > 0);
 
     /* ---- rack bars ---- */
@@ -383,7 +392,7 @@
     const cashTot = done.filter(s => s.tender && s.tender.type === "cash").reduce((a, s) => a + s.total, 0);
     const revAll = Math.max(1, revPos + revWeb);
     $("#channelRows").innerHTML = [
-      ["🏪 Register", revPos, "var(--rust)"], ["💬 WhatsApp", revWeb, "var(--green)"], ["🖼️ Catalog", 0, "var(--blue)"]
+      ["🏪 Register", revPos, "var(--rust)"], ["🌐 Web Storefront", revWeb, "var(--green)"], ["🖼️ Catalog", 0, "var(--blue)"]
     ].map(([lbl, v, color]) => `
       <div class="ch-row ch-stack">
         <div class="ch-info"><span>${lbl}</span><strong>${ugx(v)}</strong></div>
@@ -410,7 +419,7 @@
         <span class="tx-ava" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "G")}</span>
         <div class="grow">
           <div class="tx-title"><strong>${esc(s.customer_name || "Walk-in Guest")}</strong>
-            <span class="stat-chip ${s.channel === "web" ? "web" : "pos"}">${s.channel === "web" ? "WHATSAPP" : "REGISTER"}</span></div>
+            <span class="stat-chip ${s.channel === "web" ? "web" : "pos"}">${s.channel === "web" ? "WEB STORE" : "REGISTER"}</span></div>
           <div class="muted small">${esc(s.id)} · ${ago(s.created_at)} · ${esc((s.items || []).length)} item(s)</div>
         </div>
         <span class="tx-right">${statusChip(s)} <strong class="serif">${ugx(s.total)}</strong></span>
@@ -426,11 +435,10 @@
      FULFILLMENT & ORDERS (pipeline lanes)
      ============================================================ */
   const LANES = [
-    { key: "incoming",    title: "Incoming",        sub: "Pending, not queued" },
-    { key: "fulfillment", title: "Fulfillment",     sub: "Confirmed & packing" },
-    { key: "rider",       title: "With Boda Rider", sub: "Out on delivery" },
-    { key: "handed",      title: "Handed Over",     sub: "Handed to customer" },
-    { key: "completed",   title: "Completed / Closed", sub: "Booked & archived" }
+    { key: "incoming", title: "Unfulfilled", sub: "New web orders awaiting processing" },
+    { key: "fulfillment", title: "In Assembly", sub: "Items being picked and packed" },
+    { key: "ready", title: "Ready / Dispatched", sub: "Ready for pickup or on the way" },
+    { key: "completed", title: "Completed", sub: "Fulfilled and closed" }
   ];
   let activeLane = "incoming";
   let orderTerm = "";
@@ -449,7 +457,7 @@
 
   function renderSales() {
     const sales = allSales();
-    const webPend = sales.filter(s => s.channel === "web" && s.status === "pending");
+    const webPend = sales.filter(isOpenWebOrder);
     $("#pendingLine").textContent = `${webPend.length} pending online orders in UGX. Automatic background polling active (every 5s).`;
     $("#navWebBadge").textContent = webPend.length || "";
 
@@ -495,30 +503,21 @@
   function orderCard(s) {
     const paid = isSalePaid(s);
     const acts = [];
-    if (s.channel === "web" && s.status === "pending") {
+    const stage = fulfillmentStage(s);
+    if (stage === "Unfulfilled" || stage === "Pending") {
       acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-open-order="${esc(s.id)}">Manage / Dispatch →</button>
-        ${!paid ? `
-          <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="cash">💰 Cash</button>
-          <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">📱 MoMo</button>
-        ` : `
-          <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">Mark Unpaid</button>
-        `}
+        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="In Assembly">Start Assembly →</button>
+        <button class="btn sm" data-open-order="${esc(s.id)}">Details / WhatsApp</button>
         <button class="btn sm danger" data-cancel-web="${esc(s.id)}">Cancel</button></div>`);
-    } else if (activeLane === "fulfillment") {
+    } else if (stage === "In Assembly" || stage === "Packed") {
+      const readyStage = s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched";
       acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-open-order="${esc(s.id)}">🛵 Dispatch with rider →</button>
-        ${!paid ? `<button class="btn sm" data-set-paid="${esc(s.id)}" data-method="cash">Mark Paid</button>` : ""}
-        <button class="btn sm" data-print-order="${esc(s.id)}">🖨 Receipt</button></div>`);
-    } else if (activeLane === "rider") {
+        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="${readyStage}">Mark ${readyStage} →</button>
+        <button class="btn sm" data-open-order="${esc(s.id)}">Details / WhatsApp</button></div>`);
+    } else if (stage === "Ready for Pickup" || stage === "Dispatched" || stage === "With rider" || stage === "Handed over") {
       acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="Handed over">Mark handed over →</button>
-        ${!paid ? `<button class="btn sm" data-set-paid="${esc(s.id)}" data-method="cash">Mark Paid</button>` : ""}
-        <button class="btn sm" data-open-order="${esc(s.id)}">Details</button></div>`);
-    } else if (activeLane === "handed") {
-      acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="Delivered">Complete &amp; close ✓</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Details</button></div>`);
+        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="Completed">Complete Order ✓</button>
+        <button class="btn sm" data-open-order="${esc(s.id)}">Details / WhatsApp</button></div>`);
     } else {
       acts.push(`<div class="pay-row">
         <button class="btn sm" data-print-order="${esc(s.id)}">View receipt</button>
@@ -527,10 +526,9 @@
     return `<div class="order-card" data-card-order="${esc(s.id)}">
       <div class="oc-top">
         <strong class="serif">${esc(s.id)}</strong>
-        ${s.channel === "web" ? `<span class="stat-chip web">WHATSAPP</span>` : `<span class="stat-chip pos">REGISTER</span>`}
-        ${s.status === "pending" ? `<span class="stat-chip pend">PENDING</span>` : s.status === "completed" ? `<span class="stat-chip ok">COMPLETED</span>` : `<span class="stat-chip bad">CANCELLED</span>`}
+        ${s.channel === "web" ? `<span class="stat-chip web">WEB STORE</span>` : `<span class="stat-chip pos">REGISTER</span>`}
+        ${laneChip(fulfillmentStage(s))}
         ${paid ? `<span class="stat-chip ok">PAID</span>` : `<span class="stat-chip pend">UNPAID</span>`}
-        ${s.status === "completed" && s.channel === "web" ? laneChip(s.dispatch_status) : ""}
         <span class="muted small oc-when">${ago(s.created_at)}</span>
       </div>
       <div class="oc-body">
@@ -590,7 +588,7 @@
           <div class="rc-cust-row"><span class="rc-cust-k">Phone:</span> <span class="rc-cust-v">${esc(s.customer_phone || "—")}</span></div>
           ${s.customer_location ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(s.customer_location)}</span></div>` : (s.delivery_area && s.delivery_area !== "Storefront Walk-in" ? `<div class="rc-cust-row"><span class="rc-cust-k">Location:</span> <span class="rc-cust-v">${esc(s.delivery_area)}</span></div>` : "")}
           ${s.customer_notes ? `<div class="rc-cust-row"><span class="rc-cust-k">Notes:</span> <span class="rc-cust-v">${esc(s.customer_notes)}</span></div>` : ""}
-          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${s.channel === "web" ? "Online WhatsApp" : "In-Store POS (Walk-in)"}</span></div>
+          <div class="rc-cust-row"><span class="rc-cust-k">Sales Channel:</span> <span class="rc-cust-v">${s.channel === "web" ? "Web Storefront" : "In-Store POS (Walk-in)"}</span></div>
           ${s.cashier ? `<div class="rc-cust-row"><span class="rc-cust-k">Cashier:</span> <span class="rc-cust-v">${esc(s.cashier.name || s.cashier)}</span></div>` : ""}
         </div>
         <div class="rc-dashed"></div>
@@ -695,9 +693,9 @@
       </div>
 
       <div class="odm-chips">
-        <span class="stat-chip ${s.status === 'completed' ? 'ok' : s.status === 'cancelled' ? 'bad' : 'pend'}">${s.status.toUpperCase()}</span>
+        ${laneChip(fulfillmentStage(s))}
         <span class="stat-chip ${paid ? 'ok' : 'pend'}">${paid ? 'PAID' : 'UNPAID'}</span>
-        <span class="stat-chip ${s.channel === 'web' ? 'web' : 'pos'}">${s.channel === 'web' ? 'WhatsApp' : 'Register'}</span>
+        <span class="stat-chip ${s.channel === 'web' ? 'web' : 'pos'}">${s.channel === 'web' ? 'Web Store' : 'Register'}</span>
         ${s.assigned_rider_name ? `<span class="stat-chip blue">Rider: ${esc(s.assigned_rider_name)}</span>` : ''}
       </div>
 
@@ -756,8 +754,8 @@
       </div>
 
       ${s.customer_phone ? `
-        <a class="btn wa-chat-full-btn" href="https://wa.me/${esc(s.customer_phone.replace(/[^0-9]/g, ''))}?text=${encodeURIComponent(`Hello ${s.customer_name}, Adonai Thrift Store here regarding your order ${s.id}...`)}" target="_blank" rel="noopener">
-          💬 Open WhatsApp Order Chat ↗
+        <a class="btn wa-chat-full-btn" href="https://wa.me/${esc(customerWhatsAppNumber(s.customer_phone))}?text=${encodeURIComponent(customerStatusMessage(s))}" target="_blank" rel="noopener">
+          💬 Open Chat — Send Customer Confirmation / Status ↗
         </a>
       ` : ""}
 
@@ -774,13 +772,13 @@
           </select>
         </div>
 
-        ${s.dispatch_status === "With rider" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Handed over">📦 Mark Handed Over to Customer</button>
-        ` : s.dispatch_status === "Handed over" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Delivered">✓ Complete &amp; Settle Order</button>
-        ` : `
-          <button class="btn primary btn-full" id="btnDispatchRider">🛵 Dispatch to Boda Rider</button>
-        `}
+        ${fulfillmentStage(s) === "Unfulfilled" || fulfillmentStage(s) === "Pending" ? `
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">📦 Start Assembly</button>
+        ` : fulfillmentStage(s) === "In Assembly" || fulfillmentStage(s) === "Packed" ? `
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
+        ` : fulfillmentStage(s) === "Ready for Pickup" || fulfillmentStage(s) === "Dispatched" ? `
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Completed">✓ Complete Order</button>
+        ` : ""}
 
         <button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel Order &amp; Release Item to Rack</button>
         <button class="btn light btn-full" id="btnPrintReceiptModal">🖨 Print Receipt</button>

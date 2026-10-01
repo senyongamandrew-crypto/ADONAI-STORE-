@@ -26,8 +26,9 @@ export interface Product {
   conditionGrade: "Grade A — Excellent" | "Grade B — Good" | "Grade C — Fair" | string;
   sellingPrice: number; // in UGX (e.g., 45000)
   costPrice: number; // original reference/cost price (e.g., 65000)
-  rating: number; // 0.0 to 5.0
-  reviewCount: number;
+  rating?: number; // populated only from verified customer reviews
+  reviewCount?: number;
+  salesCount?: number;
   inStockCount: number;
   description: string;
   photos: ProductPhoto[];
@@ -53,9 +54,9 @@ export const formatUGX = (amount: number): string => {
 };
 
 /** Calculate discount % according to Adonai Store specification */
-export const calculateDiscount = (sellingPrice: number, costPrice: number): number => {
-  if (!sellingPrice || !costPrice || costPrice <= sellingPrice) return 0;
-  const pct = Math.round(((costPrice - sellingPrice) / costPrice) * 100);
+export const calculateDiscount = (sellingPrice: number, originalPrice: number): number => {
+  if (!originalPrice || originalPrice <= sellingPrice || sellingPrice < 0) return 0;
+  const pct = Math.round(((originalPrice - sellingPrice) / originalPrice) * 100);
   return pct > 0 ? pct : 0;
 };
 
@@ -64,11 +65,15 @@ export const calculateDiscount = (sellingPrice: number, costPrice: number): numb
    ============================================================================ */
 
 interface StarRatingProps {
-  rating: number;
-  reviewCount: number;
+  rating?: number;
+  reviewCount?: number;
+  salesCount?: number;
 }
 
-const StarRating: React.FC<StarRatingProps> = ({ rating, reviewCount }) => {
+const StarRating: React.FC<StarRatingProps> = ({ rating, reviewCount = 0, salesCount = 0 }) => {
+  if (!reviewCount || rating == null) {
+    return <div className="text-xs text-stone-500">{salesCount > 0 ? `${salesCount} sold` : "New arrival · No reviews yet"}</div>;
+  }
   const fullStars = Math.floor(rating);
   const hasHalfStar = rating % 1 >= 0.4 && rating % 1 <= 0.8;
 
@@ -287,7 +292,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 {product.name}
               </h2>
               <div className="mt-2">
-                <StarRating rating={product.rating} reviewCount={product.reviewCount} />
+                <StarRating rating={product.rating} reviewCount={product.reviewCount} salesCount={product.salesCount} />
               </div>
             </div>
 
@@ -355,7 +360,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                   </svg>
-                  Added to Your Bag!
+                  Added to Your Cart!
                 </>
               ) : (
                 <>
@@ -478,7 +483,7 @@ export const AdonaiProductCard: React.FC<ProductCardProps> = ({
 
             {/* Social Proof Rating */}
             <div className="pt-0.5">
-              <StarRating rating={product.rating} reviewCount={product.reviewCount} />
+              <StarRating rating={product.rating} reviewCount={product.reviewCount} salesCount={product.salesCount} />
             </div>
 
             {/* Pricing Block */}
@@ -554,8 +559,6 @@ export const SAMPLE_PRODUCTS: Product[] = [
     conditionGrade: "Grade A — Excellent",
     sellingPrice: 45000,
     costPrice: 65000,
-    rating: 4.9,
-    reviewCount: 38,
     inStockCount: 1,
     description: "Authentic 1990s heavy stonewash denim jacket featuring classic copper rivets, dual chest flap pockets, and natural edge patina. Laundried and sanitized at our Kampala Road workshop.",
     material: "100% Ring-Spun Cotton Denim",
@@ -578,8 +581,6 @@ export const SAMPLE_PRODUCTS: Product[] = [
     conditionGrade: "Grade A — Excellent",
     sellingPrice: 38000,
     costPrice: 50000,
-    rating: 4.8,
-    reviewCount: 22,
     inStockCount: 1,
     description: "Durable military twill overshirt with reinforced elbow stitching and heavy-duty horn buttons. Versatile Kampala evening outerwear.",
     material: "100% Heavy Twill Cotton",
@@ -601,8 +602,6 @@ export const SAMPLE_PRODUCTS: Product[] = [
     conditionGrade: "Grade B — Good",
     sellingPrice: 32000,
     costPrice: 42000,
-    rating: 5.0,
-    reviewCount: 14,
     inStockCount: 1,
     description: "Elegant breathable chiffon midi dress with delicate botanical print and waist-cinching matching belt. Dry-cleaned and ready to wear.",
     material: "Chiffon / Rayon Blend",
@@ -623,8 +622,6 @@ export const SAMPLE_PRODUCTS: Product[] = [
     conditionGrade: "Grade A — Excellent",
     sellingPrice: 55000,
     costPrice: 55000, // No discount example
-    rating: 4.7,
-    reviewCount: 19,
     inStockCount: 1,
     description: "Pure virgin wool cable sweater crafted with traditional honeycomb and diamond stitching patterns. Super warm and enduring.",
     material: "100% Pure Virgin Wool",
@@ -655,7 +652,7 @@ export const AdonaiProductGrid: React.FC = () => {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs font-medium text-stone-500">
-            Shopping Bag: <strong>{cartCount} items</strong>
+            Shopping Cart: <strong>{cartCount} items</strong>
           </span>
         </div>
       </div>
