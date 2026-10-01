@@ -77,6 +77,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Show Toolchain Versions
+        run: |
+          java -version
+          gradle --version
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
       - name: Bundle POS Web Assets into Native Project
         run: npm run bundle:pos
 
