@@ -1,4 +1,6 @@
-# Keep the JavaScript bridge methods callable from Android WebView.
--keepclassmembers class com.adonaithrift.pos.MainActivity$AndroidBridge {
-    <methods>;
+# Adonai POS — ProGuard rules
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
 }
+-keep class com.adonaithrift.pos.** { *; }
+-dontwarn android.webkit.**
