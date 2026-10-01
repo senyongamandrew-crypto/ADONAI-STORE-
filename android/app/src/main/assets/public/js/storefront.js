@@ -717,7 +717,7 @@
         </div>
 
         <input class="claim-input" id="coName" placeholder="Your Full Name *" autocomplete="name" value="${esc(formState.name)}" required />
-        <input class="claim-input" id="coPhone" placeholder="WhatsApp Phone Number (e.g. 0758873398) *" autocomplete="tel" value="${esc(formState.phone)}" required />
+        <input class="claim-input" id="coPhone" placeholder="Phone Number (e.g. 0758873398) *" autocomplete="tel" value="${esc(formState.phone)}" required />
 
         <div class="delivery-toggle-row">
           <button type="button" class="deliv-toggle-btn ${deliveryType === 'boda' ? 'active' : ''}" id="btnDelivBoda">Boda Delivery</button>
@@ -745,7 +745,7 @@
         <div class="sum-line"><span>Rider Delivery:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
-      <button class="claim-confirm-btn" id="waCheckout">Confirm order (${DB.ugx(grandTotal)})</button>
+      <button class="claim-confirm-btn" id="confirmOrder">Confirm order (${DB.ugx(grandTotal)})</button>
       <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
     `;
 
@@ -758,6 +758,9 @@
     if (elNotes) elNotes.addEventListener("input", e => { formState.notes = e.target.value; });
     if (elArea) elArea.addEventListener("change", e => {
       selectedAreaIndex = Number(e.target.value);
+      formState.detectedLocation = null;
+      formState.locationPricingReviewed = false;
+      formState.locationStatus = "Selected destination saved. Your current location will be allocated when you confirm.";
       renderCart();
     });
 
@@ -765,8 +768,8 @@
     if (btnBoda) btnBoda.addEventListener("click", () => { deliveryType = "boda"; renderCart(); });
     if (btnPickup) btnPickup.addEventListener("click", () => { deliveryType = "pickup"; renderCart(); });
 
-    const btnWa = $("#waCheckout");
-    if (btnWa) btnWa.addEventListener("click", checkout);
+    const confirmButton = $("#confirmOrder");
+    if (confirmButton) confirmButton.addEventListener("click", checkout);
   }
 
   $("#cartBody").addEventListener("click", e => {
@@ -784,7 +787,7 @@
 
   /* ---------- direct storefront checkout ---------- */
   async function checkout() {
-    const btn = $("#waCheckout");
+    const btn = $("#confirmOrder");
     const hpCompany = $("#hp_company") ? $("#hp_company").value.trim() : "";
     const hpWebsite = $("#hp_website") ? $("#hp_website").value.trim() : "";
     if (hpCompany || hpWebsite) {
@@ -804,7 +807,7 @@
       return;
     }
     if (!phone || phone.length < 7) {
-      toast("Please enter your WhatsApp phone number");
+      toast("Please enter your phone number");
       const el = $("#coPhone"); if (el) el.focus();
       return;
     }
@@ -857,7 +860,7 @@
       });
 
       if (window.AdonaiAnalytics) {
-        window.AdonaiAnalytics.trackPurchaseViaWhatsApp(order); // legacy analytics event name
+        window.AdonaiAnalytics.trackWebPurchase(order);
       }
 
       orderResult = {
