@@ -106,7 +106,19 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Compile Signed Release APK
-        run: npm run build:apk
+        id: release_build
+        run: |
+          set -o pipefail
+          npm run build:apk 2>&1 | tee /tmp/release-build.log
+
+      - name: Report Build Failure
+        if: failure()
+        run: |
+          echo "::group::Build log tail"
+          tail -120 /tmp/release-build.log || true
+          echo "::endgroup::"
+          MSG=$(grep -A 20 -m1 -E "What went wrong|error:" /tmp/release-build.log | head -40 | tr '\n' '~' || true)
+          echo "::error title=Gradle build failed::${MSG}"
 
       - name: Compile Debug APK
         run: npm run build:apk:debug
