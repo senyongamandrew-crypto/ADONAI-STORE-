@@ -79,3 +79,15 @@ Set either of these in your Render Environment tab to authorize staff:
 - `STAFF_TERMINAL_KEY=ADONAI-POS-2026` (POS Cashier Register access)
 - `ADMIN_ACCESS_PIN=246810` (Full Admin Console + POS access)
 - `JWT_SECRET=your-secure-signing-secret`
+
+---
+
+## 🤖 5. Automated CI/CD & GitHub Actions
+
+The repository includes a GitHub Actions workflow in `.github/workflows/build-pos-apk.yml`.
+
+### Key Capabilities:
+- **Automatic Builds**: On every push to `main` and PR, the workflow automatically validates backend test suites and builds the Android POS APK.
+- **Artifact Downloads**: The compiled `dist/adonai-pos-v2.apk` is uploaded as an artifact to each GitHub Action run. You can download the latest APK directly from the **Actions** tab on GitHub without local build tooling.
+- **Automated Releases**: Pushing a version tag (e.g., `git tag v2.4.0 && git push origin v2.4.0`) or triggering the action manually (`workflow_dispatch`) creates a GitHub Release with `adonai-pos-v2.apk` attached.
+

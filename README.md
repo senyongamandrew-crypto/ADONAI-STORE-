@@ -103,6 +103,16 @@ Configure in your Render Dashboard (**Environment** tab):
 
 ---
 
+## 5. Automated CI/CD & GitHub Actions Workflow
+
+The repository includes an automated GitHub Actions pipeline (`.github/workflows/build-pos-apk.yml`):
+- **Continuous Integration**: Runs full backend security, database migration, and concurrency tests on push/pull requests.
+- **Android APK Builder**: Automatically bundles POS assets and compiles `dist/adonai-pos-v2.apk`.
+- **Artifact Downloads**: Uploads `adonai-pos-v2-apk` to GitHub Actions workflow run artifacts (available under the **Actions** tab on GitHub).
+- **Release Automation**: Attaches the standalone APK binary automatically whenever a new version tag (`v*`) is pushed or triggered via `workflow_dispatch`.
+
+---
+
 ## Testing & Verification
 
 Run the comprehensive test suite verifying dual-target security, database auto-migrations, and high-concurrency atomic order deductions:

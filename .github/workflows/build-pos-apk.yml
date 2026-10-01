@@ -1,0 +1,123 @@
+name: Adonai POS Android APK Build & CI Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - 'arena/**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish as GitHub Release'
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Release Tag (e.g. v2.4.0)'
+        required: false
+        type: string
+        default: 'v2.4.0'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  backend-tests:
+    name: 🧪 Backend Test Suite & Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Backend Integration & Security Tests
+        run: |
+          python test_render_postgres.py
+
+  build-pos-apk:
+    name: 📱 Build & Package Android POS APK
+    runs-on: ubuntu-latest
+    needs: backend-tests
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Node Dependencies
+        run: npm ci
+
+      - name: Bundle POS Web Assets & Sync Native Project
+        run: |
+          npm run bundle:pos
+
+      - name: Compile and Package Android POS APK
+        run: |
+          npm run build:apk
+
+      - name: Verify Generated APK Artifact
+        run: |
+          ls -lh dist/adonai-pos-v2.apk
+          test -s dist/adonai-pos-v2.apk
+
+      - name: Upload Standalone APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adonai-pos-v2-apk
+          path: dist/adonai-pos-v2.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release & Attach APK
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: "Adonai POS ${{ github.event.inputs.release_tag || github.ref_name }}"
+          draft: false
+          prerelease: false
+          files: |
+            dist/adonai-pos-v2.apk
+          body: |
+            ## Adonai Thrift Store — Android POS APK Release
+            
+            ### 📦 Download & Installation:
+            - **Direct APK**: Download `adonai-pos-v2.apk` attached below.
+            - **Package ID**: `com.adonaithrift.pos`
+            - **Target**: Android Mobile / Tablet POS Cashier Terminal
+            
+            ### ✨ Features:
+            - Offline SQLite & local cache sync
+            - Barcode & SKU lookup
+            - Camera intake & photo compression
+            - Cash & MTN / Airtel MoMo tender settlement
+            - 80mm thermal receipt printing
+            - Outbound one-way navigation to live web storefront (`https://adonaithrift.ug`)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
