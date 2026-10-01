@@ -25,3 +25,12 @@ android/app/build/
 
 # Logs
 *.log
+
+# Build output
+dist/*.apk
+android/.gradle/
+android/*.keystore
+android/app/release/
+android/gradlew
+android/gradlew.bat
+android/gradle/wrapper/gradle-wrapper.jar

@@ -1,11 +1,12 @@
 {
   "name": "adonai-store-pos-android",
   "version": "2.4.0",
-  "description": "Adonai Thrift Store — Android POS Cashier Terminal App & Hybrid Mobile Architecture",
+  "description": "Adonai Thrift Store \u2014 Android POS Cashier Terminal App & Hybrid Mobile Architecture",
   "main": "pos.html",
   "scripts": {
     "bundle:pos": "node scripts/bundle-pos.js",
     "build:apk": "node scripts/build-pos-apk.js",
+    "build:apk:debug": "node scripts/build-pos-apk.js --debug",
     "cap:sync": "npx @capacitor/cli sync android",
     "cap:open": "npx @capacitor/cli open android",
     "cap:run": "npx @capacitor/cli run android"

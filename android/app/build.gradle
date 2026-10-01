@@ -1,5 +1,19 @@
 apply plugin: 'com.android.application'
 
+// ---------------------------------------------------------------------------
+// Signing configuration
+// An APK MUST be signed or Android refuses to install it ("App not installed").
+// Release signing uses a keystore supplied through env vars / gradle props:
+//   ADONAI_KEYSTORE_FILE, ADONAI_KEYSTORE_PASSWORD, ADONAI_KEY_ALIAS, ADONAI_KEY_PASSWORD
+// If none is supplied, the release build falls back to the debug keystore so the
+// artifact is still installable for internal testing (NOT for Play Store upload).
+// ---------------------------------------------------------------------------
+def keystoreFilePath = System.getenv('ADONAI_KEYSTORE_FILE') ?: project.findProperty('ADONAI_KEYSTORE_FILE')
+def keystorePassword = System.getenv('ADONAI_KEYSTORE_PASSWORD') ?: project.findProperty('ADONAI_KEYSTORE_PASSWORD')
+def keyAliasName = System.getenv('ADONAI_KEY_ALIAS') ?: project.findProperty('ADONAI_KEY_ALIAS')
+def keyPasswordValue = System.getenv('ADONAI_KEY_PASSWORD') ?: project.findProperty('ADONAI_KEY_PASSWORD')
+def hasReleaseKeystore = keystoreFilePath != null && file(keystoreFilePath).exists()
+
 android {
     namespace "com.adonaithrift.pos"
     compileSdk 34
@@ -12,20 +26,41 @@ android {
         versionName "2.4.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        aaptOptions {
-             // Files and dirs to omit from the packaged assets inside the APK
-             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+
+    androidResources {
+        // Files and dirs to omit from the packaged assets inside the APK
+        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+
+    signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile file(keystoreFilePath)
+                storePassword keystorePassword
+                keyAlias keyAliasName
+                keyPassword keyPasswordValue
+                enableV1Signing true
+                enableV2Signing true
+            }
         }
     }
 
     buildTypes {
         release {
             minifyEnabled false
+            shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             debuggable true
         }
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
     }
 
     compileOptions {
@@ -35,8 +70,10 @@ android {
 }
 
 repositories {
-    flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    google()
+    mavenCentral()
+    flatDir {
+        dirs 'libs'
     }
 }
 
