@@ -1,0 +1,49 @@
+{
+  "name": "Adonai POS — Cashier Register Terminal",
+  "short_name": "Adonai POS",
+  "description": "Cashier Register, Barcode Scanning, Tender Settlement & Intake for Adonai Store Kampala.",
+  "start_url": "/pos.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#171210",
+  "theme_color": "#171210",
+  "icons": [
+    {
+      "src": "assets/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/adonai-mark.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "shortcuts": [
+    {
+      "name": "POS Register",
+      "short_name": "Register",
+      "description": "Open Cashier Checkout Register",
+      "url": "/pos.html",
+      "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Catalog Intake",
+      "short_name": "Intake",
+      "description": "Intake new vintage items & photos",
+      "url": "/admin.html#intake",
+      "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Fulfillment & Orders",
+      "short_name": "Orders",
+      "description": "Manage order fulfillment & boda riders",
+      "url": "/admin.html#sales",
+      "icons": [{ "src": "assets/favicon.svg", "sizes": "any" }]
+    }
+  ]
+}
