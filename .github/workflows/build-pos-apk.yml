@@ -74,8 +74,17 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
+      # AGP 8.2.1 is not compatible with Gradle 9.x (preinstalled on the runner),
+      # so pin Gradle 8.6 and generate a wrapper the build can reuse.
+      - name: Set up Gradle 8.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+          cache-disabled: true
+
+      - name: Generate Gradle Wrapper
+        working-directory: android
+        run: gradle wrapper --gradle-version 8.6
 
       - name: Show Toolchain Versions
         run: |
