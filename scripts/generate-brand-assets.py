@@ -16,9 +16,13 @@ import subprocess, os
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(REPO, "assets")
-FONT_CINZEL = "/tmp/fonts/Cinzel.ttf"
-FONT_PLAYFAIR = "/tmp/fonts/Playfair-Italic.ttf"
-FONT_JAKARTA = "/tmp/fonts/Jakarta.ttf"
+def _font(preferred, fallback):
+    """Use the brand TTF when present, else a bundled system face."""
+    return preferred if os.path.exists(preferred) else fallback
+
+FONT_CINZEL = _font("/tmp/fonts/Cinzel.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf")
+FONT_PLAYFAIR = _font("/tmp/fonts/Playfair-Italic.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf")
+FONT_JAKARTA = _font("/tmp/fonts/Jakarta.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 
 # --- polygon geometry (local SVG coordinates) ---
 A_TILE = [(41,19),(59,19),(80,81),(62,81),(50,58),(38,81),(20,81)]
@@ -82,46 +86,40 @@ def label(text, font, size, color, fname, kerning=0, stroke_w=0):
     return int(out[0]), int(out[1])
 
 def og_image(path):
+    """Social share banner: logo mark, ADONAI STORE wordmark, motto. Nothing else."""
     W, H = 2400, 1260                 # 2x supersample of 1200x630
+    MOTTO = "Your Choice, Straight to Your Door"
     # --- wordmark two-tone ---
     w1, h1 = label("ADONAI", FONT_CINZEL, 150, TEXT_DARK, "/tmp/w1.png", kerning=22, stroke_w=3)
     w2, h2 = label("STORE", FONT_CINZEL, 150, GOLD, "/tmp/w2.png", kerning=22, stroke_w=3)
     space = 88
     total = w1 + space + w2
     x1 = (W - total) // 2
-    wm_top = 830                      # top of wordmark glyphs
-    # --- A mark glyph ---
+    wm_top = 740                      # top of wordmark glyphs
+    # --- A mark glyph (centred above the wordmark) ---
     s = 470.0 / 70.0
     tx = W/2 - 52*s
-    ty = 300                          # top of glyph (305 incl. margin)
+    ty = 220                          # top of glyph
     d_glyph = (f"fill {GLYPH} {poly(A_MARK, s, tx, ty-15*s)} "
                f"fill {STAR_CUT} {poly(STAR_MARK, s, tx, ty-15*s)}")
-    # size the badge pill to its text
-    bt = "KAMPALA \u00b7 CURATED VINTAGE"
-    bw, _bh = label(bt, FONT_JAKARTA, 42, "#A87B1F", "/tmp/bt.png", kerning=16)
-    px0, px1 = W//2 - bw//2 - 70, W//2 + bw//2 + 70
-    # frame + badge pill + gold bar
+    # frame + gold divider bar under the wordmark
     d_frame = (f"fill none stroke #E9E2D6 stroke-width 4 rectangle 52,52 {W-52},{H-52} "
-               f"fill #FBF5EA stroke {GOLD} stroke-width 3 roundrectangle {px0},150 {px1},252 51,51 "
-               f"stroke none fill {GOLD} roundrectangle {W//2-145},988 {W//2+145},1004 8,8")
+               f"stroke none fill {GOLD} roundrectangle {W//2-145},960 {W//2+145},976 8,8")
     run(["convert", "-size", f"{W}x{H}", "xc:#FFFFFF",
          "-draw", d_frame,
          "-draw", d_glyph,
-         "-font", FONT_JAKARTA, "-pointsize", "42", "-fill", "#A87B1F",
-         "-kerning", "16", "-gravity", "center", "-annotate", "+0-425", bt,
          "/tmp/og_base.png"])
     # composite wordmark halves
     run(["convert", "/tmp/og_base.png",
          "/tmp/w1.png", "-geometry", f"+{x1}+{wm_top}", "-composite",
          "/tmp/w2.png", "-geometry", f"+{x1+w1+space}+{wm_top}", "-composite",
          "/tmp/og_base.png"])
-    # tagline + footer line
+    # bottom footer: store motto only (no contacts, URLs or delivery notes)
     run(["convert", "/tmp/og_base.png",
-         "-font", FONT_PLAYFAIR, "-pointsize", "58", "-fill", "#5C5548",
-         "-gravity", "center", "-annotate", "+0+455", "Pre-loved pieces with plenty of life left.",
-         "-font", FONT_JAKARTA, "-pointsize", "36", "-fill", "#8A8175", "-kerning", "8",
-         "-annotate", "+0+552", "Same-Day Delivery in Kampala  \u00b7  MTN & Airtel MoMo  \u00b7  adonai-store.onrender.com",
+         "-font", FONT_PLAYFAIR, "-pointsize", "66", "-fill", "#5C5548",
+         "-kerning", "4", "-gravity", "center", "-annotate", "+0+440", MOTTO,
          "-resize", "1200x630!", "-depth", "8", "-strip", path])
+
 
 if __name__ == "__main__":
     favicon_master(f"{OUT}/favicon-512.png")
@@ -136,6 +134,7 @@ if __name__ == "__main__":
     run(["convert", f"{OUT}/icon-512.png", "-resize", "192x192", "-depth", "8", f"{OUT}/icon-192.png"])
     run(["convert", f"{OUT}/icon-512.png", "-resize", "180x180", "-depth", "8", f"{OUT}/apple-touch-icon.png"])
     og_image(f"{OUT}/og-image.png")
+    run(["cp", f"{OUT}/og-image.png", f"{OUT}/og-preview-banner.png"])
     print("done")
     for f in sorted(os.listdir(OUT)):
         if f.endswith((".png", ".ico")):
