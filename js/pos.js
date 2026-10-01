@@ -74,12 +74,37 @@
   if (btnPosSbExit) btnPosSbExit.addEventListener("click", doExitPos);
 
   /* ---------- Cross-Navigation: POS to Live Web Storefront (External Browser Intent) ---------- */
-  const openLiveWebStorefront = () => {
-    let siteUrl = "https://adonaithrift.ug";
+  // Live Render deployment of the public storefront (web + API share this service).
+  const LIVE_WEB_STOREFRONT_URL = "https://adonai-store.onrender.com";
+
+  // The POS must never send staff to the URL of the shell it is running in
+  // (Android APK appassets origin, Capacitor, local dev servers) — only a real
+  // hosted website is safe to hand to the external browser.
+  const isShellOrigin = origin => {
+    try {
+      const u = new URL(origin);
+      if (!/^https?:$/.test(u.protocol)) return true;
+      return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|appassets\.androidplatform\.net)$/i.test(u.hostname);
+    } catch (e) { return true; }
+  };
+
+  const resolveWebStorefrontUrl = () => {
+    // 1. A URL explicitly saved by the owner in Store Settings always wins.
     try {
       const S = DB.getSettings();
-      siteUrl = S.app_url || S.website_url || (window.location.origin.includes("localhost") || window.location.origin.includes("0.0.0.0") || window.location.origin.includes(".app") ? window.location.origin : "https://adonaithrift.ug");
+      const custom = String(S.app_url || S.website_url || "").trim();
+      if (/^https?:\/\/\S+$/i.test(custom)) return custom;
     } catch (e) {}
+    // 2. If the POS itself is served from a real website (e.g. the Render
+    //    deployment), that same origin is the live storefront.
+    if (!isShellOrigin(window.location.origin)) return window.location.origin;
+    // 3. Otherwise (Android APK shell, Capacitor, local dev) open the live
+    //    Render website directly — never the shell origin or a dead domain.
+    return LIVE_WEB_STOREFRONT_URL;
+  };
+
+  const openLiveWebStorefront = () => {
+    const siteUrl = resolveWebStorefrontUrl();
 
     // 1. Native Android WebView bridge (the standalone APK shell).
     // Calling the bridge avoids window.open being swallowed by WebView versions
@@ -100,7 +125,10 @@
     // 3. System Browser intent (_system target launches external default browser)
     try {
       const win = window.open(siteUrl, "_system", "location=yes");
-      if (!win) window.open(siteUrl, "_blank", "noopener,noreferrer");
+      if (!win) {
+        const fallback = window.open(siteUrl, "_blank", "noopener,noreferrer");
+        if (!fallback) flash("🌐 Pop-up blocked — open manually: " + siteUrl, true);
+      }
     } catch (e) {
       window.open(siteUrl, "_blank", "noopener,noreferrer");
     }

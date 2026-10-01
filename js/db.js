@@ -59,6 +59,10 @@
     return "fulfillment";
   };
   const DEFAULT_MASTER_KEY = "ADONAI-MASTER-2026";  // sandbox default per onboarding sheet — rotate in System Parameters
+  // Live Render deployment — the public storefront and the API are served by the
+  // same service. Fallback base used when the POS/admin runs inside the Android
+  // APK shell (appassets origin) or another non-web container.
+  const DEFAULT_WEB_APP_URL = "https://adonai-store.onrender.com";
 
   /* ---------- seed data ---------- */
   function seedProducts() {
@@ -213,7 +217,7 @@
                           window.location.hostname === "appassets.androidplatform.net" ||
                           (window.location.origin.includes("localhost") && !window.location.port);
       if (isMobileApp) {
-        let base = (state && state.settings && (state.settings.app_url || state.settings.website_url)) || "https://adonaithrift.ug";
+        let base = (state && state.settings && (state.settings.app_url || state.settings.website_url)) || DEFAULT_WEB_APP_URL;
         base = base.replace(/\/+$/, "");
         return base + path;
       }

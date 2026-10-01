@@ -28,8 +28,8 @@ function copyDirRecursive(src, dest) {
 function bundleTo(targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
 
-  // 1. Copy core POS HTML files
-  const htmlFiles = ['pos.html', 'admin.html', 'login.html', 'manifest-pos.json', 'manifest.json'];
+  // 1. Copy core POS HTML files (admin.html loads the root app.js console script)
+  const htmlFiles = ['pos.html', 'admin.html', 'login.html', 'app.js', 'manifest-pos.json', 'manifest.json'];
   for (const f of htmlFiles) {
     const src = path.join(ROOT, f);
     if (fs.existsSync(src)) {
