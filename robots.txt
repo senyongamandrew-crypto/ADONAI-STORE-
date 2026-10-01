@@ -10,4 +10,4 @@ Disallow: /pos
 Disallow: /login
 Disallow: /components/
 
-Sitemap: https://adonaithrift.ug/sitemap.xml
+Sitemap: https://adonai-store.onrender.com/sitemap.xml

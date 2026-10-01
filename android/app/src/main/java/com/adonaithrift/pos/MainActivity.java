@@ -63,6 +63,10 @@ public class MainActivity extends AppCompatActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
+        // Render at true device scale regardless of the phone's system font-size /
+        // display settings — the register is a fixed terminal UI that must always
+        // fit the screen instead of appearing zoomed in.
+        settings.setTextZoom(100);
 
         webView.addJavascriptInterface(new AndroidBridge(), "Android");
         webView.setWebViewClient(new WebViewClient() {

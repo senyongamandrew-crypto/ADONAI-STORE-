@@ -454,7 +454,7 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 /* ============ SIDEBAR MENU DRAWER (POS) ============ */
 .pos-sidebar {
   position: fixed; z-index: 100; left: 0; top: 0; bottom: 0;
-  width: 270px; max-width: 86vw; height: 100vh;
+  width: 270px; max-width: 86vw; height: 100vh; height: 100dvh;
   background: var(--dark); color: var(--dark-text);
   display: flex; flex-direction: column;
   padding: 22px 14px 16px; overflow-y: auto;
@@ -534,4 +534,61 @@ body.sb-open .sb-scrim { display: block; }
     width: 78mm !important; max-width: 80mm !important; margin: 0 !important;
     padding: 2mm !important; background: #FFF !important; color: #000 !important;
   }
+}
+
+/* ================= v2.4 — fit the register to the device in hand =================
+   Phones and small tablets: the register must render 1:1 at the device width —
+   no pinch-zoom, no horizontal overflow, no shrunken desktop layout. */
+@media (max-width: 640px) {
+  body { overflow: auto; }
+
+  /* topbar — compact pills that wrap instead of pushing a wide layout */
+  .pos-head { padding: 10px 12px; gap: 8px; }
+  .pos-head .pill { padding: 8px 12px; font-size: 12px; }
+  .pos-head .btn { padding: 8px 12px; font-size: 12.5px; }
+  .me-pill { padding: 4px 12px 4px 4px; font-size: 12px; }
+
+  .pos-title { padding: 14px 12px 0; }
+  .pos-title .kicker { font-size: 10px; }
+  .pos-title h1 { font-size: 24px; }
+  .pos-title-links { gap: 10px; margin-top: 8px; }
+  .pos-title-links .pill { padding: 8px 12px; font-size: 12px; }
+
+  .pos-main { padding: 0 12px; }
+  .left { padding: 12px 0 14px; gap: 11px; }
+
+  /* lookup controls wrap to their own rows instead of forcing a ~400px row */
+  .lookup-row { flex-wrap: wrap; gap: 8px; }
+  .barcode-in { flex: 1 1 100%; min-width: 0; font-size: 16px; padding: 12px 14px; }
+  .lookup-btn { flex: 1 1 auto; min-width: 0; height: 48px; padding: 0 12px; border-radius: 999px; }
+  .cam-btn { flex: 1 1 auto; padding: 12px 14px; white-space: nowrap; }
+  /* 16px inputs stop mobile browsers from auto-zooming when a field is focused */
+  .grid-search { font-size: 16px; padding: 12px 14px; }
+
+  .drow { gap: 8px; }
+  .dtab { padding: 9px 14px; font-size: 12.5px; }
+  .cat-tabs { gap: 7px; }
+  .ctab { padding: 7px 12px; font-size: 12px; }
+
+  .tiles { grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); gap: 10px; }
+  .tile { padding: 8px; gap: 6px; }
+  .tile .tile-img { height: 104px; font-size: 28px; }
+  .tile .t-name { font-size: 12.5px; }
+  .tile .t-meta { font-size: 10.5px; }
+  .tile .t-price { font-size: 15px; }
+
+  .cart-head { padding: 13px 14px; }
+  .cart-lines { padding: 10px 12px; }
+  .cart-summary { padding: 13px 14px 16px; }
+  .sum-row.total { font: 700 20px var(--font-display); margin: 8px 0 12px; }
+  .charge-btn { padding: 15px; font-size: 16px; }
+
+  .modal-backdrop { padding: 12px; }
+  .tender-modal, .receipt-modal { padding: 16px 14px; max-height: 92vh; max-height: 92dvh; }
+  .tender-actions { flex-wrap: wrap; }
+  .tender-actions .btn { flex: 1 1 auto; }
+  .grid2 { grid-template-columns: 1fr; }
+  .form2 { grid-template-columns: 1fr; }
+  .big-in { font-size: 24px; }
+  .intake-list { max-height: 50vh; }
 }
