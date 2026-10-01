@@ -299,7 +299,7 @@
 
   const posCart = $("#posCart");
   const cartToggle = $("#cartToggle");
-  const isCartDocked = () => window.matchMedia("(max-width: 960px)").matches;
+  const isCartDocked = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 960px)").matches;
   const setCartOpen = open => {
     if (!posCart || !cartToggle) return;
     posCart.classList.toggle("open", open);
@@ -316,6 +316,11 @@
   }
 
   const lockQueues = new Map();
+  const hasRemotePosAuth = () => {
+    try { return typeof Auth !== "undefined" && typeof Auth.token === "function" && !!Auth.token(); }
+    catch (e) { return false; }
+  };
+
   function addLine(pid) {
     const prior = lockQueues.get(pid) || Promise.resolve();
     const task = prior.catch(() => false).then(async () => {
@@ -324,11 +329,20 @@
       const current = cart.find(x => x.product_id === pid);
       const quantity = current ? current.qty : 0;
       if (quantity + 1 > p.in_stock_count) { flash(`✗ Only ${p.in_stock_count} in stock for "${p.name}"`, false); beep(false); return false; }
+
+      // Selection is a UI action and must not wait on a network round trip.
+      // Open-access terminals have no JWT, so their local POS database is the
+      // checkout source until a cashier signs in. Authenticated terminals still
+      // reserve against the shared inventory before adding the line.
       try {
-        await DB.acquireInventoryLock(pid, lockOwner, 1);
+        if (hasRemotePosAuth()) await DB.acquireInventoryLock(pid, lockOwner, 1);
         const line = cart.find(x => x.product_id === pid);
         if (line) line.qty++; else cart.push({ product_id: pid, qty: 1 });
         renderCart();
+        // On phones the selected-items panel is a collapsed bottom sheet. Open
+        // it after a successful tap so the cashier can immediately see and
+        // continue with the item they selected.
+        if (isCartDocked()) setCartOpen(true);
         return true;
       } catch (error) {
         flash("✗ " + (error.message || "Could not reserve this item"), false);
@@ -398,14 +412,14 @@
       if (dec) {
         const l = cart.find(x => x.product_id === dec.dataset.dec);
         if (l && l.qty > 1) {
-          await DB.releaseInventoryLock(l.product_id, lockOwner, 1);
+          if (hasRemotePosAuth()) await DB.releaseInventoryLock(l.product_id, lockOwner, 1);
           l.qty--;
         }
       }
       if (inc) await addLine(inc.dataset.inc);
       if (rm) {
         const l = cart.find(x => x.product_id === rm.dataset.rm);
-        if (l) await DB.releaseInventoryLock(l.product_id, lockOwner, l.qty);
+        if (l && hasRemotePosAuth()) await DB.releaseInventoryLock(l.product_id, lockOwner, l.qty);
         cart = cart.filter(x => x.product_id !== rm.dataset.rm);
       }
       if (dec || rm) renderCart();
@@ -417,7 +431,9 @@
 
   $("#btnClear").addEventListener("click", async () => {
     await Promise.allSettled(Array.from(lockQueues.values()));
-    try { await DB.releaseInventoryLockOwner(lockOwner); } catch (error) { flash("⚠ Hold release will retry automatically", false); }
+    if (hasRemotePosAuth()) {
+      try { await DB.releaseInventoryLockOwner(lockOwner); } catch (error) { flash("⚠ Hold release will retry automatically", false); }
+    }
     cart = [];
     renderCart();
   });
@@ -425,10 +441,10 @@
   // Extend active holds while the cart is open. The short server expiry also
   // guarantees abandoned or crashed terminals cannot block stock indefinitely.
   window.setInterval(() => {
-    if (cart.length && !document.hidden) DB.heartbeatInventoryLocks(lockOwner).catch(() => {});
+    if (cart.length && !document.hidden && hasRemotePosAuth()) DB.heartbeatInventoryLocks(lockOwner).catch(() => {});
   }, 60000);
   window.addEventListener("pagehide", () => {
-    if (cart.length) DB.releaseInventoryLockOwner(lockOwner, true).catch(() => {});
+    if (cart.length && hasRemotePosAuth()) DB.releaseInventoryLockOwner(lockOwner, true).catch(() => {});
   });
 
   /* ============================================================
