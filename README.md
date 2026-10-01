@@ -15,7 +15,7 @@ A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plo
 ┌────────────────────────────────────────────────────────┐
 │             Public Web Storefront (Render)             │
 │   • Customer Catalog (GET /api/products)               │
-│   • WhatsApp Checkout & Bag (POST /api/orders, web)    │
+│   • Website Checkout & Bag (POST /api/orders, web)     │
 │   • 100% Customer-facing (No POS links)                │
 └───────────────────────────┬────────────────────────────┘
                             │
@@ -44,7 +44,7 @@ A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plo
 ## 1. Public Web Storefront (Render Deployment)
 
 - **Entry Route**: `/`
-- **Features**: Live rail inventory, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, WhatsApp 1-of-1 order reservation, and order tracking.
+- **Features**: Live rail inventory, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, website 1-of-1 order reservation, and direct POS fulfillment sync.
 - **Privacy & Security**: All POS links, admin navigation, and staff login prompts have been completely stripped from the storefront.
 
 ---

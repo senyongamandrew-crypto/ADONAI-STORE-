@@ -293,12 +293,6 @@
     return `<span class="stat-chip ${cls}">${txt}</span>`;
   };
   const isOpenWebOrder = s => s.channel === "web" && !["completed", "cancelled"].includes(String(s.status || "").toLowerCase());
-  const customerWhatsAppNumber = value => {
-    let digits = String(value || "").replace(/\D/g, "");
-    if (digits.startsWith("0")) digits = "256" + digits.slice(1);
-    return digits;
-  };
-  const customerStatusMessage = s => `Hello ${s.customer_name || "Customer"}, your Adonai Store order ${s.id} is confirmed. Current status: ${fulfillmentStage(s)}. Total: ${ugx(s.total)}. We will keep you updated as it moves through fulfillment.`;
   /* KPI stat card — icon chip + accent tone + fluid responsive grid */
   function kpiCard(label, value, sub, tone, icon) {
     return `<div class="kpi-card kpi-${tone || "rust"}">
@@ -331,7 +325,7 @@
 
     $("#kpiCards").innerHTML =
       kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales", "green", "💰") +
-      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & WhatsApp reservations", "rust", "🧾") +
+      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & web reservations", "rust", "🧾") +
       kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", "📦") +
       kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", "🔖");
 
@@ -507,17 +501,17 @@
     if (stage === "Unfulfilled" || stage === "Pending") {
       acts.push(`<div class="pay-row">
         <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="In Assembly">Start Assembly →</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Details / WhatsApp</button>
+        <button class="btn sm" data-open-order="${esc(s.id)}">Order details</button>
         <button class="btn sm danger" data-cancel-web="${esc(s.id)}">Cancel</button></div>`);
     } else if (stage === "In Assembly" || stage === "Packed") {
       const readyStage = s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched";
       acts.push(`<div class="pay-row">
         <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="${readyStage}">Mark ${readyStage} →</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Details / WhatsApp</button></div>`);
+        <button class="btn sm" data-open-order="${esc(s.id)}">Order details</button></div>`);
     } else if (stage === "Ready for Pickup" || stage === "Dispatched" || stage === "With rider" || stage === "Handed over") {
       acts.push(`<div class="pay-row">
         <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="Completed">Complete Order ✓</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Details / WhatsApp</button></div>`);
+        <button class="btn sm" data-open-order="${esc(s.id)}">Order details</button></div>`);
     } else {
       acts.push(`<div class="pay-row">
         <button class="btn sm" data-print-order="${esc(s.id)}">View receipt</button>
@@ -753,11 +747,6 @@
         <div><strong>Notes:</strong> Location: ${esc(locationStr)}${s.delivery_notes ? " · " + esc(s.delivery_notes) : ""}</div>
       </div>
 
-      ${s.customer_phone ? `
-        <a class="btn wa-chat-full-btn" href="https://wa.me/${esc(customerWhatsAppNumber(s.customer_phone))}?text=${encodeURIComponent(customerStatusMessage(s))}" target="_blank" rel="noopener">
-          💬 Open Chat — Send Customer Confirmation / Status ↗
-        </a>
-      ` : ""}
 
       <div class="odm-dispatch-box">
         <div class="odm-dispatch-title">Workflow Dispatch &amp; Closure</div>

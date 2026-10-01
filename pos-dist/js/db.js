@@ -755,7 +755,7 @@
       });
     },
 
-    /* ----- sales (POS + WhatsApp, unified) ----- */
+    /* ----- sales (POS + web storefront, unified) ----- */
     async processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes, lock_owner }) {
       // The POS intentionally supports open access while the local access lock
       // is off. In that mode there is no JWT to use for the protected server
@@ -854,7 +854,7 @@
       const sale = Object.assign({}, remote, {
         delivery_address: remote.customer_address || String(delivery_address || "").trim(),
         cashier: null,
-        tender: remote.tender || { type: "whatsapp", paid: false },
+        tender: remote.tender || { type: "pending", paid: false },
         assigned_rider_id: null,
         assigned_rider_name: null
       });

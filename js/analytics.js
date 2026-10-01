@@ -138,14 +138,14 @@
       });
     },
 
-    trackPurchaseViaWhatsApp(order) {
+    trackWebPurchase(order) {
       if (!order) return;
       this.track('purchase', {
         transaction_id: order.id,
         value: order.total || 0,
         currency: 'UGX',
         shipping: order.delivery_fee || 0,
-        payment_type: 'WhatsApp Direct',
+        order_channel: 'Web Storefront',
         items: (order.items || []).map(it => ({
           item_id: it.product_id || it.sku,
           item_name: it.name,
