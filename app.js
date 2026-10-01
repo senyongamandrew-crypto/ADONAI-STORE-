@@ -68,14 +68,30 @@
     const input = $("#mkInput");
     input.focus();
     $("#mkShow").addEventListener("click", () => { input.type = input.type === "password" ? "text" : "password"; $("#mkShow").textContent = input.type === "password" ? "Show" : "Hide"; });
-    const go = () => {
-      if (DB.verifyMasterKey(input.value)) {
+    const go = async () => {
+      const val = input.value.trim();
+      if (!val) return;
+      if (DB.verifyMasterKey(val)) {
         Keys.set(true); closeModal(); toast("🔓 Master Key unlocked for this session");
         if (after) after();
-      } else {
-        input.classList.add("err"); toast("Incorrect master key", false);
-        setTimeout(() => input.classList.remove("err"), 700);
+        return;
       }
+      try {
+        const authEndpoint = (typeof DB !== "undefined" && DB.apiUrl) ? DB.apiUrl("/api/auth/verify") : "/api/auth/verify";
+        const r = await fetch(authEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin: val, key: val, terminal_key: val })
+        });
+        const data = await r.json();
+        if (data && data.ok && (data.staff.role === "admin" || (data.via && data.via.startsWith("env")))) {
+          Keys.set(true); closeModal(); toast("🔓 Master Key unlocked via Server / Environment");
+          if (after) after();
+          return;
+        }
+      } catch (err) {}
+      input.classList.add("err"); toast("Incorrect master key", false);
+      setTimeout(() => input.classList.remove("err"), 700);
     };
     $("#mkGo").addEventListener("click", go);
     input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
@@ -140,6 +156,42 @@
   $("#meName").textContent = whoName;
   $("#meRole").textContent = me ? "Role: " + me.role.toUpperCase() : "Roster seeded · keys unset";
   $("#meAvatar").textContent = initials(whoName);
+
+  const btnAdminExit = $("#btnAdminExit");
+  if (btnAdminExit) {
+    btnAdminExit.addEventListener("click", () => {
+      Auth.signOut();
+      location.href = "login.html";
+    });
+  }
+
+  /* Cross-Navigation: Admin Console to Live Web Storefront (External Browser Intent) */
+  const openAdminWebStorefront = () => {
+    let siteUrl = "https://adonaithrift.ug";
+    try {
+      const S = DB.getSettings();
+      siteUrl = S.app_url || S.website_url || (window.location.origin.includes("localhost") || window.location.origin.includes("0.0.0.0") || window.location.origin.includes(".app") ? window.location.origin : "https://adonaithrift.ug");
+    } catch (e) {}
+
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Browser) {
+      try {
+        window.Capacitor.Plugins.Browser.open({ url: siteUrl });
+        return;
+      } catch (err) {}
+    }
+
+    try {
+      const win = window.open(siteUrl, "_system", "location=yes");
+      if (!win) window.open(siteUrl, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      window.open(siteUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const btnAdminOpenWebStore = $("#btnAdminOpenWebStore");
+  if (btnAdminOpenWebStore) btnAdminOpenWebStore.addEventListener("click", openAdminWebStorefront);
+  const btnAdminSbOpenWebStore = $("#btnAdminSbOpenWebStore");
+  if (btnAdminSbOpenWebStore) btnAdminSbOpenWebStore.addEventListener("click", openAdminWebStorefront);
 
   /* =============== navigation =============== */
   const VALID_VIEWS = ["overview", "sales", "inventory", "intake", "customers", "dispatch", "payments", "staff", "settings"];

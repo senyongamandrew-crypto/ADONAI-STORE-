@@ -42,6 +42,10 @@ ROUTES = {
     "/sitemap.xml": "sitemap.xml",
     "/robots.txt": "robots.txt",
     "/manifest.json": "manifest.json",
+    "/manifest-pos.json": "manifest-pos.json",
+    "/download/pos-apk": "dist/adonai-pos-v2.apk",
+    "/dist/adonai-pos-v2.apk": "dist/adonai-pos-v2.apk",
+    "/adonai-pos.apk": "dist/adonai-pos-v2.apk",
 }
 
 COMPRESSIBLE_TYPES = {
@@ -61,6 +65,7 @@ mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("application/manifest+json", ".json")
 mimetypes.add_type("application/xml", ".xml")
+mimetypes.add_type("application/vnd.android.package-archive", ".apk")
 
 
 SECURITY_HEADERS = [
@@ -116,8 +121,16 @@ def wsgi_app(environ, start_response):
         except Exception:
             body_bytes = b""
 
+        headers_dict = {}
+        for k, v in environ.items():
+            if k.startswith("HTTP_"):
+                header_name = k[5:].replace("_", "-").lower()
+                headers_dict[header_name] = v
+            elif k in ("CONTENT_TYPE", "CONTENT_LENGTH"):
+                headers_dict[k.replace("_", "-").lower()] = v
+
         status_code, content_type, response_body = handle_api_request(
-            method, raw_path, query_params, body_bytes
+            method, raw_path, query_params, body_bytes, headers=headers_dict
         )
 
         headers = [
@@ -158,6 +171,8 @@ def wsgi_app(environ, start_response):
         headers = [
             ("Content-Type", f"{mime_type}; charset=utf-8" if "text" in mime_type or "svg" in mime_type or "javascript" in mime_type or "json" in mime_type else mime_type),
         ]
+        if target_file.endswith(".apk"):
+            headers.append(("Content-Disposition", 'attachment; filename="adonai-pos-v2.apk"'))
         headers.extend(SECURITY_HEADERS)
         headers.extend(get_cache_headers(target_file))
 
@@ -235,8 +250,9 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             except Exception:
                 body_bytes = b""
 
+            headers_dict = {k.lower(): v for k, v in self.headers.items()}
             status_code, content_type, response_body = handle_api_request(
-                self.command, path, query_params, body_bytes
+                self.command, path, query_params, body_bytes, headers=headers_dict
             )
 
             self.send_response(status_code)
@@ -282,6 +298,8 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", f"{mime_type}; charset=utf-8" if "text" in mime_type or "svg" in mime_type or "javascript" in mime_type or "json" in mime_type else mime_type)
             self.send_header("Content-Length", str(len(content)))
+            if target_file.endswith(".apk"):
+                self.send_header("Content-Disposition", 'attachment; filename="adonai-pos-v2.apk"')
             if should_gzip:
                 self.send_header("Content-Encoding", "gzip")
                 self.send_header("Vary", "Accept-Encoding")

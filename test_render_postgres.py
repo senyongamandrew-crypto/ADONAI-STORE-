@@ -91,6 +91,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "REQUEST_METHOD": "POST",
                 "PATH_INFO": "/api/orders",
                 "QUERY_STRING": "",
+                "HTTP_X_TERMINAL_KEY": "ADONAI-MASTER-2026",
                 "CONTENT_LENGTH": str(len(json.dumps(payload))),
                 "wsgi.input": io.BytesIO(json.dumps(payload).encode("utf-8"))
             }
@@ -144,26 +145,187 @@ class TestRenderPostgresHardening(unittest.TestCase):
         print(f"✅ PASS: /api/health returned 200 OK with table verification: {data['tables']}")
 
     def test_05_api_sync_pull(self):
-        """Test /api/sync/pull endpoint delivers complete sync payload for frontend."""
+        """Test /api/sync/pull endpoint delivers complete sync payload for authenticated staff."""
         import io
-        environ = {
+        # 1. Unauthenticated request must return 401 Unauthorized
+        environ_unauthed = {
             "REQUEST_METHOD": "GET",
             "PATH_INFO": "/api/sync/pull",
             "QUERY_STRING": "",
             "wsgi.input": io.BytesIO(b"")
         }
         status_captured = []
-        def start_response(status, headers):
-            status_captured.append(status)
+        resp_unauthed = wsgi_app(environ_unauthed, lambda s, h: status_captured.append(s))
+        self.assertTrue(status_captured[0].startswith("401"))
 
-        resp = wsgi_app(environ, start_response)
-        data = json.loads(b"".join(resp).decode("utf-8"))
+        # 2. Authenticated request with Master Key must return 200 OK with full state
+        environ_authed = {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": "/api/sync/pull",
+            "QUERY_STRING": "key=ADONAI-MASTER-2026",
+            "wsgi.input": io.BytesIO(b"")
+        }
+        status_captured_auth = []
+        resp_authed = wsgi_app(environ_authed, lambda s, h: status_captured_auth.append(s))
+        data = json.loads(b"".join(resp_authed).decode("utf-8"))
+        self.assertTrue(status_captured_auth[0].startswith("200"))
         self.assertIn("products", data)
         self.assertIn("sales", data)
         self.assertIn("categories", data)
         self.assertIn("settings", data)
         self.assertGreaterEqual(len(data["products"]), 16)
-        print(f"✅ PASS: /api/sync/pull payload generated with {len(data['products'])} products and full state.")
+        print(f"✅ PASS: /api/sync/pull payload generated with {len(data['products'])} products and secured by terminal auth.")
+
+    def test_06_staff_and_admin_auth_verification(self):
+        """Test Staff Terminal Key and Admin Access PIN verification via environment variables and database."""
+        import io
+
+        # 1. Test ADMIN_ACCESS_PIN environment variable
+        os.environ["ADMIN_ACCESS_PIN"] = "987654"
+        payload_admin = {"pin": "987654"}
+        environ_admin = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/auth/verify",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(payload_admin))),
+            "wsgi.input": io.BytesIO(json.dumps(payload_admin).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_admin, lambda s, h: status_cap.append(s))
+        data = json.loads(b"".join(resp).decode("utf-8"))
+        self.assertTrue(data.get("ok"))
+        self.assertIn("token", data)
+        self.assertEqual(data["staff"]["role"], "admin")
+        self.assertTrue(status_cap[0].startswith("200"))
+
+        # 2. Test STAFF_TERMINAL_KEY environment variable
+        os.environ["STAFF_TERMINAL_KEY"] = "ADONAI-POS-STAFF-KEY"
+        payload_staff = {"terminal_key": "ADONAI-POS-STAFF-KEY"}
+        environ_staff = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/auth/verify",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(payload_staff))),
+            "wsgi.input": io.BytesIO(json.dumps(payload_staff).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_staff, lambda s, h: status_cap.append(s))
+        data = json.loads(b"".join(resp).decode("utf-8"))
+        self.assertTrue(data.get("ok"))
+        self.assertIn("token", data)
+        self.assertEqual(data["staff"]["role"], "cashier")
+        self.assertTrue(status_cap[0].startswith("200"))
+
+        # 3. Test Database Seed Staff PIN ('1234' for Mercer Admin)
+        payload_db = {"pin": "1234"}
+        environ_db = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/auth/verify",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(payload_db))),
+            "wsgi.input": io.BytesIO(json.dumps(payload_db).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_db, lambda s, h: status_cap.append(s))
+        data = json.loads(b"".join(resp).decode("utf-8"))
+        self.assertTrue(data.get("ok"))
+        self.assertIn("token", data)
+        self.assertEqual(data["staff"]["id"], "STF-01")
+        self.assertEqual(data["staff"]["role"], "admin")
+
+        # 4. Test Invalid Key Rejection
+        payload_invalid = {"pin": "invalid_wrong_key"}
+        environ_invalid = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/auth/verify",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(payload_invalid))),
+            "wsgi.input": io.BytesIO(json.dumps(payload_invalid).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_invalid, lambda s, h: status_cap.append(s))
+        data = json.loads(b"".join(resp).decode("utf-8"))
+        self.assertFalse(data.get("ok"))
+        self.assertTrue(status_cap[0].startswith("401"))
+
+        print("✅ PASS: Staff Terminal Key & Admin PIN environment variable verification passed.")
+
+    def test_07_dual_target_endpoint_security(self):
+        """Test public storefront vs protected POS endpoints security separation."""
+        import io
+        import time
+
+        # Ensure test products have stock for isolated test 7
+        with get_db() as session:
+            for pid in ("PRD-1002", "PRD-1003"):
+                p = session.query(Product).filter_by(id=pid).first()
+                if p:
+                    p.in_stock_count = 5
+
+        # Public storefront can read products without auth
+        environ_public_prods = {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": "/api/products",
+            "QUERY_STRING": "",
+            "wsgi.input": io.BytesIO(b"")
+        }
+        status_cap = []
+        resp = wsgi_app(environ_public_prods, lambda s, h: status_cap.append(s))
+        self.assertTrue(status_cap[0].startswith("200"))
+
+        # Public web checkout succeeds without auth
+        order_web = {
+            "id": f"AT-WEB-{int(time.time() * 1000)}",
+            "channel": "web",
+            "customer_name": "Web Shopper",
+            "items": [{"product_id": "PRD-1002", "qty": 1}]
+        }
+        environ_web_order = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/orders",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(order_web))),
+            "wsgi.input": io.BytesIO(json.dumps(order_web).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_web_order, lambda s, h: status_cap.append(s))
+        self.assertTrue(status_cap[0].startswith("201"))
+
+        # Protected POS checkout without auth must fail with 401
+        order_pos_unauthed = {
+            "channel": "pos",
+            "items": [{"product_id": "PRD-1003", "qty": 1}]
+        }
+        environ_pos_unauth = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/orders",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(order_pos_unauthed))),
+            "wsgi.input": io.BytesIO(json.dumps(order_pos_unauthed).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_pos_unauth, lambda s, h: status_cap.append(s))
+        self.assertTrue(status_cap[0].startswith("401"))
+
+        # Protected POS checkout with auth header succeeds with 201
+        import time
+        order_pos_authed = {
+            "id": f"AT-POS-AUTH-{int(time.time() * 1000)}",
+            "channel": "pos",
+            "items": [{"product_id": "PRD-1003", "qty": 1}]
+        }
+        environ_pos_auth = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/orders",
+            "QUERY_STRING": "",
+            "HTTP_X_TERMINAL_KEY": "ADONAI-MASTER-2026",
+            "CONTENT_LENGTH": str(len(json.dumps(order_pos_authed))),
+            "wsgi.input": io.BytesIO(json.dumps(order_pos_authed).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_pos_auth, lambda s, h: status_cap.append(s))
+        self.assertTrue(status_cap[0].startswith("201"))
+        print("✅ PASS: Dual-target security verified (public web order 201, POS unauthed 401, POS authed 201).")
 
 
 if __name__ == "__main__":

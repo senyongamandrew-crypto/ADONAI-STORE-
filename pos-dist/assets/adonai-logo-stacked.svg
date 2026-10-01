@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 320" width="340" height="320" fill="none">
+  <!-- Centered large dark A mark -->
+  <g transform="translate(118, 20)">
+    <path d="M42 15 L62 15 L85 85 L64 85 L52 61 L40 85 L19 85 Z" fill="#222222"/>
+    <polygon points="52,28.5 53,36 56.6,33.7 54.4,37.3 62,38.2 54.4,39.1 56.6,42.7 53,40.4 52,47.9 51,40.4 47.4,42.7 49.6,39.1 42,38.2 49.6,37.3 47.4,33.7 51,36" fill="#FFFFFF"/>
+  </g>
+  <!-- ADONAI STORE text centered -->
+  <text x="170" y="182" text-anchor="middle" font-family="'Playfair Display', Georgia, 'Times New Roman', serif" font-weight="800" font-size="30" letter-spacing="3.5">
+    <tspan fill="#222222">ADONAI </tspan><tspan fill="#DA9902">STORE</tspan>
+  </text>
+  <!-- Accent golden bar centered -->
+  <rect x="136" y="212" width="68" height="4.5" rx="2.25" fill="#DA9902"/>
+</svg>

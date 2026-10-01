@@ -1,0 +1,28 @@
+{
+  "appId": "com.adonaithrift.pos",
+  "appName": "Adonai POS",
+  "webDir": "pos-dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "plugins": {
+    "Browser": {
+      "presentationStyle": "popover"
+    },
+    "Keyboard": {
+      "resize": "body",
+      "style": "dark"
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#171210"
+    }
+  }
+}

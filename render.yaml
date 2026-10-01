@@ -21,10 +21,12 @@ services:
         value: 300
       - key: FORCE_HTTPS
         value: true
-      # Owner's emergency master PIN for /login — set the secret value
-      # yourself in the Render dashboard (Environment tab). Entering it
-      # on the staff keypad always grants admin access, server-verified.
+      # Owner's emergency master PIN / key for /login — set the secret value
+      # in the Render dashboard (Environment tab). Entering it grants full admin access.
       - key: ADMIN_ACCESS_PIN
+        sync: false
+      # Staff Terminal Key for cashier & POS register access from the website
+      - key: STAFF_TERMINAL_KEY
         sync: false
 
 databases:

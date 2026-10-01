@@ -1,97 +1,112 @@
-# ADONAI THRIFT STORE — Dual-Interface Retail Platform
+# ADONAI THRIFT STORE — Dual-Target Architecture (Web Storefront + Android Native POS)
 
-A unified, multi-tier system for **Adonai Thrift Store** (Kampala) — a public storefront, a protected cashier POS, and an operations dashboard, all powered by one real-time shared database engine.
+A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plot 45 Salama Road / Kibuli, Kampala, Uganda) built on a **Dual-Target Architecture**:
 
-## Interfaces & routes
-
-| Route | Interface | Who |
-| --- | --- | --- |
-| `/` | 🛍️ **Storefront** — public catalog, live stock badges, WhatsApp checkout | everyone |
-| `/pos` | 🧾 **Cashier terminal** — barcode scanning, tender settlement, thermal receipts | staff |
-| `/admin` | 📊 **OPS dashboard** — sales, inventory, payments, staff & access | owner/admin |
-| `/login` | 🔐 **Staff PIN screen** | staff |
-
-## Run it
-
-```bash
-python3 serve.py        # serves everything on http://localhost:8080
-```
-
-Zero dependencies, zero build step.
+1. 🛍️ **Public Web Storefront (Render Deployment)**: Lightweight, mobile-responsive, customer-facing e-commerce application served at `/` on Render. Public storefront contains **zero POS/admin links or authentication triggers**.
+2. 📱 **Android POS App (Native APK / Capacitor)**: Standalone cashier register and catalog intake terminal packaged into an installable Android APK (`com.adonai.store.pos`).
+3. 🌐 **Cross-Navigation (POS to Website Only)**: The Android POS app includes a **"🌐 Open Live Web Storefront ↗"** button that triggers an external Android intent to open the live Render site in the phone's default browser. The public website has no return mechanism to the POS app.
+4. 🔒 **Real-Time Data Sync & Endpoint Security**: Atomically decrements database stock across both channels. POS backend endpoints are secured via JWT and Staff Terminal Keys (`STAFF_TERMINAL_KEY` / `ADMIN_ACCESS_PIN`).
 
 ---
 
-## 🔓 Access model — OPEN MODE right now
-
-Per the owner's directive, **no passkeys are configured**: the system ships in **open access mode** (`staff: []`, `access_locked: false`), so `/pos` and `/admin` are freely reachable while you trial it.
-
-When you're ready to publish:
-
-1. Open **`/admin` → Staff & Access**
-2. Add each cashier/admin with a name, role and 4–8 digit **PIN**
-3. Flip the **staff lock ON**
-
-From that moment `/pos` and `/admin` require a PIN at `/login` (cashiers always land on the terminal; admins can reach the dashboard). The public storefront stays open to everyone. "Log Out / Exit POS" revokes the session and returns to the storefront.
-
-### 🆘 Locked out? The environment master PIN always works
-
-Set **`ADMIN_ACCESS_PIN`** (4–8 digits) in the Render dashboard → your service → **Environment**. Typing that PIN on the `/login` keypad is verified **server-side** and always signs you in as **admin** — even if the staff PINs stored in the browser were never set, were lost, or were forgotten. Once in, go to **`/admin` → Staff & Access** to reset staff PINs or turn the lock off. (Staff PINs saved in the server database also work on the keypad via the same `/api/auth/verify` endpoint.)
-
-## Architecture
+## Architecture Diagram
 
 ```
-┌────────────┐   ┌─────────┐   ┌──────────────┐
-│ Storefront │   │   POS   │   │ OPS Dashboard │
-│     /      │   │  /pos   │   │    /admin     │
-└─────┬──────┘   └────┬────┘   └───────┬───────┘
-      └───────────────┼────────────────┘
-                      ▼
-              js/db.js  — single source of truth
-        (products · sales · staff · settings)
-   localStorage + BroadcastChannel (real-time, cross-tab)
-   + Web Locks for atomic, race-safe stock deductions
+┌────────────────────────────────────────────────────────┐
+│             Public Web Storefront (Render)             │
+│   • Customer Catalog (GET /api/products)               │
+│   • WhatsApp Checkout & Bag (POST /api/orders, web)    │
+│   • 100% Customer-facing (No POS links)                │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            │ (Atomic Stock Decr. / Read)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│             Shared Backend REST API & DB               │
+│   • PostgreSQL (Render) / SQLite Engine                │
+│   • JWT / Staff Terminal Key Verification              │
+│   • High-concurrency Connection Pool                   │
+└───────────────────────────▲────────────────────────────┘
+                            │
+                            │ (JWT / X-Terminal-Key Auth)
+┌───────────────────────────┴────────────────────────────┐
+│             Android POS App (Native APK)               │
+│   • Cashier Checkout Register & Barcode Scanning       │
+│   • Cash & MTN / Airtel MoMo Tender Settlement         │
+│   • Camera Catalog Intake & Photo Compression          │
+│   • 80mm Thermal Receipt Printing                      │
+│   • "Open Live Web Storefront" (External Intent)       │
+└────────────────────────────────────────────────────────┘
 ```
 
-Every sale — whether scanned at the counter (`process_pos_sale`) or placed via the storefront's WhatsApp checkout (`createWebOrder`) — hits the same tables. Stock changes broadcast instantly: a counter sale flips the storefront badge to **SOLD** in every open tab without a refresh.
+---
 
-> **Going to production?** `js/db.js` is a clean adapter boundary — reimplement the same `DB.*` API against Supabase (tables + Realtime + Auth) and all three UIs work unchanged.
+## 1. Public Web Storefront (Render Deployment)
 
-### Key guarantees
+- **Entry Route**: `/`
+- **Features**: Live rail inventory, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, WhatsApp 1-of-1 order reservation, and order tracking.
+- **Privacy & Security**: All POS links, admin navigation, and staff login prompts have been completely stripped from the storefront.
 
-- **Atomic inventory deductions** — `DB.processPosSale()` checks *all* cart lines against stock under a cross-tab Web Lock, then decrements. Any failure = nothing is written. Unique thrift pieces can't be double-sold.
-- **Real-time sync** — BroadcastChannel + storage events keep storefront, POS and admin consistent across tabs/devices on the same browser profile.
-- **Unified product schema** — `barcode_id` (Code 128 string), `in_stock_count`, `cost_price`, `selling_price` (UGX), size and condition for thrift items.
+---
 
-## Cashier terminal (`/pos`)
+## 2. Android POS App (Native APK Setup)
 
-- **Global hardware scanner listener** — invisible `keydown` capture; USB/Bluetooth scanners burst-type the code + Enter and the item lands in the cart, a beep + flash confirms. Manual barcode input also supported.
-- **Manual lookup grid** — category tabs (Jackets, Shirts, Shoes, Dresses, Trousers, Accessories) + live search for un-tagged items.
-- **Live cart register** — line items, stock-bounded quantity steppers, running subtotal.
-- **Tender settlement**:
-  - 💵 **Cash** — quick-amount chips + change calculator (`tendered − total = change to return`)
-  - 📱 **MTN MoMo / Airtel Money** — sender name/phone, transaction reference, mandatory *"payment received & verified"* confirmation, logged per sale
-- **Thermal receipts** — 80 mm print stylesheet; auto-triggers the browser print dialog on every completed sale; reprint from the last-sale button.
+### Quick Install (Pre-built APK)
+The installable Android APK is available at:
+- `dist/adonai-pos-v2.apk`
+- `android/app/build/outputs/apk/release/adonai-pos-release.apk`
 
-## Storefront (`/`)
+Transfer `dist/adonai-pos-v2.apk` to any Android phone or tablet register, enable **Install Unknown Apps**, and install.
 
-- Live stock badges (**In stock / Sold**) driven by real-time DB events
-- Category tabs + search, one-of-one thrift details (size, condition)
-- Cart drawer → **WhatsApp checkout**: reserves stock atomically, creates a `WEB-…` order in the shared DB, then opens `wa.me` with the full order payload for payment confirmation
-- Discreet **Staff / POS Login** gateway in the header (and footer)
+### Build APK from Source
+```bash
+./build-apk.sh
+# or
+npm run build:apk
+```
 
-## OPS dashboard (`/admin`)
+### Open & Run in Android Studio (Capacitor)
+```bash
+npm install
+npm run bundle:pos
+npx cap open android
+```
 
-- **Overview** — revenue today, AOV, pending web orders, sold-out pieces; 14-day revenue chart stacked by channel; POS-vs-Web split
-- **Sales** — unified ledger of counter sales + WhatsApp orders; confirm payment for pending web orders or cancel them (stock is automatically returned to the shelf)
-- **Inventory** — unified product creation (auto-generated scannable barcode, live on POS + storefront the instant it's added), cost vs selling margin, stock tools
-- **Payments** — collection KPIs; complete tender log (cash with change, MoMo refs with verifying cashier)
-- **Customers** — lifetime value for WhatsApp customers plus walk-in totals
-- **Staff & Access** — create PIN accounts, enable the staff lock
+---
 
-## Configuration
+## 3. Cross-Navigation (POS to Website Only)
 
-Store metadata (name, address, **WhatsApp number**) lives in `js/db.js → seedState().settings.whatsapp` and can be updated in the browser console via `DB.updateSettings({ whatsapp: "2567XXXXXXXX" })`. To reseed demo data: `DB.resetToSeed()`.
+- In the Android POS topbar and sidebar, tap **"🌐 Open Live Web Storefront ↗"**.
+- This launches an external Android Intent (`Intent.ACTION_VIEW` or Capacitor `Browser.open`), opening the live website in the phone's external browser (Chrome / Samsung Internet).
+- The public website contains **no return link** to the POS app. Navigating back to the cashier terminal is done via Android's task manager / app switcher.
 
-## Product photography
+---
 
-Seeds ship with placeholder images (locked to each product). Staff replace them with the **real item photo** during intake — either in the POS terminal (**📥 Intake** → Edit · photo → 📁 Upload from Gallery / Files) or the admin product editor. Photos from local files or device gallery are compressed to a compact JPEG and saved into the shared DB, so the storefront, POS tiles and dashboard update **live, with no refresh**. Products without a photo gracefully fall back to a clean category icon.
+## 4. API & Data Synchronization (Live Stock & JWT Security)
+
+| Channel | Endpoint | Method | Auth Required | Action |
+| :--- | :--- | :--- | :--- | :--- |
+| **Storefront** | `/api/products` | `GET` | Public | Reads live catalog & in-stock counts |
+| **Storefront** | `/api/categories` | `GET` | Public | Standard category list |
+| **Storefront** | `/api/orders` | `POST` (`channel="web"`) | Public | Atomically decrements stock & creates order |
+| **POS App** | `/api/auth/verify` | `POST` | Terminal Key / PIN | Returns signed JWT Bearer Token |
+| **POS App** | `/api/orders` | `POST` (`channel="pos"`) | **JWT / Terminal Key** | Atomically decrements stock, settles tender, logs ledger |
+| **POS App** | `/api/products` | `POST` | **JWT / Terminal Key** | Intakes new piece into shared database & inventory |
+| **POS App** | `/api/sync/pull` | `POST`/`GET` | **JWT / Terminal Key** | Full operational state sync (sales, inventory, ledger) |
+
+### Render Environment Variables
+Configure in your Render Dashboard (**Environment** tab):
+- `STAFF_TERMINAL_KEY=ADONAI-POS-2026` (Authorizes POS Cashier Register terminals)
+- `ADMIN_ACCESS_PIN=246810` (Authorizes Store Admin & full operations console)
+- `JWT_SECRET=your-secure-signing-secret`
+- `DATABASE_URL=postgresql://...` (Render Managed PostgreSQL)
+
+---
+
+## Testing & Verification
+
+Run the comprehensive test suite verifying dual-target security, database auto-migrations, and high-concurrency atomic order deductions:
+
+```bash
+python3 test_render_postgres.py
+```

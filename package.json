@@ -1,0 +1,32 @@
+{
+  "name": "adonai-store-pos-android",
+  "version": "2.4.0",
+  "description": "Adonai Thrift Store — Android POS Cashier Terminal App & Hybrid Mobile Architecture",
+  "main": "pos.html",
+  "scripts": {
+    "bundle:pos": "node scripts/bundle-pos.js",
+    "build:apk": "node scripts/build-pos-apk.js",
+    "cap:sync": "npx @capacitor/cli sync android",
+    "cap:open": "npx @capacitor/cli open android",
+    "cap:run": "npx @capacitor/cli run android"
+  },
+  "keywords": [
+    "pos",
+    "point-of-sale",
+    "android",
+    "capacitor",
+    "adonai",
+    "retail",
+    "kampala"
+  ],
+  "author": "Adonai Thrift Store",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/browser": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/keyboard": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0"
+  }
+}
