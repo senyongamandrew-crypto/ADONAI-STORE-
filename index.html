@@ -108,7 +108,7 @@
   <div class="logistics-head">
     <p class="eyebrow">Regional Logistics</p>
     <h2 class="section-title">Dependable delivery across Uganda</h2>
-    <p class="section-sub">Every piece is safely packed and dispatched directly from our Kampala store with real-time WhatsApp &amp; rider tracking.</p>
+    <p class="section-sub" id="deliveryScopeText">Every piece is safely packed and dispatched directly from our Kampala store with real-time WhatsApp &amp; rider tracking.</p>
   </div>
   <div class="region-cards">
     <div class="region-card">
@@ -121,7 +121,7 @@
           <span class="rc-badge">Same-Day Boda</span>
         </div>
       </div>
-      <p>Instant dispatch across Kampala (Kololo, Ntinda, Bugolobi, Muyenga, Nakasero), Entebbe &amp; Mukono. Free in-store pickup available at Plot 45 Salama Road / Kibuli.</p>
+      <p>Instant dispatch across Kampala (Kololo, Ntinda, Bugolobi, Muyenga, Nakasero), Entebbe &amp; Mukono. Free in-store pickup available at <span id="storePickupAddress">our Kampala store</span>.</p>
     </div>
     <div class="region-card">
       <div class="rc-header">
@@ -172,13 +172,13 @@
     <div>
       <p class="foot-h">Customer Care &amp; Orders</p>
       <ul class="foot-list">
-        <li><a href="https://wa.me/256758873398?text=Hello%20Adonai%20Store%2C%20I%20would%20like%20to%20track%20my%20order" target="_blank" rel="noopener noreferrer">Track Your Order (WhatsApp)</a></li>
+        <li><a id="trackOrderLink" href="https://wa.me/256758873398?text=Hello%20Adonai%20Store%2C%20I%20would%20like%20to%20track%20my%20order" target="_blank" rel="noopener noreferrer">Track Your Order (WhatsApp)</a></li>
         <li><a href="terms-and-conditions.html">Terms &amp; 2-Day Returns</a></li>
         <li><a href="privacy-policy.html">Privacy Policy</a></li>
       </ul>
     </div>
   </div>
-  <div class="wrap foot-base">© 2026 Adonai Thrift Store · All prices in Ugandan Shillings (UGX)</div>
+  <div class="wrap foot-base" id="footCopyright">© 2026 Adonai Thrift Store · All prices in Ugandan Shillings (UGX)</div>
 </footer>
 
 <!-- ============ COOKIE / PRIVACY BANNER ============ -->
@@ -217,7 +217,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="js/analytics.js"></script>
-<script src="js/db.js?v=2.5"></script>
-<script src="js/storefront.js?v=2.4"></script>
+<script src="js/db.js?v=2.7"></script>
+<script src="js/storefront.js?v=2.5"></script>
 </body>
 </html>

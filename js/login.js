@@ -176,7 +176,9 @@
       .then(({ ok, data }) => {
         inFlight = false;
         if (ok && data && data.ok && data.staff) {
-          enter(data.staff);
+          // Keep the signed JWT returned by the server. Protected operations
+          // such as publishing System Parameters use it on later API calls.
+          enter(Object.assign({}, data.staff, { token: data.token || "" }));
           return;
         }
         if (explicit || key.length >= 8) {

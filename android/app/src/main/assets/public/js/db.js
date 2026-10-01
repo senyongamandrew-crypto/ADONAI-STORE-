@@ -231,6 +231,50 @@
     subs.filter(s => s.table === table || s.table === "*").forEach(s => { try { s.cb(table); } catch (e) {} });
     if (bc) { try { bc.postMessage({ table }); } catch (e) {} }
   }
+
+  const NUMERIC_SETTING_KEYS = new Set(["base_delivery_fee", "boda_base_fee"]);
+  const BOOLEAN_SETTING_KEYS = new Set(["access_locked"]);
+
+  function normalizeRemoteSettings(remote) {
+    if (!remote || typeof remote !== "object" || Array.isArray(remote)) return {};
+    return Object.keys(remote).reduce((out, key) => {
+      let value = remote[key];
+      if (NUMERIC_SETTING_KEYS.has(key)) value = Math.max(0, Number(value) || 0);
+      if (BOOLEAN_SETTING_KEYS.has(key)) value = value === true || value === 1 || String(value).toLowerCase() === "true" || String(value) === "1";
+      out[key] = value;
+      return out;
+    }, {});
+  }
+
+  function applyRemoteSettings(remote) {
+    const incoming = normalizeRemoteSettings(remote);
+    if (!Object.keys(incoming).length) return false;
+    reload();
+    let changed = false;
+    Object.keys(incoming).forEach(key => {
+      if (state.settings[key] !== incoming[key]) {
+        state.settings[key] = incoming[key];
+        changed = true;
+      }
+    });
+    if (changed) {
+      save();
+      broadcast("settings");
+    }
+    return changed;
+  }
+
+  let settingsSyncInFlight = null;
+  function pullStoreSettings() {
+    if (settingsSyncInFlight || typeof fetch === "undefined") return settingsSyncInFlight || Promise.resolve(false);
+    settingsSyncInFlight = fetch(apiUrl("/api/settings"), { method: "GET", cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => data && data.settings ? applyRemoteSettings(data.settings) : false)
+      .catch(() => false)
+      .finally(() => { settingsSyncInFlight = null; });
+    return settingsSyncInFlight;
+  }
+
   function initRealtime(iface) {
     if (typeof BroadcastChannel !== "undefined") {
       bc = new BroadcastChannel(CHANNEL);
@@ -247,6 +291,14 @@
       });
       document.addEventListener("visibilitychange", () => { if (!document.hidden) { state = null; reload(); subs.filter(s => s.table === "*").forEach(s => s.cb("reload")); } });
 
+      // Store profile settings are publicly readable and deliberately fetched
+      // independently of the protected POS sync. Polling keeps already-open
+      // storefronts current when an Android terminal saves System Parameters.
+      pullStoreSettings();
+      window.setInterval(() => {
+        if (!document.hidden) pullStoreSettings();
+      }, 5000);
+
       // Hydrate state from backend (POS full sync or Public catalog)
       try {
         const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
@@ -258,6 +310,7 @@
               state.products = data.products;
               if (Array.isArray(data.sales) && data.sales.length > 0) state.sales = data.sales;
               save();
+              if (data.settings) applyRemoteSettings(data.settings);
               broadcast("*");
             } else {
               // Public storefront fallback to live products
@@ -414,6 +467,44 @@
       return tx("settings", st => {
         Object.keys(patch).forEach(k => { st.settings[k] = patch[k]; });
         return Object.assign({}, st.settings);
+      });
+    },
+    pullStoreSettings,
+    syncStoreSettings(patch, adminCredential) {
+      const cleanPatch = Object.assign({}, patch || {});
+      const credential = String(adminCredential || "").trim();
+      const headers = { "Content-Type": "application/json" };
+
+      if (credential) {
+        if (credential.split(".").length === 3) headers.Authorization = "Bearer " + credential;
+        else headers["X-Terminal-Key"] = credential;
+      } else if (typeof Auth !== "undefined" && Auth.authHeaders) {
+        Object.assign(headers, Auth.authHeaders());
+      }
+
+      return fetch(apiUrl("/api/settings"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ settings: cleanPatch })
+      }).then(async response => {
+        let data = null;
+        try { data = await response.json(); } catch (e) {}
+        if (!response.ok || !data || !data.ok) {
+          const message = data && data.error
+            ? data.error
+            : "Could not publish settings to the live storefront";
+          throw new Error(message);
+        }
+
+        const publicSettings = normalizeRemoteSettings(data.settings || {});
+        return tx("settings", st => {
+          Object.keys(publicSettings).forEach(key => { st.settings[key] = publicSettings[key]; });
+          // The server never returns secret values. Keep the locally verified
+          // master key in the admin_key slot only after the remote save succeeds.
+          if (cleanPatch.master_key) st.settings.admin_key = String(cleanPatch.master_key);
+          else if (cleanPatch.admin_key) st.settings.admin_key = String(cleanPatch.admin_key);
+          return Object.assign({}, st.settings);
+        });
       });
     },
 

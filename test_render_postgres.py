@@ -327,6 +327,69 @@ class TestRenderPostgresHardening(unittest.TestCase):
         self.assertTrue(status_cap[0].startswith("201"))
         print("✅ PASS: Dual-target security verified (public web order 201, POS unauthed 401, POS authed 201).")
 
+    def test_08_live_store_settings_sync(self):
+        """System Parameters persist centrally and public reads never expose keys."""
+        import io
+
+        with get_db() as session:
+            original = {
+                row.key: row.value
+                for row in session.query(StoreSetting).filter(
+                    StoreSetting.key.in_(["store_name", "base_delivery_fee"])
+                ).all()
+            }
+
+        def request(method, path, payload=None, terminal_key=None):
+            raw = json.dumps(payload or {}).encode("utf-8") if payload is not None else b""
+            environ = {
+                "REQUEST_METHOD": method,
+                "PATH_INFO": path,
+                "QUERY_STRING": "",
+                "CONTENT_LENGTH": str(len(raw)),
+                "wsgi.input": io.BytesIO(raw)
+            }
+            if terminal_key:
+                environ["HTTP_X_TERMINAL_KEY"] = terminal_key
+            captured = []
+            response = wsgi_app(environ, lambda status, headers: captured.append(status))
+            return captured[0], json.loads(b"".join(response).decode("utf-8"))
+
+        try:
+            status, public_before = request("GET", "/api/settings")
+            self.assertTrue(status.startswith("200"))
+            self.assertNotIn("master_key", public_before["settings"])
+            self.assertNotIn("admin_key", public_before["settings"])
+
+            status, denied = request("POST", "/api/settings", {
+                "settings": {"store_name": "Unauthorized Name"}
+            })
+            self.assertTrue(status.startswith("403"))
+            self.assertFalse(denied.get("ok"))
+
+            live_name = "Adonai Live Sync Test"
+            status, updated = request(
+                "POST",
+                "/api/settings",
+                {"settings": {"store_name": live_name, "base_delivery_fee": 8500}},
+                "ADONAI-MASTER-2026"
+            )
+            self.assertTrue(status.startswith("200"))
+            self.assertTrue(updated.get("ok"))
+            self.assertEqual(updated["settings"]["store_name"], live_name)
+            self.assertEqual(updated["settings"]["base_delivery_fee"], "8500")
+
+            status, public_after = request("GET", "/api/settings")
+            self.assertTrue(status.startswith("200"))
+            self.assertEqual(public_after["settings"]["store_name"], live_name)
+            self.assertEqual(public_after["settings"]["base_delivery_fee"], "8500")
+            print("✅ PASS: System Parameters publish centrally and are publicly readable without exposing secrets.")
+        finally:
+            with get_db() as session:
+                for key, value in original.items():
+                    row = session.query(StoreSetting).filter_by(key=key).first()
+                    if row:
+                        row.value = value
+
 
 if __name__ == "__main__":
     unittest.main()

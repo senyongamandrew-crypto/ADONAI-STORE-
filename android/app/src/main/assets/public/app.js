@@ -39,10 +39,30 @@
 
   /* =============== MASTER KEY GATE =============== */
   const KEY_FLAG = "adonai-master-2026";
+  // The raw Master Key is held only in page memory. The session flag may keep
+  // local controls unlocked after a reload, but publishing live settings asks
+  // for server-valid admin authorization again when no credential is available.
+  let masterCredential = "";
   const Keys = {
     unlocked() { return sessionStorage.getItem(KEY_FLAG) === "1"; },
-    set(v) { v ? sessionStorage.setItem(KEY_FLAG, "1") : sessionStorage.removeItem(KEY_FLAG); paintUnlockChip(); },
-    require(cb) { if (this.unlocked()) return cb(); renderMasterModal(cb); }
+    set(v, credential) {
+      if (v) {
+        sessionStorage.setItem(KEY_FLAG, "1");
+        if (credential) masterCredential = String(credential);
+      } else {
+        sessionStorage.removeItem(KEY_FLAG);
+        masterCredential = "";
+      }
+      paintUnlockChip();
+    },
+    require(cb) { if (this.unlocked()) return cb(masterCredential); renderMasterModal(cb); },
+    requireRemote(cb) {
+      if (masterCredential) return cb(masterCredential);
+      const active = Auth.me();
+      const token = Auth.token();
+      if (active && active.role === "admin" && token) return cb(token);
+      renderMasterModal(cb);
+    }
   };
   function paintUnlockChip() {
     const c = $("#unlockChip");
@@ -75,8 +95,8 @@
       const val = input.value.trim();
       if (!val) return;
       if (DB.verifyMasterKey(val)) {
-        Keys.set(true); closeModal(); toast("🔓 Master Key unlocked for this session");
-        if (after) after();
+        Keys.set(true, val); closeModal(); toast("🔓 Master Key unlocked for this session");
+        if (after) after(val);
         return;
       }
       try {
@@ -87,9 +107,10 @@
           body: JSON.stringify({ pin: val, key: val, terminal_key: val })
         });
         const data = await r.json();
-        if (data && data.ok && (data.staff.role === "admin" || (data.via && data.via.startsWith("env")))) {
-          Keys.set(true); closeModal(); toast("🔓 Master Key unlocked via Server / Environment");
-          if (after) after();
+        if (data && data.ok && data.staff && data.staff.role === "admin") {
+          const credential = data.token || val;
+          Keys.set(true, credential); closeModal(); toast("🔓 Master Key unlocked via Server / Environment");
+          if (after) after(credential);
           return;
         }
       } catch (err) {}
@@ -1272,8 +1293,15 @@
     paintUnlockChip();
   }
   async function saveSettings() {
-    Keys.require(async () => {
-      await DB.updateSettings({
+    Keys.requireRemote(async adminCredential => {
+      const newKey = $("#setKey").value.trim();
+      if (newKey && newKey.length < 6) {
+        toast("Master key must be at least 6 characters", false);
+        return;
+      }
+
+      const baseFee = Math.max(0, Number($("#setFee").value) || 0);
+      const livePatch = {
         store_name: $("#setName").value.trim(),
         whatsapp: $("#setWaRaw").value.trim().replace(/\D/g, ""),
         whatsapp_display: $("#setWaDisp").value.trim(),
@@ -1284,12 +1312,29 @@
         address: $("#setAddress").value.trim(),
         delivery_scope: $("#setScope").value.trim(),
         hours: $("#setHours").value.trim(),
-        base_delivery_fee: Number($("#setFee").value) || 0
-      });
-      const newKey = $("#setKey").value.trim();
-      if (newKey) { await DB.setMasterKey(newKey); toast("Configuration saved — master key rotated"); }
-      else toast("Configuration saved — live across storefront & terminals");
-      renderSettings();
+        base_delivery_fee: baseFee,
+        boda_base_fee: baseFee
+      };
+      if (newKey) livePatch.master_key = newKey;
+
+      const saveBtn = $("#btnSaveCfg");
+      const originalLabel = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Publishing to live storefront…";
+
+      try {
+        await DB.syncStoreSettings(livePatch, adminCredential);
+        if (newKey) Keys.set(true, newKey);
+        toast(newKey
+          ? "Configuration published — storefront updated and master key rotated"
+          : "Configuration published — live storefront will refresh within 5 seconds");
+        renderSettings();
+      } catch (err) {
+        toast(err.message || "Could not publish configuration", false);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalLabel;
+      }
     });
   }
   $("#btnSaveCfg").addEventListener("click", saveSettings);

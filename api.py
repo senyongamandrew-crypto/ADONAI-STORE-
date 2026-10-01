@@ -36,6 +36,26 @@ STAFF_ENV_VARS = [
     "POS_KEY", "POS_PIN", "TERMINAL_PIN", "POS_MASTER_KEY"
 ]
 
+# Settings that may be read by the public storefront. Authentication keys and
+# operational flags are intentionally excluded from public API responses.
+PUBLIC_STORE_SETTING_KEYS = {
+    "store_name", "tagline", "address", "whatsapp", "whatsapp_display",
+    "phone", "hotline", "email", "tiktok", "instagram", "hours",
+    "delivery_scope", "base_delivery_fee", "boda_base_fee", "currency",
+    "receipt_footer", "website_url", "app_url"
+}
+
+# Parameters accepted from the protected System Parameters screen. Secret keys
+# can be updated by an authorized admin but are never returned publicly.
+EDITABLE_STORE_SETTING_KEYS = PUBLIC_STORE_SETTING_KEYS | {
+    "master_key", "admin_key"
+}
+
+
+def public_store_settings(rows) -> dict:
+    """Serialize only settings that are safe and useful on the storefront."""
+    return {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+
 
 # ============================================================================
 # JWT & Authentication Helpers
@@ -471,7 +491,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 riders = [r.to_dict() for r in session.query(Rider).all()]
                 ledger = [l.to_dict() for l in session.query(LedgerEntry).order_by(LedgerEntry.created_at.desc()).all()]
                 settings_rows = session.query(StoreSetting).all()
-                settings = {s.key: s.value for s in settings_rows}
+                settings = public_store_settings(settings_rows)
 
                 return json_response({
                     "synced_at": datetime.utcnow().isoformat(),
@@ -490,10 +510,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
         if clean_path == "/api/settings" and method == "GET":
             with get_db() as session:
                 rows = session.query(StoreSetting).all()
-                data = {r.key: r.value for r in rows}
-                return json_response({"settings": data})
+                return json_response({
+                    "settings": public_store_settings(rows),
+                    "synced_at": datetime.utcnow().isoformat()
+                })
 
-        if clean_path == "/api/settings" and method == "POST":
+        if clean_path == "/api/settings" and method in ("POST", "PUT", "PATCH"):
             is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
             if not is_authed or (staff_info or {}).get("role") != "admin":
                 return json_response({
@@ -501,15 +523,58 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "error": "Unauthorized: Admin authorization required to update store settings"
                 }, status=403)
 
+            # New clients wrap updates in {"settings": {...}} so credentials can
+            # never be mistaken for values. Accept the old flat form only for
+            # known keys to preserve compatibility with an already-installed POS.
+            supplied = body.get("settings") if isinstance(body.get("settings"), dict) else body
+            unknown = sorted(set(supplied.keys()) - EDITABLE_STORE_SETTING_KEYS)
+            if unknown:
+                return json_response({
+                    "ok": False,
+                    "error": "Unsupported store setting(s): " + ", ".join(unknown)
+                }, status=400)
+
+            updates = {}
+            for key, value in supplied.items():
+                if value is None:
+                    value = ""
+                if isinstance(value, (dict, list)):
+                    return json_response({
+                        "ok": False,
+                        "error": f"Store setting '{key}' must be a scalar value"
+                    }, status=400)
+                text_value = str(value).strip()
+                if key in ("master_key", "admin_key") and len(text_value) < 6:
+                    return json_response({
+                        "ok": False,
+                        "error": "Master key must be at least 6 characters"
+                    }, status=400)
+                if len(text_value) > 2000:
+                    return json_response({
+                        "ok": False,
+                        "error": f"Store setting '{key}' is too long"
+                    }, status=400)
+                updates[key] = text_value
+
+            if not updates:
+                return json_response({"ok": False, "error": "No store settings supplied"}, status=400)
+
             with get_db() as session:
-                for k, v in body.items():
-                    s = session.query(StoreSetting).filter_by(key=k).first()
-                    if s:
-                        s.value = str(v)
+                for key, value in updates.items():
+                    setting = session.query(StoreSetting).filter_by(key=key).first()
+                    if setting:
+                        setting.value = value
                     else:
-                        session.add(StoreSetting(key=k, value=str(v)))
+                        session.add(StoreSetting(key=key, value=value))
                 session.flush()
-                return json_response({"status": "updated"})
+                public_rows = session.query(StoreSetting).all()
+                return json_response({
+                    "ok": True,
+                    "status": "updated",
+                    "updated_keys": sorted(updates.keys()),
+                    "settings": public_store_settings(public_rows),
+                    "synced_at": datetime.utcnow().isoformat()
+                })
 
         # ----------------------------------------------------
         # 7. Staff Authentication & JWT Token Verification

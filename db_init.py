@@ -124,11 +124,19 @@ def seed_products(session):
 def seed_settings(session):
     defaults = {
         "store_name": "Adonai Thrift Store",
-        "tagline": "Curated Vintage & Quality Apparel · Kampala, Uganda",
+        "tagline": "Curated pre-loved vintage · Laundered, graded and sold once",
         "whatsapp": "256758873398",
+        "whatsapp_display": "+256 758 873 398",
         "phone": "+256 758 873 398",
-        "address": "Plot 45 Salama Road, Kibuli / Kampala",
+        "hotline": "+256 765 652 403",
+        "email": "adonaithriftstore@gmail.com",
+        "tiktok": "@adonai.thrift256",
+        "instagram": "@adonaithrift256",
+        "address": "Plot 45 Salama Road / Kibuli, Kampala, Uganda",
+        "hours": "Mon - Sat: 8:30 AM - 7:30 PM | Sun: 10:00 AM - 6:00 PM",
+        "delivery_scope": "Uganda (Central, Eastern, and Western regions)",
         "currency": "UGX",
+        "base_delivery_fee": "7000",
         "boda_base_fee": "7000",
         "master_key": "ADONAI-MASTER-2026",
         "receipt_footer": "Thank you for shopping at Adonai Store! Returns accepted within 2 days with valid receipt."
