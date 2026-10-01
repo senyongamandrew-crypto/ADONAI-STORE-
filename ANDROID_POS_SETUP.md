@@ -149,3 +149,11 @@ the opening (Chrome / Files), and tap it. Minimum Android version: 5.1 (API 22).
 `.github/workflows/build-pos-apk.yml` installs JDK 17 + the Android SDK, builds
 both variants, verifies signatures, and uploads them as workflow artifacts
 (`adonai-pos-v2-apk`, `adonai-pos-v2-debug-apk`).
+
+### Creating the permanent release key
+```bash
+./scripts/generate-release-keystore.sh
+```
+It generates the keystore and prints the four values to paste into GitHub
+Actions secrets. Back up the keystore file and passwords — if they are lost,
+future versions cannot be installed as upgrades over the current one.
