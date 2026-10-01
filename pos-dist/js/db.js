@@ -275,6 +275,59 @@
     return settingsSyncInFlight;
   }
 
+  let productSyncInFlight = null;
+  function pullProducts(publicAvailability) {
+    if (productSyncInFlight || typeof fetch === "undefined") return productSyncInFlight || Promise.resolve(false);
+    const isPublic = publicAvailability === true || (typeof window !== "undefined" && window.__ADONAI_STOREFRONT__ === true);
+    const endpoint = "/api/products" + (isPublic ? "?availability=public" : "");
+    productSyncInFlight = fetch(apiUrl(endpoint), { method: "GET", cache: "no-store" })
+      .then(async response => {
+        let data = null;
+        try { data = await response.json(); } catch (e) {}
+        if (!response.ok || !data || !Array.isArray(data.products)) return false;
+        reload();
+        const before = JSON.stringify(state.products || []);
+        const after = JSON.stringify(data.products);
+        if (before === after) return false;
+        state.products = data.products;
+        save();
+        broadcast("products");
+        return true;
+      })
+      .catch(() => false)
+      .finally(() => { productSyncInFlight = null; });
+    return productSyncInFlight;
+  }
+
+  let operationalSyncInFlight = null;
+  function pullOperationalData() {
+    if (operationalSyncInFlight || typeof fetch === "undefined") return operationalSyncInFlight || Promise.resolve(false);
+    const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
+    operationalSyncInFlight = fetch(apiUrl("/api/sync/pull"), {
+      method: "POST",
+      headers: Object.assign({ "Content-Type": "application/json" }, authH),
+      cache: "no-store"
+    }).then(async response => {
+      let data = null;
+      try { data = await response.json(); } catch (e) {}
+      if (!response.ok || !data || !Array.isArray(data.products)) return false;
+      reload();
+      state.products = data.products;
+      if (Array.isArray(data.sales)) state.sales = data.sales;
+      if (Array.isArray(data.ledger)) state.ledger = data.ledger.map(line => Object.assign({
+        label: line.desc || `${line.kind} ${line.ref_id || ""}`,
+        note: line.staff ? `Logged by ${line.staff}` : "",
+        by: line.staff || "System",
+        sale_id: line.ref_id || null
+      }, line));
+      save();
+      if (data.settings) applyRemoteSettings(data.settings);
+      broadcast("*");
+      return true;
+    }).catch(() => false).finally(() => { operationalSyncInFlight = null; });
+    return operationalSyncInFlight;
+  }
+
   function initRealtime(iface) {
     if (typeof BroadcastChannel !== "undefined") {
       bc = new BroadcastChannel(CHANNEL);
@@ -289,56 +342,37 @@
         state = null; reload();
         subs.filter(s => s.table === "*" || true).forEach(s => { try { s.cb("*"); } catch (e) {} });
       });
-      document.addEventListener("visibilitychange", () => { if (!document.hidden) { state = null; reload(); subs.filter(s => s.table === "*").forEach(s => s.cb("reload")); } });
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          state = null; reload();
+          subs.filter(s => s.table === "*").forEach(s => s.cb("reload"));
+          if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
+          else pullOperationalData();
+        }
+      });
 
       // Store profile settings are publicly readable and deliberately fetched
       // independently of the protected POS sync. Polling keeps already-open
       // storefronts current when an Android terminal saves System Parameters.
       pullStoreSettings();
+      if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
       window.setInterval(() => {
-        if (!document.hidden) pullStoreSettings();
+        if (!document.hidden) {
+          pullStoreSettings();
+          if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
+        }
       }, 5000);
 
-      // Hydrate state from backend (POS full sync or Public catalog)
-      try {
-        const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
-        fetch(apiUrl("/api/sync/pull"), { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, authH) })
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (data && Array.isArray(data.products) && data.products.length > 0) {
-              reload();
-              state.products = data.products;
-              if (Array.isArray(data.sales) && data.sales.length > 0) state.sales = data.sales;
-              save();
-              if (data.settings) applyRemoteSettings(data.settings);
-              broadcast("*");
-            } else {
-              // Public storefront fallback to live products
-              fetch(apiUrl("/api/products"))
-                .then(r => r.ok ? r.json() : null)
-                .then(pdata => {
-                  if (pdata && Array.isArray(pdata.products) && pdata.products.length > 0) {
-                    reload();
-                    state.products = pdata.products;
-                    save();
-                    broadcast("products");
-                  }
-                }).catch(() => {});
-            }
-          })
-          .catch(() => {
-            fetch(apiUrl("/api/products"))
-              .then(r => r.ok ? r.json() : null)
-              .then(pdata => {
-                if (pdata && Array.isArray(pdata.products) && pdata.products.length > 0) {
-                  reload();
-                  state.products = pdata.products;
-                  save();
-                  broadcast("products");
-                }
-              }).catch(() => {});
-          });
-      } catch (e) {}
+      // Defer one tick so auth.js can restore the JWT after this module loads.
+      // Staff consoles hydrate the full operational state; the storefront only
+      // requests the public stock view adjusted for active POS holds.
+      window.setTimeout(() => {
+        if (window.__ADONAI_STOREFRONT__ === true) {
+          pullProducts(true);
+        } else {
+          pullOperationalData().then(ok => { if (!ok) pullProducts(false); });
+        }
+      }, 0);
     }
   }
   initRealtime();
@@ -357,6 +391,27 @@
   const byId = (arr, id) => arr.find(x => x.id === id);
   const stockError = (name, have) => { const e = new Error(`Insufficient stock for "${name}" (in stock: ${have})`); e.code = "STOCK"; return e; };
   const shakeOn = s => String(s || "").trim();
+
+  function apiHeaders(withAuth = true) {
+    const headers = { "Content-Type": "application/json" };
+    if (withAuth && typeof Auth !== "undefined" && Auth.authHeaders) Object.assign(headers, Auth.authHeaders());
+    return headers;
+  }
+
+  async function apiRequest(path, options = {}, withAuth = true) {
+    const response = await fetch(apiUrl(path), Object.assign({}, options, {
+      headers: Object.assign(apiHeaders(withAuth), options.headers || {})
+    }));
+    let data = null;
+    try { data = await response.json(); } catch (e) {}
+    if (!response.ok) {
+      const error = new Error((data && (data.error || data.details)) || `Server request failed (${response.status})`);
+      error.status = response.status;
+      error.data = data;
+      throw error;
+    }
+    return data || {};
+  }
 
   function saleFromItems(st, items) {
     const lines = items.map(it => {
@@ -585,172 +640,121 @@
       const p = state.products.find(x => x.barcode_id.toUpperCase() === c || x.sku.toUpperCase() === c);
       return p ? Object.assign({}, p) : null;
     },
-    addProduct(input) {
+    async addProduct(input) {
+      const payload = Object.assign({}, input || {});
+      const data = await apiRequest("/api/products", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }, true);
+      const product = data.product;
+      if (!product) throw new Error("The server did not return the registered product");
       return tx("products", st => {
-        const n = ++st.counters.product;
-        const id = "PRD-" + n;
-        const demo = DEMOGRAPHICS.includes(input.demographic) ? input.demographic : "Men";
-        const cat = CATEGORIES.includes(input.category) ? input.category : "Accessories";
-        let barcode = String(input.barcode_id || "").trim() || ("ADT-" + (10000 + n - 1000));
-        if (st.products.some(p => p.barcode_id.toUpperCase() === barcode.toUpperCase()))
-          barcode = "ADT-" + n + "-" + String(Date.now()).slice(-4);
-        const p = {
-          id, barcode_id: barcode,
-          sku: String(input.sku || "").trim() || ("ADN-" + (CAT_CODES[cat] || "GEN") + "-" + n),
-          name: String(input.name || "Untitled item").trim(),
-          brand: String(input.brand || "Unbranded").trim(),
-          color: String(input.color || "").trim(),
-          demographic: demo, category: cat,
-          size: String(input.size || "-"),
-          condition: CONDITIONS.includes(input.condition) ? input.condition : CONDITIONS[1],
-          cost_price: money(input.cost_price), selling_price: money(input.selling_price),
-          compare_price: money(input.compare_price),
-          desc: String(input.desc || "").trim(),
-          staff_notes: String(input.staff_notes || "").trim(),
-          visibility: String(input.visibility || "Online WhatsApp & In-Store POS").trim(),
-          image_url: String(input.image_url || "").trim(),
-          images: Array.isArray(input.images) ? input.images.filter(Boolean) : [],
-          in_stock_count: Math.max(0, money(input.in_stock_count)),
-          created_at: new Date().toISOString()
-        };
-        st.products.push(p);
-
-        // Asynchronously sync product intake to backend database
-        try {
-          const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
-          fetch(apiUrl("/api/products"), {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, authH),
-            body: JSON.stringify(p)
-          }).catch(() => {});
-        } catch (e) {}
-
-        return Object.assign({}, p);
+        const existing = byId(st.products, product.id);
+        if (existing) Object.assign(existing, product);
+        else st.products.push(product);
+        return Object.assign({}, product);
       });
     },
-    updateProduct(id, patch) {
+    async updateProduct(id, patch) {
+      const data = await apiRequest("/api/products/" + encodeURIComponent(id), {
+        method: "PUT",
+        body: JSON.stringify(patch || {})
+      }, true);
+      const product = data.product;
       return tx("products", st => {
-        const p = byId(st.products, id); if (!p) throw new Error("Product not found");
-        ["name", "brand", "color", "demographic", "category", "size", "condition", "desc", "staff_notes", "visibility", "image_url"].forEach(k => {
-          if (patch[k] !== undefined) p[k] = patch[k];
-        });
-        if (patch.images !== undefined && Array.isArray(patch.images)) p.images = patch.images.filter(Boolean);
-        ["cost_price", "selling_price", "compare_price", "in_stock_count"].forEach(k => {
-          if (patch[k] !== undefined) p[k] = money(patch[k]);
-        });
-        return Object.assign({}, p);
+        const local = byId(st.products, id);
+        if (local && product) Object.assign(local, product);
+        return Object.assign({}, product || local || {});
       });
     },
     setProductImage(id, imageUrl) {
-      return tx("products", st => {
-        const p = byId(st.products, id); if (!p) throw new Error("Product not found");
-        p.image_url = String(imageUrl || "");
-        return Object.assign({}, p);
-      });
+      return this.updateProduct(id, { image_url: String(imageUrl || "") });
     },
-    adjustStock(id, delta) {
-      return tx("products", st => {
-        const p = byId(st.products, id); if (!p) throw new Error("Product not found");
-        p.in_stock_count = Math.max(0, p.in_stock_count + money(delta));
-        return Object.assign({}, p);
-      });
+    async adjustStock(id, delta) {
+      const product = this.getProduct(id);
+      if (!product) throw new Error("Product not found");
+      return this.updateProduct(id, { in_stock_count: Math.max(0, Number(product.in_stock_count || 0) + money(delta)) });
     },
-    removeProduct(id) {
-      return tx("products", st => { st.products = st.products.filter(p => p.id !== id); return true; });
+    async removeProduct(id) {
+      await apiRequest("/api/products/" + encodeURIComponent(id), {
+        method: "DELETE",
+        body: "{}"
+      }, true);
+      return tx("products", st => {
+        st.products = st.products.filter(product => product.id !== id);
+        return true;
+      });
     },
 
     /* ----- sales (POS + WhatsApp, unified) ----- */
-    processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes }) {
+    async processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes, lock_owner }) {
+      const payload = {
+        channel: "pos",
+        lock_owner: String(lock_owner || ""),
+        items: (items || []).map(item => ({ product_id: item.product_id, qty: item.qty })),
+        tender: Object.assign({ type: "cash", paid: true }, tender || {}),
+        cashier: cashier || null,
+        customer_name: String(customer_name || "Walk-in Guest").trim(),
+        customer_phone: String(customer_phone || "").trim(),
+        customer_address: String(customer_location || "").trim(),
+        delivery_type: "pickup",
+        delivery_fee: 0,
+        delivery_notes: String(customer_notes || "").trim(),
+        status: "completed",
+        dispatch_status: "Delivered"
+      };
+      const data = await apiRequest("/api/orders", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }, true);
+      const remote = data.order;
+      if (!remote) throw new Error("The server did not return the completed sale");
+      const sale = Object.assign({}, remote, {
+        tender: Object.assign({ paid: true }, remote.tender || payload.tender),
+        customer_email: String(customer_email || "").trim(),
+        customer_location: remote.customer_address || String(customer_location || "").trim(),
+        delivery_address: remote.customer_address || String(customer_location || "").trim(),
+        customer_notes: String(customer_notes || "").trim(),
+        assigned_rider_id: null,
+        assigned_rider_name: null
+      });
       return tx("sales", st => {
-        const { items: finalItems, total } = saleFromItems(st, items);
-        if (!st.counters.sale_seq) st.counters.sale_seq = Math.max(1861, st.counters.sale_pos || 1841);
-        const seq = ++st.counters.sale_seq;
-        const cName = String(customer_name || "Walk-in Guest").trim();
-        const cPhone = String(customer_phone || "").trim();
-        const cLocation = String(customer_location || "").trim();
-        const cEmail = String(customer_email || "").trim();
-        const cNotes = String(customer_notes || "").trim();
+        (data.products || []).forEach(product => {
+          const local = byId(st.products, product.id);
+          if (local) Object.assign(local, product);
+        });
+        const existing = byId(st.sales, sale.id);
+        if (existing) Object.assign(existing, sale);
+        else st.sales.push(sale);
+        if (!st.ledger.some(line => line.sale_id === sale.id)) logSaleEntry(st, sale, cashier && cashier.name);
 
-        const sale = {
-          id: "AT-" + seq,
-          channel: "pos", status: "completed",
-          created_at: new Date().toISOString(),
-          customer_name: cName,
-          customer_phone: cPhone,
-          customer_email: cEmail,
-          customer_location: cLocation,
-          customer_notes: cNotes,
-          delivery_area: cLocation || "In-Store POS (Walk-in)",
-          delivery_address: cLocation,
-          delivery_fee: 0,
-          subtotal: total,
-          total,
-          cashier: cashier || null,
-          items: finalItems,
-          tender: Object.assign({ type: "cash", paid: true }, tender || {}),
-          dispatch_status: "Delivered",
-          assigned_rider_id: null,
-          assigned_rider_name: null
-        };
-        st.sales.push(sale);
-        logSaleEntry(st, sale, cashier && cashier.name);
-
-        // Asynchronously sync in-store POS sale to PostgreSQL backend
-        try {
-          const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
-          fetch(apiUrl("/api/orders"), {
-            method: "POST",
-            headers: Object.assign({ "Content-Type": "application/json" }, authH),
-            body: JSON.stringify({
-              id: sale.id,
-              channel: "pos",
-              items: sale.items.map(it => ({ product_id: it.product_id, qty: it.qty, unit_price: it.unit_price })),
-              tender: sale.tender,
-              cashier: sale.cashier,
-              customer_name: sale.customer_name,
-              customer_phone: sale.customer_phone,
-              delivery_fee: 0,
-              subtotal: sale.subtotal,
-              total: sale.total
-            })
-          }).catch(() => {});
-        } catch (e) {}
-
-        // Auto-link or save walk-in customer in Guest Book
+        const cName = sale.customer_name;
+        const cPhone = sale.customer_phone;
+        const cLocation = sale.customer_location;
         if (cName && cName !== "Walk-in Guest") {
-          let existingGuest = st.guests.find(g => (cPhone && g.phone && g.phone === cPhone) || (g.name && g.name.toLowerCase() === cName.toLowerCase()));
+          const existingGuest = st.guests.find(g =>
+            (cPhone && g.phone && g.phone === cPhone) ||
+            (g.name && g.name.toLowerCase() === cName.toLowerCase())
+          );
           if (!existingGuest) {
             st.guests.push({
-              id: "GUS-" + (++st.counters.guest),
-              name: cName,
-              phone: cPhone,
-              email: cEmail,
-              address: cLocation,
-              neighborhood: cLocation,
-              notes: cNotes ? `Walk-in POS: ${cNotes}` : "Walk-in POS Customer",
+              id: "GUS-" + (++st.counters.guest), name: cName, phone: cPhone,
+              email: sale.customer_email, address: cLocation, neighborhood: cLocation,
+              notes: sale.customer_notes ? `Walk-in POS: ${sale.customer_notes}` : "Walk-in POS Customer",
               created_at: new Date().toISOString()
             });
-          } else {
-            if (cPhone && !existingGuest.phone) existingGuest.phone = cPhone;
-            if (cLocation && !existingGuest.neighborhood) existingGuest.neighborhood = cLocation;
           }
         }
-
         return JSON.parse(JSON.stringify(sale));
       });
     },
-    createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items }) {
-      return tx("sales", st => {
-        const { items: finalItems, total: subtotal } = saleFromItems(st, items);
-        const fee = delivery_type === "pickup" ? 0 : Number(delivery_fee != null ? delivery_fee : 7000);
-        const finalTotal = subtotal + fee;
-        if (!st.counters.sale_seq) st.counters.sale_seq = Math.max(1861, st.counters.sale_pos || 1841);
-        const seq = ++st.counters.sale_seq;
-        const sale = {
-          id: "AT-" + seq,
+    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items }) {
+      const fee = delivery_type === "pickup" ? 0 : Number(delivery_fee != null ? delivery_fee : 7000);
+      const data = await apiRequest("/api/orders", {
+        method: "POST",
+        body: JSON.stringify({
           channel: "web",
-          status: "pending",
-          created_at: new Date().toISOString(),
+          items: (items || []).map(item => ({ product_id: item.product_id, qty: item.qty })),
           customer_name: String(customer_name || "Web customer").trim(),
           customer_phone: String(customer_phone || "").trim(),
           delivery_type: delivery_type || "boda",
@@ -758,37 +762,27 @@
           delivery_address: String(delivery_address || "").trim(),
           delivery_fee: fee,
           delivery_notes: String(delivery_notes || "").trim(),
-          subtotal,
-          total: finalTotal,
-          cashier: null,
-          items: finalItems,
-          tender: { type: "whatsapp", paid: false },
-          dispatch_status: "Pending",
-          assigned_rider_id: null,
-          assigned_rider_name: null
-        };
-        st.sales.push(sale);
-
-        // Asynchronously sync customer web order to PostgreSQL backend
-        try {
-          fetch(apiUrl("/api/orders"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: sale.id,
-              channel: "web",
-              items: sale.items.map(it => ({ product_id: it.product_id, qty: it.qty, unit_price: it.unit_price })),
-              customer_name: sale.customer_name,
-              customer_phone: sale.customer_phone,
-              delivery_type: sale.delivery_type,
-              delivery_area: sale.delivery_area,
-              delivery_address: sale.delivery_address,
-              delivery_fee: sale.delivery_fee,
-              delivery_notes: sale.delivery_notes
-            })
-          }).catch(() => {});
-        } catch (e) {}
-
+          status: "pending",
+          dispatch_status: "Pending"
+        })
+      }, false);
+      const remote = data.order;
+      if (!remote) throw new Error("The server did not return the placed order");
+      const sale = Object.assign({}, remote, {
+        delivery_address: remote.customer_address || String(delivery_address || "").trim(),
+        cashier: null,
+        tender: remote.tender || { type: "whatsapp", paid: false },
+        assigned_rider_id: null,
+        assigned_rider_name: null
+      });
+      return tx("sales", st => {
+        (data.products || []).forEach(product => {
+          const local = byId(st.products, product.id);
+          if (local) Object.assign(local, product);
+        });
+        const existing = byId(st.sales, sale.id);
+        if (existing) Object.assign(existing, sale);
+        else st.sales.push(sale);
         return JSON.parse(JSON.stringify(sale));
       });
     },
@@ -920,7 +914,40 @@
     },
     removeRider(id) { return tx("riders", st => { st.riders = st.riders.filter(r => r.id !== id); return true; }); },
 
-    /* ----- financial ledger ----- */
+    /* ----- live backend financials & POS holds ----- */
+    pullProducts,
+    pullOperationalData,
+    financeRequest(path, options) {
+      const suffix = String(path || "").replace(/^\//, "");
+      return apiRequest("/api/finance/" + suffix, options || { method: "GET" }, true);
+    },
+    acquireInventoryLock(productId, lockOwner, quantity = 1) {
+      return apiRequest("/api/inventory-locks/acquire", {
+        method: "POST",
+        body: JSON.stringify({ product_id: productId, lock_owner: lockOwner, quantity })
+      }, true);
+    },
+    releaseInventoryLock(productId, lockOwner, quantity = 1) {
+      return apiRequest("/api/inventory-locks/release", {
+        method: "POST",
+        body: JSON.stringify({ product_id: productId, lock_owner: lockOwner, quantity })
+      }, true);
+    },
+    releaseInventoryLockOwner(lockOwner, keepalive = false) {
+      return apiRequest("/api/inventory-locks/release-owner", {
+        method: "POST",
+        keepalive: !!keepalive,
+        body: JSON.stringify({ lock_owner: lockOwner })
+      }, true);
+    },
+    heartbeatInventoryLocks(lockOwner) {
+      return apiRequest("/api/inventory-locks/heartbeat", {
+        method: "POST",
+        body: JSON.stringify({ lock_owner: lockOwner })
+      }, true);
+    },
+
+    /* ----- legacy financial ledger compatibility ----- */
     listLedger() { reload(); return state.ledger.map(e => Object.assign({}, e)).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     addLedgerEntry({ kind, amount, label, channel, by }) {
       return tx("ledger", st => {

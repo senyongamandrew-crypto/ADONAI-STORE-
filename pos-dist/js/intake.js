@@ -144,6 +144,7 @@
       selling_price: Number(v("[data-f-sell]")) || 0,
       compare_price: Number(v("[data-f-compare]")) || 0,
       desc: v("[data-f-desc]"),
+      stock_lot_id: v("[data-f-lot]"),
       in_stock_count: Math.max(0, Number(v("[data-f-stock]")) || 0)
     };
   }

@@ -968,6 +968,19 @@
     const demo = $("#inDemo").value || "Men";
     return `ADN-${DEMO_CODES[demo] || "GEN"}-${1000 + Math.floor(Math.random() * 9000)}`;
   }
+  async function loadIntakeStockLots() {
+    const select = $("#inStockLot");
+    if (!select) return;
+    try {
+      const data = await DB.financeRequest("stock-lots", { method:"GET" });
+      const current = select.value;
+      const lots = (data.stock_lots || []).filter(lot => lot.remaining_count > 0);
+      select.innerHTML = `<option value="">No registered lot selected</option>` + lots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left · ${ugx(lot.unit_cost)}/item</option>`).join("");
+      select.value = current;
+    } catch (error) {
+      select.innerHTML = `<option value="">Sign in to load registered lots</option>`;
+    }
+  }
   function initIntakeForm() {
     $("#inDemo").innerHTML = DB.DEMOGRAPHICS.map(d => `<option>${d}</option>`).join("");
     $("#inCat").innerHTML = DB.CATEGORIES.map(c => `<option>${c}</option>`).join("");
@@ -975,6 +988,7 @@
     $("#inGroup").innerHTML = Object.keys(GROUPS).map(g => `<option>${g}</option>`).join("");
     $("#inSizePreset").innerHTML = `<option value="">Preset</option>` + ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"].map(s => `<option value="${s}">${s}</option>`).join("");
     $("#inSku").value = demoSku();
+    loadIntakeStockLots();
 
     if (intakeBound) return;
     intakeBound = true;
@@ -982,6 +996,11 @@
     $("#inDemo").addEventListener("change", () => { $("#inSku").value = demoSku(); paintTag(); });
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
     $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; paintTag(); });
+    $("#inStockLot").addEventListener("change", () => {
+      const option = $("#inStockLot").options[$("#inStockLot").selectedIndex];
+      if (option && option.dataset.unitCost) $("#inCost").value = option.dataset.unitCost;
+      paintTag();
+    });
     $("#inCat").addEventListener("change", () => {
       const g = Object.keys(GROUPS).find(k => GROUPS[k].includes($("#inCat").value));
       if (g) $("#inGroup").value = g;
@@ -1059,6 +1078,7 @@
       size: $("#inSize").value.trim() || "-",
       condition: $("#inCond").value,
       cost_price: Number($("#inCost").value) || 0,
+      stock_lot_id: $("#inStockLot").value,
       selling_price: Number($("#inSell").value) || 0,
       compare_price: Number($("#inRrp").value) || 0,
       desc: $("#inStory").value.trim(),
@@ -1077,6 +1097,7 @@
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes"].forEach(id => $("#" + id).value = "");
         intakePhotos.fill(""); paintAngles();
+        $("#inStockLot").value = "";
         $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();
       } else {
         renderAll();
@@ -1178,49 +1199,313 @@
   }
 
   /* ============================================================
-     FINANCIAL LEDGER
+     FINANCIAL LEDGERS — server-backed, double-entry hub
      ============================================================ */
-  let ledgerFilter = "all";
-  const LEDGER_ICONS = { sale: "💰", expense: "📤", refund: "↩️", adjustment: "⚖️" };
-  function renderLedger() {
-    const sum = DB.ledgerSummary();
-    $("#ledgerKpis").innerHTML =
-      kpiCard("TODAY'S SALES", ugx(sum.todaySales), "Money in since midnight", "green", "💰") +
-      kpiCard("ALL-TIME REVENUE", ugx(sum.revenue), "Every completed sale", "rust", "📈") +
-      kpiCard("TOTAL OUTFLOW", "− " + ugx(Math.abs(sum.outflow)), "Expenses, refunds & payouts", "red", "📤") +
-      kpiCard("NET BALANCE", ugx(sum.revenue + sum.outflow), "Revenue minus outflow", "blue", "⚖️");
-    $("#ledgerPills").innerHTML = ["all", ...DB.LEDGER_KINDS].map(k =>
-      `<button class="lane-tab ${ledgerFilter === k ? "active" : ""}" data-kf="${k}">${k === "all" ? "ALL ENTRIES" : (LEDGER_ICONS[k] || "") + " " + k.toUpperCase()}</button>`).join("");
-    $$("#ledgerPills .lane-tab").forEach(b => b.addEventListener("click", () => { ledgerFilter = b.dataset.kf; renderLedger(); }));
-    let list = DB.listLedger();
-    if (ledgerFilter !== "all") list = list.filter(e => e.kind === ledgerFilter);
-    $("#ledgerRows").innerHTML = list.length ? list.map(e => `
-      <div class="ledger-row">
-        <span class="lg-ico lg-${esc(e.kind)}">${LEDGER_ICONS[e.kind] || "📒"}</span>
-        <div class="grow">
-          <div class="lg-title">${esc(e.label)}</div>
-          <div class="lg-meta">${ago(e.created_at)}${e.note ? ` · ${esc(e.note)}` : ""}</div>
-        </div>
-        <div class="lg-side">
-          <span class="stat-chip ${e.kind === "sale" ? "ok" : e.kind === "expense" ? "bad" : "pend"}">${e.kind.toUpperCase()}</span>
-          <strong class="serif ${e.amount >= 0 ? "amt-pos" : "amt-neg"}">${e.amount >= 0 ? "+" : "−"} ${ugx(Math.abs(e.amount))}</strong>
-          ${e.kind !== "sale" ? `<button class="lnk dim lg-del" data-del-entry="${esc(e.id)}">Delete</button>` : ""}
-        </div>
-      </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">The book is empty for this filter.</p></div>`;
+  let financeTab = "expenses";
+  let agingDays = 30;
+  let financeLoadedAt = 0;
+  let financeBusy = false;
+
+  const localISODate = (date = new Date()) => {
+    const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return shifted.toISOString().slice(0, 10);
+  };
+  const localISODateTime = (date = new Date()) => {
+    const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return shifted.toISOString().slice(0, 16);
+  };
+  const readableDateTime = value => {
+    if (!value) return "—";
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-UG", {
+      day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit"
+    });
+  };
+  const financeError = error => {
+    const status = Number(error && error.status);
+    const message = (error && error.message) || "Financial data could not be loaded";
+    return `<div class="finance-error"><div><strong>${status === 401 ? "Staff sign-in required" : status === 403 ? "Manager authorization required" : "Could not load this workspace"}</strong><p class="small">${esc(message)}</p>${status === 401 ? `<a class="btn primary sm" href="login.html">Sign in to terminal</a>` : ""}</div></div>`;
+  };
+  const setFinanceUpdated = text => {
+    const target = $("#financeUpdated");
+    if (target) target.textContent = text || ("Synced " + new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }));
+  };
+  const setButtonBusy = (button, busy, busyText) => {
+    if (!button) return;
+    if (busy) {
+      button.dataset.label = button.textContent;
+      button.textContent = busyText || "Saving…";
+      button.disabled = true;
+    } else {
+      button.textContent = button.dataset.label || button.textContent;
+      button.disabled = false;
+    }
+  };
+
+  function switchFinanceTab(tab, force = false) {
+    if (!["expenses", "lots", "dashboard", "aging", "journal"].includes(tab)) return;
+    financeTab = tab;
+    $$("[data-finance-tab]").forEach(button => {
+      const active = button.dataset.financeTab === tab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    $$(".finance-panel").forEach(panel => {
+      const active = panel.id === "finance-" + tab;
+      panel.classList.toggle("active", active);
+      panel.hidden = !active;
+    });
+    loadFinanceTab(tab, force);
   }
-  function ledgerModal() {
-    Keys.require(() => openModal(`
+
+  async function loadFinanceTab(tab, force = false) {
+    if (financeBusy && !force) return;
+    financeBusy = true;
+    try {
+      if (tab === "expenses") await loadExpenses();
+      else if (tab === "lots") await loadStockLots();
+      else if (tab === "dashboard") await loadDashboard();
+      else if (tab === "aging") await loadAging();
+      else if (tab === "journal") await loadJournal();
+      financeLoadedAt = Date.now();
+      setFinanceUpdated();
+    } finally {
+      financeBusy = false;
+    }
+  }
+
+  async function loadExpenses() {
+    const host = $("#expenseList");
+    if (!host) return;
+    host.innerHTML = `<div class="finance-empty">Syncing today’s cash outs…</div>`;
+    try {
+      const data = await DB.financeRequest("expenses?date=" + localISODate(), { method:"GET" });
+      $("#expenseTodayTotal").textContent = ugx(data.total || 0);
+      const rows = data.expenses || [];
+      host.innerHTML = rows.length ? `<div class="fin-list">${rows.map(row => `
+        <article class="fin-list-row">
+          <div>
+            <div class="fin-list-title">${esc(row.category)} <span class="fin-status ${row.status === "VOID" ? "void" : ""}">${esc(row.status)}</span></div>
+            <div class="fin-list-meta">${readableDateTime(row.occurred_at)} · ${esc(row.payment_method.replaceAll("_", " "))}${row.vendor ? " · " + esc(row.vendor) : ""}${row.receipt_reference ? " · Ref " + esc(row.receipt_reference) : ""}<br/>Posted by ${esc(row.created_by_name || "Staff")}${row.void_reason ? " · " + esc(row.void_reason) : ""}</div>
+          </div>
+          <div class="fin-list-side"><strong>${ugx(row.amount)}</strong>${row.status === "POSTED" ? `<div class="fin-actions"><button data-expense-edit="${esc(row.id)}">Edit</button><button class="danger" data-expense-void="${esc(row.id)}">Void</button></div>` : ""}</div>
+        </article>`).join("")}</div>` : `<div class="finance-empty"><div><strong>No expenses posted today</strong><p class="small">Use the form to record the first cash out.</p></div></div>`;
+      host._expenseRows = rows;
+    } catch (error) {
+      host.innerHTML = financeError(error);
+    }
+  }
+
+  function openExpenseEditor(expense) {
+    const sourceDate = new Date(expense.occurred_at);
+    openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>Record Ledger Entry</h3>
-      <p class="muted small" style="margin-bottom:12px">Record expenses, boda fuel floats, supplies, or cash adjustments.</p>
-      <div class="field"><label>Entry category</label>
-        <select class="sel-full" id="mlKind">${DB.LEDGER_KINDS.filter(k => k !== "sale").map(k => `<option value="${k}">${DB.LEDGER_KIND_LABELS[k]}</option>`).join("")}</select></div>
-      <div class="field"><label>Amount in UGX</label><input class="sel-full" id="mlAmount" type="number" min="0" placeholder="e.g. 15000" /></div>
-      <div class="field"><label>Payment channel</label>
-        <select class="sel-full" id="mlChannel"><option value="cash">Cash Drawer</option><option value="mtn">MTN MoMo Float</option><option value="airtel">Airtel Money Float</option></select></div>
-      <div class="field"><label>Description / reason</label><input class="sel-full" id="mlLabel" placeholder="e.g. Boda rider delivery fuel float – Jinja dispatch" /></div>
-      <button class="btn primary big" style="width:100%" id="mlSave">Save Entry to Book</button>`));
+      <p class="kicker">AUDITED ADJUSTMENT</p><h3>Edit today’s expense</h3>
+      <p class="muted small">The original journal is reversed and a corrected balanced entry is posted. Audit history is retained.</p>
+      <div class="fgrid">
+        <div class="field"><label>Category</label><input class="sel-full" id="editExpenseCategory" value="${esc(expense.category)}" /></div>
+        <div class="field"><label>Amount (UGX)</label><input class="sel-full" id="editExpenseAmount" type="number" min="1" value="${expense.amount}" /></div>
+        <div class="field"><label>Paid from</label><select class="sel-full" id="editExpensePayment"><option value="cash" ${expense.payment_method === "cash" ? "selected" : ""}>Cash Drawer</option><option value="mobile_money" ${expense.payment_method === "mobile_money" ? "selected" : ""}>Mobile Money</option><option value="bank" ${expense.payment_method === "bank" ? "selected" : ""}>Bank Account</option></select></div>
+        <div class="field"><label>Vendor</label><input class="sel-full" id="editExpenseVendor" value="${esc(expense.vendor)}" /></div>
+        <div class="field"><label>Receipt / reference</label><input class="sel-full" id="editExpenseReceipt" value="${esc(expense.receipt_reference)}" /></div>
+        <div class="field"><label>Date &amp; time</label><input class="sel-full" id="editExpenseDate" type="datetime-local" value="${localISODateTime(sourceDate)}" /></div>
+        <div class="field full"><label>Notes</label><textarea class="sel-full" id="editExpenseNotes">${esc(expense.notes)}</textarea></div>
+      </div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="saveExpenseEdit">Post corrected entry</button></div>`);
+    $("#saveExpenseEdit").addEventListener("click", async () => {
+      const button = $("#saveExpenseEdit");
+      setButtonBusy(button, true, "Posting correction…");
+      try {
+        await DB.financeRequest("expenses/" + encodeURIComponent(expense.id), {
+          method:"PUT", body:JSON.stringify({
+            category:$("#editExpenseCategory").value.trim(), amount:Number($("#editExpenseAmount").value),
+            payment_method:$("#editExpensePayment").value, vendor:$("#editExpenseVendor").value.trim(),
+            receipt_reference:$("#editExpenseReceipt").value.trim(), occurred_at:$("#editExpenseDate").value,
+            notes:$("#editExpenseNotes").value.trim()
+          })
+        });
+        closeModal(); toast("Expense corrected and journal history preserved"); await loadExpenses();
+      } catch (error) { toast(error.message, false); setButtonBusy(button, false); }
+    });
   }
+
+  async function loadStockLots() {
+    const host = $("#stockLotList");
+    if (!host) return;
+    host.innerHTML = `<div class="finance-empty">Syncing stock-lot allocations…</div>`;
+    try {
+      const data = await DB.financeRequest("stock-lots", { method:"GET" });
+      const rows = data.stock_lots || [];
+      host.innerHTML = rows.length ? `<div class="fin-list">${rows.map(row => `
+        <article class="fin-list-row"><div><div class="fin-list-title">${esc(row.lot_code)} <span class="fin-status">${esc(row.status)}</span></div><div class="fin-list-meta">${esc(row.supplier)} · ${esc(row.description)}<br/>${row.allocated_count} allocated · ${row.remaining_count} remaining · ${readableDateTime(row.acquired_at)}</div></div><div class="fin-list-side"><strong>${ugx(row.unit_cost)} / item</strong><span class="small muted">Landed ${ugx(row.total_landed_cost)}</span></div></article>`).join("")}</div>` : `<div class="finance-empty"><div><strong>No lots registered</strong><p class="small">Register a bale before tagging its items.</p></div></div>`;
+    } catch (error) { host.innerHTML = financeError(error); }
+  }
+
+  function metricCard(label, value, note, classes = "") {
+    return `<div class="finance-metric ${classes}"><span class="metric-label">${esc(label)}</span><strong>${esc(value)}</strong><small>${esc(note)}</small></div>`;
+  }
+  function barRows(rows, labelKey, valueKey, valueFormatter) {
+    if (!rows.length) return `<div class="finance-empty">No activity for this period.</div>`;
+    const max = Math.max(1, ...rows.map(row => Math.max(0, Number(row[valueKey]) || 0)));
+    return rows.map(row => `<div class="bar-row"><span class="bar-label" title="${esc(row[labelKey])}">${esc(row[labelKey])}</span><span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, Math.round((Math.max(0, row[valueKey]) / max) * 100))}%"></span></span><span class="bar-value">${esc(valueFormatter(row))}</span></div>`).join("");
+  }
+  async function loadDashboard() {
+    const metricsHost = $("#dashboardMetrics");
+    if (!metricsHost) return;
+    metricsHost.innerHTML = `<div class="finance-empty" style="grid-column:1/-1">Calculating live profitability…</div>`;
+    try {
+      const date = $("#dashboardDate").value || localISODate();
+      const data = await DB.financeRequest("dashboard?date=" + encodeURIComponent(date), { method:"GET" });
+      const m = data.metrics;
+      metricsHost.innerHTML =
+        metricCard("Gross sales", ugx(m.gross_sales), `${data.order_count} completed / active orders`, "accent") +
+        metricCard("Cost of goods", ugx(m.cogs), "Historical unit-cost snapshots") +
+        metricCard("Gross profit", ugx(m.gross_profit), `${m.gross_margin}% gross margin`, "") +
+        metricCard("Operating expenses", ugx(m.expenses), "Posted cash outs & write-offs", "warn") +
+        metricCard("Net operating income", ugx(m.net_operating_income), "Gross profit less operating expenses", m.net_operating_income >= 0 ? "accent" : "warn") +
+        metricCard("Cash drawer", ugx(m.cash_balance), "Journal balance") +
+        metricCard("Mobile Money", ugx(m.mobile_money_balance), "MTN / Airtel journal balance") +
+        metricCard("Bank", ugx(m.bank_balance), "Bank-account journal balance");
+      $("#channelChart").innerHTML = barRows(data.sales_by_channel || [], "channel", "amount", row => ugx(row.amount));
+      $("#categoryChart").innerHTML = barRows(data.category_profitability || [], "category", "profit", row => `${ugx(row.profit)} · ${row.sales ? Math.round(row.profit / row.sales * 100) : 0}%`);
+    } catch (error) {
+      metricsHost.innerHTML = `<div style="grid-column:1/-1">${financeError(error)}</div>`;
+      $("#channelChart").innerHTML = financeError(error);
+      $("#categoryChart").innerHTML = financeError(error);
+    }
+  }
+
+  async function loadAging() {
+    const host = $("#agingList");
+    if (!host) return;
+    host.innerHTML = `<div class="finance-empty">Calculating inventory age…</div>`;
+    try {
+      const data = await DB.financeRequest("aging?days=" + agingDays, { method:"GET" });
+      $("#agingSummary").innerHTML = `<div class="aging-stat"><span>Items at risk</span><strong>${data.count}</strong></div><div class="aging-stat"><span>Cost value at risk</span><strong>${ugx(data.value_at_risk)}</strong></div><div class="aging-stat"><span>Age threshold</span><strong>${data.days}+ days</strong></div>`;
+      const rows = data.products || [];
+      host.innerHTML = rows.length ? `<div class="fin-table-scroll"><table class="fin-table"><thead><tr><th>Product</th><th>Age</th><th>Stock</th><th class="num">Unit cost</th><th class="num">Live price</th><th class="num">Value at risk</th><th>Action</th></tr></thead><tbody>${rows.map(row => `<tr><td><div class="aging-product">${row.image_url ? `<img class="aging-thumb" src="${esc(row.image_url)}" alt="" onerror="this.style.display='none'"/>` : `<span class="aging-thumb"></span>`}<span><strong>${esc(row.name)}</strong><br/><small class="muted">${esc(row.sku)} · ${esc(row.category)}</small></span></div></td><td>${row.age_days} days</td><td>${row.in_stock_count}</td><td class="num">${ugx(row.cost_price)}</td><td class="num">${ugx(row.selling_price)}</td><td class="num">${ugx(row.stock_value)}</td><td><div class="aging-action"><button data-aging-markdown="${esc(row.id)}" data-name="${esc(row.name)}" data-price="${row.selling_price}">Markdown</button><button class="danger" data-aging-writeoff="${esc(row.id)}" data-name="${esc(row.name)}">Write off</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="finance-empty"><div><strong>No stock beyond ${agingDays} days</strong><p class="small">Inventory is moving within this threshold.</p></div></div>`;
+    } catch (error) { host.innerHTML = financeError(error); $("#agingSummary").innerHTML = ""; }
+  }
+
+  function openMarkdown(productId, name, currentPrice) {
+    openModal(`<button class="modal-x" data-close>×</button><p class="kicker">LIVE STOREFRONT PRICE</p><h3>Markdown ${esc(name)}</h3><p class="muted small">The new price is written to the shared catalog immediately. Open storefronts refresh within five seconds.</p><div class="field"><label>Current price</label><div class="sel-full" style="background:#f3f1ed">${ugx(currentPrice)}</div></div><div class="field"><label>New selling price (UGX)</label><input class="sel-full" id="markdownPrice" type="number" min="1" max="${Math.max(1,currentPrice-1)}" /></div><div class="field"><label>Reason</label><input class="sel-full" id="markdownReason" value="Dead-stock markdown" /></div><div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="saveMarkdown">Publish markdown</button></div>`);
+    $("#saveMarkdown").addEventListener("click", async () => {
+      const button = $("#saveMarkdown"); setButtonBusy(button, true, "Publishing…");
+      try {
+        await DB.financeRequest(`aging/${encodeURIComponent(productId)}/markdown`, { method:"POST", body:JSON.stringify({ new_price:Number($("#markdownPrice").value), reason:$("#markdownReason").value.trim() }) });
+        closeModal(); toast("Markdown is live on POS and storefront"); await DB.pullProducts(false); await loadAging();
+      } catch (error) { toast(error.message, false); setButtonBusy(button, false); }
+    });
+  }
+
+  async function loadJournal() {
+    const host = $("#journalTable");
+    if (!host) return;
+    host.innerHTML = `<div class="finance-empty">Loading audited journal lines…</div>`;
+    const params = new URLSearchParams();
+    const controls = { search:"#journalSearch", account:"#journalAccount", source:"#journalSource", from:"#journalFrom", to:"#journalTo" };
+    Object.keys(controls).forEach(key => { const value = $(controls[key]).value.trim(); if (value) params.set(key, value); });
+    try {
+      const data = await DB.financeRequest("journal?" + params.toString(), { method:"GET" });
+      const account = $("#journalAccount"), source = $("#journalSource");
+      const accountValue = account.value, sourceValue = source.value;
+      account.innerHTML = `<option value="">All accounts</option>` + (data.accounts || []).map(row => `<option value="${esc(row.code)}">${esc(row.code)} · ${esc(row.name)}</option>`).join("");
+      source.innerHTML = `<option value="">All sources</option>` + (data.sources || []).map(value => `<option value="${esc(value)}">${esc(value.replaceAll("_", " "))}</option>`).join("");
+      account.value = accountValue; source.value = sourceValue;
+      const difference = Number(data.totals.difference || 0);
+      $("#journalBalance").textContent = difference === 0 ? `Balanced · ${ugx(data.totals.debit)}` : `Filtered difference · ${ugx(Math.abs(difference))}`;
+      $("#journalBalance").classList.toggle("unbalanced", difference !== 0);
+      const rows = data.lines || [];
+      host.innerHTML = rows.length ? `<div class="fin-table-scroll"><table class="fin-table"><thead><tr><th>Date / time</th><th>Reference</th><th>Source</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Running balance</th><th>Memo / operator</th></tr></thead><tbody>${rows.map(row => `<tr><td>${readableDateTime(row.occurred_at)}</td><td><strong>${esc(row.reference)}</strong><br/><small class="muted">${esc(row.status)}</small></td><td>${esc(row.source.replaceAll("_", " "))}</td><td><strong>${esc(row.account_code)}</strong><br/><small>${esc(row.account_name)}</small></td><td class="num debit">${row.debit ? ugx(row.debit) : "—"}</td><td class="num credit">${row.credit ? ugx(row.credit) : "—"}</td><td class="num">${ugx(row.running_balance)}</td><td>${esc(row.memo || row.description)}<br/><small class="muted">${esc(row.created_by_name || "System")}</small></td></tr>`).join("")}</tbody></table></div>` : `<div class="finance-empty">No journal lines match these filters.</div>`;
+    } catch (error) { host.innerHTML = financeError(error); }
+  }
+
+  function renderLedger() {
+    if (!$("#financeTabs")) return;
+    if (!$("#expenseDate").value) $("#expenseDate").value = localISODateTime();
+    if (!$("#lotDate").value) $("#lotDate").value = localISODateTime();
+    if (!$("#dashboardDate").value) $("#dashboardDate").value = localISODate();
+    if (Date.now() - financeLoadedAt > 10000) switchFinanceTab(financeTab, true);
+  }
+
+  $("#financeTabs").addEventListener("click", event => {
+    const button = event.target.closest("[data-finance-tab]");
+    if (button) switchFinanceTab(button.dataset.financeTab, true);
+  });
+  $("#expenseForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const button = $("#expenseSubmit"); setButtonBusy(button, true, "Posting atomically…");
+    try {
+      await DB.financeRequest("expenses", { method:"POST", body:JSON.stringify({
+        category:$("#expenseCategory").value, amount:Number($("#expenseAmount").value),
+        payment_method:$("#expensePayment").value, vendor:$("#expenseVendor").value.trim(),
+        receipt_reference:$("#expenseReceipt").value.trim(), occurred_at:$("#expenseDate").value,
+        notes:$("#expenseNotes").value.trim()
+      }) });
+      event.target.reset(); $("#expenseDate").value = localISODateTime();
+      toast("Expense posted with balanced journal lines"); await loadExpenses();
+    } catch (error) { toast(error.message, false); }
+    finally { setButtonBusy(button, false); }
+  });
+  const updateLotUnitCost = () => {
+    const total = (Number($("#lotAcquisition").value) || 0) + (Number($("#lotShipping").value) || 0);
+    const count = Number($("#lotItemCount").value) || 0;
+    $("#lotUnitCost").textContent = count > 0 ? `${ugx(Math.round(total / count))} / item` : "UGX 0 / item";
+  };
+  ["#lotAcquisition", "#lotShipping", "#lotItemCount"].forEach(selector => $(selector).addEventListener("input", updateLotUnitCost));
+  $("#stockLotForm").addEventListener("submit", async event => {
+    event.preventDefault(); const button = $("#lotSubmit"); setButtonBusy(button, true, "Registering lot…");
+    try {
+      await DB.financeRequest("stock-lots", { method:"POST", body:JSON.stringify({
+        supplier:$("#lotSupplier").value.trim(), description:$("#lotDescription").value.trim(),
+        acquisition_cost:Number($("#lotAcquisition").value), shipping_cost:Number($("#lotShipping").value),
+        item_count:Number($("#lotItemCount").value), payment_method:$("#lotPayment").value,
+        acquired_at:$("#lotDate").value
+      }) });
+      event.target.reset(); $("#lotShipping").value = 0; $("#lotDate").value = localISODateTime(); updateLotUnitCost();
+      toast("Stock lot registered — unit cost is ready in POS Intake"); await loadStockLots();
+    } catch (error) { toast(error.message, false); }
+    finally { setButtonBusy(button, false); }
+  });
+  $("#dashboardDate").addEventListener("change", loadDashboard);
+  $("#agingPills").addEventListener("click", event => {
+    const button = event.target.closest("[data-aging-days]"); if (!button) return;
+    agingDays = Number(button.dataset.agingDays); $$("#agingPills button").forEach(item => item.classList.toggle("active", item === button)); loadAging();
+  });
+  $("#journalFilters").addEventListener("submit", event => { event.preventDefault(); loadJournal(); });
+  let journalSearchTimer;
+  $("#journalSearch").addEventListener("input", () => { clearTimeout(journalSearchTimer); journalSearchTimer = setTimeout(loadJournal, 350); });
+  $("#view-payments").addEventListener("click", async event => {
+    const edit = event.target.closest("[data-expense-edit]");
+    if (edit) {
+      const rows = $("#expenseList")._expenseRows || [];
+      const expense = rows.find(row => row.id === edit.dataset.expenseEdit);
+      if (expense) openExpenseEditor(expense);
+      return;
+    }
+    const voidButton = event.target.closest("[data-expense-void]");
+    if (voidButton) {
+      const reason = window.prompt("Reason for voiding this expense?", "Duplicate or incorrect posting");
+      if (reason === null) return;
+      try {
+        await DB.financeRequest(`expenses/${encodeURIComponent(voidButton.dataset.expenseVoid)}/void`, { method:"POST", body:JSON.stringify({ reason }) });
+        toast("Expense voided with a balanced reversal"); await loadExpenses();
+      } catch (error) { toast(error.message, false); }
+      return;
+    }
+    const markdown = event.target.closest("[data-aging-markdown]");
+    if (markdown) { openMarkdown(markdown.dataset.agingMarkdown, markdown.dataset.name, Number(markdown.dataset.price)); return; }
+    const writeoff = event.target.closest("[data-aging-writeoff]");
+    if (writeoff) {
+      const reason = window.prompt(`Write off all remaining units of ${writeoff.dataset.name}? Enter damage / loss reason:`, "Damaged / unsellable inventory");
+      if (reason === null) return;
+      if (!window.confirm("This removes the stock from POS and the storefront and posts an accounting loss. Continue?")) return;
+      try {
+        await DB.financeRequest(`aging/${encodeURIComponent(writeoff.dataset.agingWriteoff)}/write-off`, { method:"POST", body:JSON.stringify({ reason }) });
+        toast("Inventory written off and accounting loss posted"); await DB.pullProducts(false); await loadAging();
+      } catch (error) { toast(error.message, false); }
+    }
+  });
 
   /* ============================================================
      STAFF & PERMISSIONS

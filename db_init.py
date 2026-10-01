@@ -6,10 +6,23 @@ from datetime import datetime, timedelta
 import hashlib
 import json
 import logging
-from sqlalchemy import inspect
+import uuid
+from sqlalchemy import inspect, text
 
 from database import Base, engine, get_db, verify_database_connection
-from models import Category, Inventory, LedgerEntry, Order, OrderItem, Product, Rider, StoreSetting, User
+from models import (
+    AccountingJournalEntry,
+    AccountingJournalLine,
+    Category,
+    Inventory,
+    LedgerEntry,
+    Order,
+    OrderItem,
+    Product,
+    Rider,
+    StoreSetting,
+    User,
+)
 
 logger = logging.getLogger("adonai.db_init")
 
@@ -17,6 +30,108 @@ logger = logging.getLogger("adonai.db_init")
 def hash_pin(pin: str) -> str:
     """Computes SHA-256 hash for staff PINs."""
     return hashlib.sha256(pin.encode("utf-8")).hexdigest()
+
+
+def apply_additive_schema_migrations():
+    """Add columns create_all cannot add, without changing or dropping live data."""
+    additions = {
+        "products": [
+            ("stock_lot_id", "VARCHAR(64)"),
+            ("inventory_status", "VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE'"),
+        ],
+        "order_items": [
+            ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
+            ("category", "VARCHAR(100)"),
+        ],
+    }
+    with engine.begin() as connection:
+        schema = inspect(connection)
+        for table_name, columns in additions.items():
+            existing = {column["name"] for column in schema.get_columns(table_name)}
+            for name, declaration in columns:
+                if name not in existing:
+                    connection.execute(
+                        text(f"ALTER TABLE {table_name} ADD COLUMN {name} {declaration}")
+                    )
+                    logger.info("Added safe column %s.%s", table_name, name)
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS ix_products_stock_lot_id ON products(stock_lot_id)",
+            "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
+            "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
+        ):
+            connection.execute(text(statement))
+
+
+def _journal_line(entry, code, name, debit=0, credit=0, memo=""):
+    entry.lines.append(AccountingJournalLine(
+        id=f"JLN-{uuid.uuid4().hex[:20].upper()}",
+        account_code=code,
+        account_name=name,
+        debit=max(0, int(debit or 0)),
+        credit=max(0, int(credit or 0)),
+        memo=memo,
+    ))
+
+
+def backfill_financial_journal(session):
+    """Idempotently add balanced history for legacy sales and cash expenses."""
+    products = {product.id: product for product in session.query(Product).all()}
+    for order in session.query(Order).all():
+        source = "pos_sale" if order.channel == "pos" else "web_sale"
+        exists = session.query(AccountingJournalEntry).filter_by(
+            reference=order.id, source=source
+        ).first()
+        if exists or str(order.status).lower() in {"cancelled", "void"}:
+            continue
+        cogs = 0
+        for item in order.items:
+            product = products.get(item.product_id)
+            if not item.unit_cost and product:
+                item.unit_cost = int(product.cost_price or 0)
+            if not item.category and product:
+                item.category = product.category
+            cogs += int(item.unit_cost or 0) * int(item.qty or 0)
+        account = ("1000", "Cash Drawer")
+        if str(order.tender_type).lower() in {"mtn", "airtel", "mobile_money", "mobile"}:
+            account = ("1010", "Mobile Money")
+        entry = AccountingJournalEntry(
+            id=f"JRN-{uuid.uuid4().hex[:20].upper()}",
+            reference=order.id,
+            source=source,
+            description=f"Backfilled {order.channel.upper()} sale {order.id}",
+            status="POSTED",
+            occurred_at=order.created_at or datetime.utcnow(),
+            created_by_id=order.cashier_id,
+            created_by_name=order.cashier_name or "System migration",
+        )
+        _journal_line(entry, account[0], account[1], debit=order.total, memo=order.id)
+        _journal_line(entry, "4000", "Sales Revenue", credit=order.total, memo=order.id)
+        if cogs:
+            _journal_line(entry, "5000", "Cost of Goods Sold", debit=cogs, memo=order.id)
+            _journal_line(entry, "1200", "Inventory Asset", credit=cogs, memo=order.id)
+        session.add(entry)
+
+    for legacy in session.query(LedgerEntry).filter(LedgerEntry.kind == "expense").all():
+        reference = legacy.ref_id or legacy.id
+        if session.query(AccountingJournalEntry).filter_by(
+            reference=reference, source="legacy_expense"
+        ).first():
+            continue
+        amount = abs(int(legacy.amount or 0))
+        if not amount:
+            continue
+        entry = AccountingJournalEntry(
+            id=f"JRN-{uuid.uuid4().hex[:20].upper()}",
+            reference=reference,
+            source="legacy_expense",
+            description=legacy.description or "Legacy expense",
+            status="POSTED",
+            occurred_at=legacy.created_at or datetime.utcnow(),
+            created_by_name=legacy.staff_name or "System migration",
+        )
+        _journal_line(entry, "5100", "Operating Expense", debit=amount, memo=legacy.category or "")
+        _journal_line(entry, "1000", "Cash Drawer", credit=amount, memo=reference)
+        session.add(entry)
 
 
 def seed_categories(session):
@@ -225,6 +340,7 @@ def init_db() -> bool:
         # Create all declared tables if they do not exist
         logger.info("Verifying and auto-migrating database schema tables...")
         Base.metadata.create_all(bind=engine)
+        apply_additive_schema_migrations()
 
         inspector = inspect(engine)
         tables = inspector.get_table_names()
@@ -238,6 +354,7 @@ def init_db() -> bool:
             seed_riders(session)
             seed_products(session)
             seed_sample_sales(session)
+            backfill_financial_journal(session)
 
         logger.info("Database schema verification and auto-migration completed successfully.")
         return True
