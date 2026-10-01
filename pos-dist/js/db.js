@@ -207,8 +207,10 @@
   function apiUrl(path) {
     if (!path.startsWith("/")) path = "/" + path;
     if (typeof window !== "undefined") {
-      const isMobileApp = window.location.protocol === "file:" ||
+      const isMobileApp = window.__ADONAI_MOBILE_APP__ === true ||
+                          window.location.protocol === "file:" ||
                           window.location.origin.includes("capacitor") ||
+                          window.location.hostname === "appassets.androidplatform.net" ||
                           (window.location.origin.includes("localhost") && !window.location.port);
       if (isMobileApp) {
         let base = (state && state.settings && (state.settings.app_url || state.settings.website_url)) || "https://adonaithrift.ug";

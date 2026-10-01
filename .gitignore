@@ -22,6 +22,7 @@ adonai.db
 node_modules/
 android/build/
 android/app/build/
+dist/*.apk
 
 # Logs
 *.log
