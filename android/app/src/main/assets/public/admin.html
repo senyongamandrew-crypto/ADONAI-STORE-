@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=3.1" />
+<link rel="stylesheet" href="styles.css?v=3.3" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="apple-touch-icon" href="assets/favicon.svg" />
 <link rel="manifest" href="manifest.json" />
@@ -44,10 +44,6 @@
     </nav>
 
     <div class="sidebar-foot">
-      <div class="install-card" id="sidebarInstall">
-        <span class="nav-ico">⬇️</span>
-        <div><strong>Install POS App on Phone</strong><span>Add to home screen</span></div>
-      </div>
       <div class="me-card">
         <span class="me-avatar" id="meAvatar">OA</span>
         <div>
@@ -57,7 +53,7 @@
       </div>
       <div class="foot-actions">
         <button class="mini-link" id="btnMasterKey">🔑 Master Key</button>
-        <button class="mini-link" id="btnAdminExit" type="button">Sign Out / Exit</button>
+        <button class="mini-link" id="btnAdminExit" type="button">Sign out</button>
       </div>
     </div>
   </aside>
@@ -71,7 +67,6 @@
       <button class="pill" id="btnMenu">☰ Menu</button>
       <div class="ol-topbar-right">
         <span class="pill live" id="syncPill"><span class="live-dot"></span><span id="syncText">Sync Live · 0s | Auto 5s</span></span>
-        <button class="pill install" id="btnInstallTop">⬇ Install Mobile App</button>
         <button class="pill store" id="btnAdminOpenWebStore" type="button" title="Launch the live customer website in device browser">🌐 Open Live Web Storefront ↗</button>
       </div>
     </header>
@@ -366,9 +361,10 @@
 <div id="receiptSheet"></div>
 
 <script src="js/analytics.js"></script>
+<script src="js/adaptive.js?v=1.0"></script>
 <script src="js/db.js?v=2.5"></script>
 <script src="js/auth.js"></script>
 <script src="js/intake.js"></script>
-<script src="app.js?v=3.2"></script>
+<script src="app.js?v=3.3"></script>
 </body>
 </html>

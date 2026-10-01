@@ -74,13 +74,6 @@ svg { flex-shrink: 0; }
 .badge:empty { display: none; }
 
 .sidebar-foot { margin-top: auto; padding: 14px 8px 4px; display: flex; flex-direction: column; gap: 10px; }
-.install-card {
-  display: flex; align-items: center; gap: 10px;
-  background: var(--dark-card); border: 1px solid var(--dark-line); border-radius: 12px; padding: 11px 12px;
-}
-.install-card svg { width: 20px; height: 20px; color: var(--dark-muted); }
-.install-card strong { display: block; font-size: 12.5px; color: var(--dark-text); }
-.install-card span { font-size: 11px; color: var(--dark-muted); }
 .me-card { display: flex; align-items: center; gap: 10px; padding: 4px 4px 0; }
 .me-avatar {
   width: 34px; height: 34px; border-radius: 50%; background: var(--rust);
@@ -92,8 +85,12 @@ svg { flex-shrink: 0; }
 .mini-link { background: none; border: 0; color: var(--dark-muted); font: 600 12px var(--font-text); cursor: pointer; text-decoration: none; }
 .mini-link:hover { color: var(--dark-text); }
 
-/* ============ MAIN (light warm) ============ */
-.main { flex: 1; padding: 24px 30px 64px; max-width: calc(100vw - 258px); min-width: 0; }
+/* ============ MAIN (light warm — fluid across devices) ============ */
+.main {
+  flex: 1; min-width: 0;
+  padding: clamp(14px, 2.2vw, 24px) clamp(14px, 2.4vw, 30px) calc(72px + var(--sa-b, 0px));
+  max-width: calc(100vw - 258px);
+}
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 22px; flex-wrap: wrap; }
 h1 { font: 800 26px var(--font-display); color: var(--ink); letter-spacing: -0.01em; }
 .muted { color: var(--muted); }
@@ -132,14 +129,14 @@ h1 { font: 800 26px var(--font-display); color: var(--ink); letter-spacing: -0.0
 .view { display: none; animation: fade .18s ease; }
 .view.active { display: block; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; box-shadow: var(--shadow); overflow-x: auto; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: clamp(14px, 2vw, 20px) clamp(14px, 2.2vw, 22px); box-shadow: var(--shadow); overflow-x: auto; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .card-head h3 { font: 700 17px var(--font-display); color: var(--ink); }
 .grid { display: grid; gap: 16px; margin-top: 16px; }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 
-/* ---- KPIs ---- */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 14px; }
+/* ---- KPIs (fluid — 2-up on phones, 4-up on desktop) ---- */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(clamp(152px, 44vw, 210px), 1fr)); gap: clamp(10px, 1.4vw, 14px); }
 .kpi { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); position: relative; overflow: hidden; }
 .kpi::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--rust); }
 .kpi.green::before { background: var(--green); }
@@ -262,14 +259,13 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .pill:hover { border-color: var(--ink); }
 .pill.live { color: var(--muted); cursor: default; }
 .pill.live:hover { border-color: var(--line); }
-.pill.install { background: var(--card); color: var(--ink); }
 .pill.store { background: #F3E4DC; border-color: #EDD5C8; color: var(--rust); }
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; box-shadow: 0 0 0 3px rgba(47, 125, 79, .15); }
 
-/* ---- page headers ---- */
+/* ---- page headers (fluid type) ---- */
 .kicker { font-size: 11px; letter-spacing: .16em; color: var(--rust); text-transform: uppercase; font-weight: 700; margin-bottom: 6px; }
 .page-head { margin-bottom: 18px; }
-.page-head h1 { font: 800 30px var(--font-display); color: var(--ink); letter-spacing: -0.01em; }
+.page-head h1 { font: 800 clamp(22px, 4.6vw, 30px) var(--font-display); color: var(--ink); letter-spacing: -0.01em; }
 .page-head .muted { margin-top: 6px; }
 .page-head.row { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
 .head-actions { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
@@ -555,4 +551,238 @@ textarea.sel-full { resize: vertical; min-height: 78px; line-height: 1.5; }
   .inv-filter-row { flex-wrap: wrap; }
   .inv-filter-row .search-wide { flex-basis: 100%; }
   .staff-row { flex-wrap: wrap; }
+}
+
+/* =====================================================================
+   v3.3 — DASHBOARD DESIGN REFRESH + ADAPTIVE DEVICE LAYOUT
+   Works with js/adaptive.js (data-device / data-pointer on <html>).
+   Every dashboard flexes to a reasonable size for the device in hand:
+   phones get stacked touch-friendly cards, tablets two columns,
+   desktops the full console grid.
+   ===================================================================== */
+
+/* ---- shared mini tag chips (inventory, guests, riders) ---- */
+.itag {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: var(--tint); border: 1px solid var(--line); color: var(--muted);
+  border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700;
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+.itag:first-letter { text-transform: uppercase; }
+
+/* ---- redesigned KPI cards (icon + tone + fluid value) ---- */
+.kpi-card { display: flex; flex-direction: column; gap: 4px; position: relative; overflow: hidden; }
+.kpi-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--rust); }
+.kpi-card.kpi-green::before { background: var(--green); }
+.kpi-card.kpi-amber::before { background: var(--amber); }
+.kpi-card.kpi-blue::before { background: var(--blue); }
+.kpi-card.kpi-red::before { background: var(--red); }
+.kpi-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.kpi-ico {
+  width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 15px;
+  background: var(--tint); border: 1px solid var(--line);
+}
+.kpi-card.kpi-green .kpi-ico { background: #E2F3E8; border-color: #BDE0C9; }
+.kpi-card.kpi-amber .kpi-ico { background: #F5EBD8; border-color: #E8DDC2; }
+.kpi-card.kpi-blue .kpi-ico { background: #E4EAFB; border-color: #C9D4F3; }
+.kpi-card.kpi-red .kpi-ico { background: #FBEDEA; border-color: #F2CFC9; }
+.kpi-top .kpi-lab { min-width: 0; }
+.kpi-val { font: 700 clamp(19px, 4.2vw, 28px) var(--font-display); color: var(--ink); margin-top: 2px; white-space: pre-wrap; }
+.kpi-sub { font-size: 11.5px; color: var(--muted); }
+
+/* ---- channel / summary rows with share bars ---- */
+.ch-row { padding: 11px 0; }
+.ch-row.ch-stack { flex-direction: column; align-items: stretch; gap: 0; }
+.ch-info { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; min-width: 0; }
+.ch-info span { font-size: 13px; color: var(--body); font-weight: 600; }
+.ch-info strong { font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.ch-bar { height: 7px; background: var(--tint); border-radius: 999px; margin-top: 7px; overflow: hidden; }
+.ch-bar i { display: block; height: 100%; border-radius: 999px; transition: width .4s ease; }
+.ch-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.rider-mini { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.rider-mini .avatar { width: 36px; height: 36px; font-size: 12.5px; }
+.ph-mini { width: 40px; height: 40px; border-radius: 9px; font-size: 17px; }
+
+/* ---- rack bars (inventory mix) ---- */
+.rack-row { margin: 13px 0; }
+.rack-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.rack-lbl { font-size: 13px; color: var(--ink); font-weight: 600; }
+.rack-val { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.rack-val em { font-style: normal; font-size: 11px; color: var(--muted); font-weight: 600; }
+
+/* ---- recent transactions (avatar rows) ---- */
+.tx-row { display: flex; align-items: center; gap: 11px; padding: 12px 0; }
+.tx-ava {
+  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; color: #fff; font: 800 13px var(--font-text);
+}
+.tx-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; font-size: 13.5px; }
+.tx-title strong { color: var(--ink); }
+.tx-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+.tx-right strong { font-size: 14.5px; color: var(--ink); }
+.grow { flex: 1; min-width: 0; }
+
+/* ---- inventory rack rows (card layout) ---- */
+.stock-row {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: start;
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  padding: clamp(12px, 1.8vw, 20px) clamp(12px, 2vw, 22px); box-shadow: var(--shadow); margin-bottom: 12px;
+}
+.ph-thumb { width: clamp(56px, 10vw, 64px); height: clamp(56px, 10vw, 64px); border-radius: 12px; font-size: clamp(22px, 5vw, 26px); }
+.stock-title-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.stock-name { font: 700 clamp(15.5px, 2.4vw, 18px) var(--font-display); color: var(--ink); line-height: 1.25; }
+.stock-sku { font-size: 12px; color: var(--rust); font-weight: 700; letter-spacing: .04em; margin-top: 2px; }
+.stock-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.stock-price-row { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; margin-top: 10px; }
+.stock-price { font: 800 clamp(17px, 2.6vw, 20px) var(--font-display); color: var(--rust); }
+.stock-strike { color: var(--muted); font-size: 12.5px; }
+.stock-cost { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.stock-foot { margin-top: 8px; }
+.stock-actions { display: flex; flex-direction: column; gap: 7px; }
+
+/* ---- guest book (avatar cards) ---- */
+.guest-card { padding: clamp(14px, 2vw, 20px) clamp(14px, 2.2vw, 22px); }
+.guest-top { display: flex; align-items: center; gap: 12px; }
+.guest-top .avatar { width: 44px; height: 44px; font-size: 14.5px; }
+.guest-top .grow { min-width: 0; }
+.guest-name { font: 700 clamp(16px, 2.6vw, 19px) var(--font-display); color: var(--ink); }
+.guest-phone { display: inline-block; color: var(--blue); font-weight: 700; font-size: 13.5px; margin-top: 2px; text-decoration: none; }
+.guest-phone:hover { text-decoration: underline; }
+.guest-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.gc-actions { position: static; display: flex; gap: 12px; flex-shrink: 0; }
+.guest-notes { color: var(--muted); margin-top: 10px; font-size: 13px; background: var(--tint); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; }
+
+/* ---- riders ---- */
+.rider-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.rc-stats { display: flex; gap: 14px; text-align: center; flex-shrink: 0; }
+.rc-stats strong { display: block; font-size: 19px; color: var(--ink); line-height: 1.1; }
+.rc-stats span { font-size: 9px; letter-spacing: .12em; }
+.rc-chip { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 11px 0; }
+.rc-chip .stat-chip.mut { text-decoration: none; }
+
+/* ---- financial ledger (designed entry rows) ---- */
+.ledger-row {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 13px 15px; box-shadow: var(--shadow);
+}
+.lg-ico {
+  width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0;
+  display: grid; place-items: center; font-size: 17px;
+  background: var(--tint); border: 1px solid var(--line);
+}
+.lg-ico.lg-sale { background: #E2F3E8; border-color: #BDE0C9; }
+.lg-ico.lg-expense { background: #FBEDEA; border-color: #F2CFC9; }
+.lg-ico.lg-refund { background: #F5EBD8; border-color: #E8DDC2; }
+.lg-ico.lg-adjustment { background: #E4EAFB; border-color: #C9D4F3; }
+.lg-title { font-weight: 700; color: var(--ink); font-size: 13.5px; line-height: 1.3; }
+.lg-meta { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.lg-side { display: flex; align-items: center; gap: 10px; flex-shrink: 0; margin-left: auto; }
+.lg-side strong { font-size: 15px; white-space: nowrap; }
+
+/* ---- order pipeline cards ---- */
+.order-card { padding: 14px 0; }
+.oc-top { row-gap: 6px; }
+.oc-when { margin-left: auto; }
+.oc-body { align-items: center; }
+.oc-customer { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.oc-ava { width: 38px; height: 38px; font-size: 13px; }
+.oc-name { font-size: 14px; color: var(--ink); font-weight: 700; }
+.oc-tel { font-size: 12px; margin-left: 4px; }
+.oc-total { color: var(--ink); }
+.pay-row { gap: 7px; }
+
+/* ---- scrollable filter rails (no more stacked mega-buttons on phones) ---- */
+.dpills, .lane-tabs, .kpills, .filterbar, .ol-topbar, .ol-topbar-right {
+  flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.dpills::-webkit-scrollbar, .lane-tabs::-webkit-scrollbar, .kpills::-webkit-scrollbar,
+.filterbar::-webkit-scrollbar, .ol-topbar::-webkit-scrollbar, .ol-topbar-right::-webkit-scrollbar { display: none; }
+.dpills .dpill, .lane-tabs .lane-tab, .kpills .lane-tab { flex-shrink: 0; white-space: nowrap; }
+.lane-tab { scroll-snap-align: start; }
+.dpills, .lane-tabs, .kpills { scroll-snap-type: x proximity; }
+
+/* ---- search rows stack cleanly on narrow screens ---- */
+.inv-filter-row { flex-wrap: wrap; }
+.inv-filter-row .sel { flex: 1 1 130px; min-width: 0; }
+
+/* ---- touch devices: roomier tap targets ---- */
+html[data-pointer="touch"] .btn, html[data-pointer="touch"] .pill { min-height: 42px; }
+html[data-pointer="touch"] .dpill, html[data-pointer="touch"] .lane-tab { min-height: 44px; display: inline-flex; align-items: center; }
+html[data-pointer="touch"] .lnk { padding: 6px 2px; }
+
+/* ---- phone layout (≤640px): stacked, thumb-friendly ---- */
+@media (max-width: 640px) {
+  .ol-topbar { margin-bottom: 14px; }
+  .ol-topbar .pill.store { display: none; }        /* storefront link lives in the menu drawer */
+  .pill { padding: 8px 12px; font-size: 12px; }
+  .pill.live { max-width: 62vw; overflow: hidden; }
+
+  .page-head.row { flex-direction: column; }
+  .head-actions { width: 100%; }
+  .head-actions .btn, .head-actions .chip-gold.big { flex: 1 1 auto; text-align: center; }
+  .page-head .muted { font-size: 12.5px; }
+
+  .dash-grid-top, .dash-grid-mid { gap: 12px; margin-top: 12px; }
+  .card-head { flex-wrap: wrap; row-gap: 8px; }
+  .card-head .btn { flex-shrink: 0; }
+
+  .stock-row { grid-template-columns: auto 1fr; }
+  .stock-actions { grid-column: 1 / -1; flex-direction: row; }
+  .stock-actions .btn { flex: 1 1 auto; }
+  .stock-cost { margin-left: 0; width: 100%; }
+
+  .ledger-row { flex-wrap: wrap; }
+  .lg-side { margin-left: 52px; width: calc(100% - 52px); justify-content: space-between; }
+
+  .tx-row { gap: 9px; }
+  .tx-right { flex-direction: row; align-items: center; }
+
+  .oc-body { flex-direction: column; align-items: stretch; gap: 8px; }
+  .oc-total { text-align: right; font-size: 17px; }
+  .oc-when { margin-left: 0; width: 100%; }
+  .pay-row .btn { flex: 1 1 44%; }
+
+  .rc-top { flex-wrap: wrap; }
+  .rc-stats { margin-left: auto; }
+  .rc-btns .lane-tab { flex: 1 1 30%; text-align: center; }
+
+  .staff-row { flex-wrap: wrap; row-gap: 8px; padding: 13px 14px; }
+  .staff-row .lnk { flex: 1 1 auto; text-align: center; }
+
+  .guest-top { flex-wrap: wrap; }
+  .gc-actions { margin-left: auto; }
+
+  .modal { padding: 18px 16px; max-height: 92vh; max-height: calc(var(--app-vh, 92dvh) - 20px); }
+  .modal-actions { flex-wrap: wrap; }
+  .modal-actions .btn { flex: 1 1 auto; }
+
+  .access-card { flex-wrap: wrap; }
+  .dark-card { padding: 18px 16px; }
+}
+
+/* ---- small phones (≤380px) ---- */
+@media (max-width: 380px) {
+  .kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kpi-val { font-size: 18px; }
+  .kpi-sub { display: none; }
+}
+
+/* ---- tablets: comfortable two-lane grids ---- */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .dash-grid-mid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---- landscape phones: tighter vertical chrome ---- */
+@media (max-width: 960px) and (orientation: landscape) {
+  .page-head { margin-bottom: 12px; }
+  .page-head h1 { font-size: 21px; }
+  .page-head .muted { display: none; }
+}
+
+/* ---- reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .view, .ch-bar i, .rack-track > div, .sidebar { animation: none !important; transition: none !important; }
 }

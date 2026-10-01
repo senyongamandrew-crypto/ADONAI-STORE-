@@ -36,7 +36,11 @@ body {
 button { font: inherit; }
 h3 { font: 700 19px var(--font-display); color: var(--ink); }
 
-.pos-app { display: flex; flex-direction: column; height: 100vh; }
+.pos-app {
+  display: flex; flex-direction: column;
+  height: 100vh;               /* legacy fallback */
+  height: var(--app-vh, 100dvh); /* live viewport — tracks Android browser bars */
+}
 
 /* ================= HEADER (warm dark bar) ================= */
 .pos-head {
@@ -122,23 +126,25 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .ctab:hover { color: var(--ink); }
 .ctab.active { background: var(--ink); border-color: var(--ink); color: #fff; }
 
-/* product tiles — white cards with real photos */
+/* product tiles — white cards with real photos (fluid, aspect-ratio driven) */
 .tiles {
-  flex: 1; overflow-y: auto; display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  flex: 1; overflow-y: auto; display: grid; gap: clamp(8px, 1.4vw, 12px);
+  grid-template-columns: repeat(auto-fill, minmax(clamp(124px, 34vw, 176px), 1fr));
   align-content: start; padding: 2px 4px 8px 2px;
+  -webkit-overflow-scrolling: touch;
 }
 .tile {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 10px; cursor: pointer; text-align: left; color: var(--text);
-  display: flex; flex-direction: column; gap: 8px;
+  box-shadow: var(--shadow); padding: clamp(7px, 1.2vw, 10px); cursor: pointer; text-align: left; color: var(--text);
+  display: flex; flex-direction: column; gap: 7px;
   transition: transform .1s, border-color .12s, box-shadow .12s;
+  min-width: 0;
 }
 .tile:hover { border-color: var(--accent); transform: translateY(-2px); }
 .tile:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .tile .tile-img {
-  width: 100%; height: 118px; border-radius: 10px; overflow: hidden; position: relative;
-  background: var(--panel-2); display: grid; place-items: center; font-size: 34px; flex-shrink: 0;
+  width: 100%; height: auto; aspect-ratio: 1 / 1; border-radius: 10px; overflow: hidden; position: relative;
+  background: var(--panel-2); display: grid; place-items: center; font-size: clamp(24px, 6vw, 34px); flex-shrink: 0;
 }
 .tile .tile-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tile .tile-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
@@ -151,9 +157,15 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 
 /* ================= CART REGISTER ================= */
 .cart {
-  width: 390px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--line);
+  width: clamp(320px, 30vw, 390px); flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--line);
   display: flex; flex-direction: column;
 }
+/* toggle chip for the docked (phone) cart — hidden on desktop */
+.cart-toggle {
+  display: none;
+}
+/* inner column keeps head / lines / summary stacking inside the panel or sheet */
+.cart-body { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .cart-head { display: flex; justify-content: space-between; align-items: center; padding: 15px 18px; border-bottom: 1px solid var(--line); }
 .cart-head-actions { display: flex; gap: 6px; }
 .cart-lines { flex: 1; overflow-y: auto; padding: 12px 14px; background: var(--bg); }
@@ -315,12 +327,46 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .imgfield-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .imgfield-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 
-/* ================= responsive fallback ================= */
+/* ================= responsive fallback → bottom-dock cart ================= */
 @media (max-width: 960px) {
   .pos-main { flex-direction: column; overflow-y: auto; }
-  .cart { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
   body { overflow: auto; }
   .grid2 { grid-template-columns: 1fr; }
+
+  /* the register cart becomes a docked bottom sheet:
+     collapsed = summary bar, expanded = full cart panel */
+  .cart {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    width: 100%; border-left: 0; border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 34px rgba(23, 18, 16, .16);
+    padding-bottom: var(--sa-b, 0px);            /* gesture-bar safe area */
+    max-height: calc(var(--app-vh, 100dvh) - 56px);
+    display: flex; flex-direction: column;
+  }
+  .cart-toggle {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    background: var(--dark); color: var(--dark-text); border: 0; cursor: pointer;
+    padding: 13px 16px; border-radius: 18px 18px 0 0;
+    font: 700 14px var(--font-text); flex-shrink: 0;
+  }
+  .cart-toggle .ct-count {
+    min-width: 26px; height: 26px; padding: 0 7px; border-radius: 999px;
+    background: var(--accent); color: #fff; display: grid; place-items: center;
+    font-size: 12.5px; font-weight: 800;
+  }
+  .cart-toggle .ct-count:empty, .cart-toggle .ct-count[data-zero="1"] { background: #3A2E26; color: var(--dark-muted); }
+  .cart-toggle .ct-label { color: var(--dark-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; }
+  .cart-toggle .ct-total { margin-left: auto; font: 700 17px var(--font-display); color: #fff; }
+  .cart-toggle .ct-chevron { color: var(--dark-muted); font-size: 13px; transition: transform .2s; }
+  .cart.open .cart-toggle .ct-chevron { transform: rotate(180deg); }
+  .cart-body {
+    max-height: 0; overflow: hidden; transition: max-height .26s ease;
+  }
+  .cart.open .cart-body { max-height: calc(var(--app-vh, 100dvh) - 150px); overflow-y: auto; }
+  .cart-lines { max-height: none; flex: 1 1 auto; }
+  /* keep scrollable content clear of the dock */
+  .pos-main { padding-bottom: 76px; }
 }
 
 /* ================== v2.2 — reference “Cashier Register” layout ================== */
@@ -507,14 +553,6 @@ body.sb-open .sb-scrim { display: block; }
 .pos-sidebar .badge:empty { display: none; }
 
 .pos-sidebar .sidebar-foot { margin-top: auto; padding: 14px 8px 4px; display: flex; flex-direction: column; gap: 10px; }
-.pos-sidebar .install-card {
-  display: flex; align-items: center; gap: 10px;
-  background: var(--dark-card); border: 1px solid var(--dark-line); border-radius: 12px; padding: 11px 12px;
-  cursor: pointer; transition: background .14s;
-}
-.pos-sidebar .install-card:hover { background: rgba(255, 255, 255, .08); }
-.pos-sidebar .install-card strong { display: block; font-size: 12.5px; color: var(--dark-text); }
-.pos-sidebar .install-card span { font-size: 11px; color: var(--dark-muted); }
 .pos-sidebar .me-card { display: flex; align-items: center; gap: 10px; padding: 4px 4px 0; }
 .pos-sidebar .me-avatar {
   width: 34px; height: 34px; border-radius: 50%; background: var(--accent);
@@ -543,19 +581,22 @@ body.sb-open .sb-scrim { display: block; }
   body { overflow: auto; }
 
   /* topbar — compact pills that wrap instead of pushing a wide layout */
-  .pos-head { padding: 10px 12px; gap: 8px; }
-  .pos-head .pill { padding: 8px 12px; font-size: 12px; }
-  .pos-head .btn { padding: 8px 12px; font-size: 12.5px; }
-  .me-pill { padding: 4px 12px 4px 4px; font-size: 12px; }
+  .pos-head { padding: 8px 10px; gap: 7px; }
+  .pos-head .pill { padding: 7px 11px; font-size: 12px; }
+  .pos-head .btn { padding: 7px 11px; font-size: 12.5px; }
+  .me-pill { padding: 4px 10px 4px 4px; font-size: 12px; }
+  .me-pill .role { display: none; }              /* role stays in the drawer */
+  .pos-head .pill.store { display: none; }       /* storefront link lives in the menu drawer */
 
-  .pos-title { padding: 14px 12px 0; }
+  .pos-title { padding: 12px 12px 0; }
   .pos-title .kicker { font-size: 10px; }
-  .pos-title h1 { font-size: 24px; }
+  .pos-title h1 { font-size: clamp(20px, 6vw, 24px); }
   .pos-title-links { gap: 10px; margin-top: 8px; }
-  .pos-title-links .pill { padding: 8px 12px; font-size: 12px; }
+  .pos-title-links .pill { padding: 7px 11px; font-size: 12px; }
+  .pos-title-links .sync-active { display: none; }  /* topbar already shows live sync state */
 
-  .pos-main { padding: 0 12px; }
-  .left { padding: 12px 0 14px; gap: 11px; }
+  .pos-main { padding: 0 10px; }
+  .left { padding: 12px 0 14px; gap: 10px; }
 
   /* lookup controls wrap to their own rows instead of forcing a ~400px row */
   .lookup-row { flex-wrap: wrap; gap: 8px; }
@@ -566,29 +607,109 @@ body.sb-open .sb-scrim { display: block; }
   .grid-search { font-size: 16px; padding: 12px 14px; }
 
   .drow { gap: 8px; }
-  .dtab { padding: 9px 14px; font-size: 12.5px; }
+  .dtab { padding: 8px 13px; font-size: 12.5px; }
   .cat-tabs { gap: 7px; }
   .ctab { padding: 7px 12px; font-size: 12px; }
+  .cat-lab { display: none; }
 
-  .tiles { grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); gap: 10px; }
-  .tile { padding: 8px; gap: 6px; }
-  .tile .tile-img { height: 104px; font-size: 28px; }
-  .tile .t-name { font-size: 12.5px; }
-  .tile .t-meta { font-size: 10.5px; }
-  .tile .t-price { font-size: 15px; }
+  .tiles { gap: 8px; }
+  .tile { padding: 7px; gap: 5px; }
+  .tile .t-name { font-size: 12px; }
+  .tile .t-meta { font-size: 10px; }
+  .tile .t-price { font-size: 14px; }
+  .tile .t-row { gap: 4px; }
 
-  .cart-head { padding: 13px 14px; }
+  .cart-head { padding: 12px 14px; }
   .cart-lines { padding: 10px 12px; }
-  .cart-summary { padding: 13px 14px 16px; }
+  .cart-summary { padding: 12px 14px 14px; }
   .sum-row.total { font: 700 20px var(--font-display); margin: 8px 0 12px; }
   .charge-btn { padding: 15px; font-size: 16px; }
 
   .modal-backdrop { padding: 12px; }
-  .tender-modal, .receipt-modal { padding: 16px 14px; max-height: 92vh; max-height: 92dvh; }
+  .tender-modal, .receipt-modal { padding: 16px 14px; max-height: 92vh; max-height: calc(var(--app-vh, 92dvh) - 12px); overflow-y: auto; }
   .tender-actions { flex-wrap: wrap; }
   .tender-actions .btn { flex: 1 1 auto; }
   .grid2 { grid-template-columns: 1fr; }
   .form2 { grid-template-columns: 1fr; }
   .big-in { font-size: 24px; }
   .intake-list { max-height: 50vh; }
+}
+
+/* =====================================================================
+   v2.5 — ADAPTIVE DEVICE LAYOUT (js/adaptive.js publishes data-device)
+   The register flexes itself to the device in hand: phones get a compact
+   touch layout, tablets a two-pane register, desktops the full console.
+   Fluid clamp() sizing keeps every card at a reasonable aspect-driven
+   size between breakpoints — no fixed-width jumps.
+   ===================================================================== */
+
+/* ---- compact, horizontally scrollable filter chip rails ---- */
+.drow, .cat-tabs {
+  flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.drow::-webkit-scrollbar, .cat-tabs::-webkit-scrollbar { display: none; }
+.drow .dtab, .cat-tabs .ctab { scroll-snap-align: start; flex-shrink: 0; white-space: nowrap; }
+
+/* ---- fluid page typography & spacing ---- */
+.pos-title h1 { font-size: clamp(20px, 3vw, 30px); }
+.pos-head { padding: clamp(8px, 1.4vw, 12px) clamp(10px, 1.6vw, 18px); }
+.pos-main { padding: 0 clamp(10px, 1.6vw, 18px); }
+.left { padding: clamp(10px, 1.4vw, 14px) 0 14px; gap: clamp(9px, 1.2vw, 13px); }
+.lookup-btn { width: clamp(52px, 6vw, 64px); height: clamp(48px, 6vw, 64px); }
+
+/* ---- touch devices: roomier tap targets, no hover-only affordances ---- */
+html[data-pointer="touch"] .ctab, html[data-pointer="touch"] .dtab { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+html[data-pointer="touch"] .qty button { width: 36px; height: 36px; }
+html[data-pointer="touch"] .tile .tile-img { font-size: clamp(28px, 8vw, 34px); }
+
+/* ---- tablet portrait: register + cart share the width comfortably ---- */
+@media (min-width: 641px) and (max-width: 960px) {
+  .pos-main { flex-direction: row; overflow-y: hidden; padding-bottom: 0; }
+  .cart {
+    position: static; width: clamp(300px, 34vw, 390px);
+    border-radius: 0; box-shadow: none; padding-bottom: 0; max-height: none;
+  }
+  .cart-toggle { display: none; }
+  .cart-body { max-height: none !important; overflow: visible; }
+  .tiles { grid-template-columns: repeat(auto-fill, minmax(clamp(118px, 26vw, 160px), 1fr)); }
+}
+
+/* ---- phone landscape: keep both panes live, shrink chrome ---- */
+@media (max-width: 960px) and (orientation: landscape) {
+  .pos-title { padding: 8px 12px 0; }
+  .pos-title h1 { font-size: 18px; }
+  .pos-title-links { margin-top: 4px; }
+  .left { padding: 8px 0 10px; gap: 8px; }
+  .tile .tile-img { aspect-ratio: 4 / 3; }
+}
+
+/* ---- very small phones (≤380px): denser two-column grid ---- */
+@media (max-width: 380px) {
+  .tiles { grid-template-columns: repeat(2, 1fr); gap: 7px; }
+  .tile .t-meta { display: none; }          /* photo, name & price carry the card */
+  .pos-head .pill.live { font-size: 11px; padding: 7px 9px; }
+  .pos-head .pill.live .dot { display: none; }
+}
+
+/* ---- small phones (≤480px): keep the topbar on one row ---- */
+@media (max-width: 480px) {
+  .pos-head { flex-wrap: nowrap; }
+  .pos-head .pillrow, .pos-head .head-right { flex-wrap: nowrap; min-width: 0; }
+  .me-pill { padding: 4px; }
+  .me-pill #meName { display: none; }        /* identity lives in the menu drawer */
+  .pos-head .pill { white-space: nowrap; }
+}
+
+/* ---- hidpi phones: crisper, tighter tile text ---- */
+html[data-device="phone"][data-density="hidpi"] .tile .t-name { line-height: 1.2; }
+
+/* ---- tender modal: customer block header wraps on narrow screens ---- */
+.pos-cust-block > div:first-child { flex-wrap: wrap; row-gap: 4px; }
+
+/* ---- reduced-motion respect ---- */
+@media (prefers-reduced-motion: reduce) {
+  .cart-body, .cart-toggle .ct-chevron, .tile, .pos-sidebar { transition: none !important; }
 }

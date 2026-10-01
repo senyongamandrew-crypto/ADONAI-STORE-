@@ -69,7 +69,6 @@
     Auth.signOut();                       // revoke staff privileges
     location.href = "login.html";         // return to terminal login
   };
-  $("#btnExit").addEventListener("click", doExitPos);
   const btnPosSbExit = $("#btnPosSbExit");
   if (btnPosSbExit) btnPosSbExit.addEventListener("click", doExitPos);
 
@@ -215,13 +214,6 @@
   });
   let installPromptEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPromptEvt = e; });
-  const triggerInstall = () => {
-    if (installPromptEvt) { installPromptEvt.prompt(); installPromptEvt = null; }
-    else flash("Use browser menu → “Add to Home screen” to install the POS app.", true);
-  };
-  $("#btnInstall").addEventListener("click", triggerInstall);
-  const posSidebarInstall = $("#posSidebarInstall");
-  if (posSidebarInstall) posSidebarInstall.addEventListener("click", triggerInstall);
 
   function handleScan(code) {
     const p = DB.findByBarcode(code);
@@ -298,8 +290,27 @@
 
   /* ============================================================
      LIVE CART REGISTER
+     (docks to a bottom sheet on phones — see css/pos.css)
      ============================================================ */
   let cart = []; // {product_id, qty}
+
+  const posCart = $("#posCart");
+  const cartToggle = $("#cartToggle");
+  const isCartDocked = () => window.matchMedia("(max-width: 960px)").matches;
+  const setCartOpen = open => {
+    if (!posCart || !cartToggle) return;
+    posCart.classList.toggle("open", open);
+    cartToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  if (cartToggle) {
+    cartToggle.addEventListener("click", () => setCartOpen(!posCart.classList.contains("open")));
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && posCart.classList.contains("open")) setCartOpen(false);
+    });
+    window.addEventListener("resize", () => {
+      if (!isCartDocked()) setCartOpen(false);   // desktop always shows the full panel
+    }, { passive: true });
+  }
 
   function addLine(pid) {
     const p = products.find(x => x.id === pid);
@@ -352,6 +363,11 @@
     }
     $("#sumItems").textContent = det.reduce((s, x) => s + x.l.qty, 0);
     $("#sumTotal").textContent = DB.ugx(cartTotal());
+    /* docked mini-bar (phones) mirrors the live totals */
+    const itemCount = det.reduce((s, x) => s + x.l.qty, 0);
+    const ctCount = $("#ctCount"), ctTotal = $("#ctTotal");
+    if (ctCount) { ctCount.textContent = itemCount; ctCount.dataset.zero = itemCount ? "0" : "1"; }
+    if (ctTotal) ctTotal.textContent = DB.ugx(cartTotal());
     const btn = $("#btnCharge");
     btn.disabled = !det.length;
     btn.textContent = "Charge · " + DB.ugx(cartTotal());
@@ -512,6 +528,7 @@
       lastSale = sale;
       cart = [];
       closeTender();
+      setCartOpen(false);                // fold the docked cart back down (phones)
       refreshProducts();                 // stock now lower; tiles re-render
       showReceipt(sale);
       if (window.AdonaiAnalytics) {
