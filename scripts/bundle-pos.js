@@ -28,13 +28,25 @@ function copyDirRecursive(src, dest) {
 function bundleTo(targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
 
-  // 1. Copy core POS HTML files (admin.html loads the root app.js console script)
-  const htmlFiles = ['pos.html', 'admin.html', 'login.html', 'app.js', 'manifest-pos.json', 'manifest.json'];
-  for (const f of htmlFiles) {
+  // 1. Copy root-level application files. The operations console keeps its
+  // script and stylesheet at the repository root, while POS/login styles live
+  // in css/. Omitting styles.css makes every console destination render as
+  // unstyled browser HTML inside the Android app.
+  const rootFiles = [
+    'pos.html',
+    'admin.html',
+    'login.html',
+    'app.js',
+    'styles.css',
+    'manifest-pos.json',
+    'manifest.json'
+  ];
+  for (const f of rootFiles) {
     const src = path.join(ROOT, f);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(targetDir, f));
+    if (!fs.existsSync(src)) {
+      throw new Error(`[POS Bundler] Required application file is missing: ${f}`);
     }
+    fs.copyFileSync(src, path.join(targetDir, f));
   }
 
   // Create default index.html redirecting to pos.html inside the Capacitor / Android webview
