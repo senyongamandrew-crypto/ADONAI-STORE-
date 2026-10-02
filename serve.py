@@ -18,6 +18,7 @@ import sys
 import urllib.parse
 
 # Setup Database and Auto-Migrations
+import notifications
 from api import handle_api_request
 from database import DATABASE_URL, IS_POSTGRES, mask_database_url, verify_database_connection
 from db_init import init_db
@@ -218,6 +219,38 @@ def wsgi_app(environ, start_response):
     query_string = environ.get("QUERY_STRING", "")
     query_params = urllib.parse.parse_qs(query_string)
 
+    # 0. Real-time notification stream (SSE) — streamed as a generator so
+    #    Gunicorn forwards frames as they are produced.
+    if raw_path == "/api/notifications/stream" and method == "GET":
+        origin = environ.get("HTTP_ORIGIN", "")
+        cors = api_cors_headers(origin)
+        ticket = (query_params.get("ticket", [""])[0] or "").strip()
+        staff = notifications.redeem_stream_ticket(ticket)
+        if not staff:
+            payload = b'{"ok": false, "error": "Unauthorized: a valid stream ticket is required"}'
+            start_response("401 Unauthorized", [
+                ("Content-Type", "application/json; charset=utf-8"),
+                ("Content-Length", str(len(payload))), *cors, *SECURITY_HEADERS,
+            ])
+            return [payload]
+
+        start_response("200 OK", [
+            ("Content-Type", "text/event-stream; charset=utf-8"),
+            ("Cache-Control", "no-cache, no-store, must-revalidate"),
+            ("X-Accel-Buffering", "no"), *cors, *SECURITY_HEADERS,
+        ])
+
+        def sse_generator():
+            q = notifications.subscribe()
+            try:
+                yield notifications.sse_preamble()
+                while True:
+                    yield notifications.next_frame(q, timeout=25.0)
+            finally:
+                notifications.unsubscribe(q)
+
+        return sse_generator()
+
     # 1. API Route Handling
     if raw_path.startswith("/api/"):
         origin = environ.get("HTTP_ORIGIN", "")
@@ -370,6 +403,13 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
 
+        # 0. Real-time notification stream (long-lived SSE connection).
+        #    Handled before the buffered API dispatch: each client holds one
+        #    thread of the ThreadingTCPServer and receives events as they fire.
+        if path == "/api/notifications/stream" and self.command == "GET" and not head_only:
+            self.handle_notification_stream(parsed)
+            return
+
         # 1. API Endpoint Dispatch
         if path.startswith("/api/"):
             origin = self.headers.get("Origin", "")
@@ -480,6 +520,55 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             if not head_only:
                 self.wfile.write(content_404)
+
+    def handle_notification_stream(self, parsed):
+        """
+        Server-Sent Events endpoint: /api/notifications/stream?ticket=...
+        The ticket is a single-use 60s handshake issued by
+        POST /api/notifications/ticket to header-authenticated staff —
+        long-lived credentials never appear in the URL.
+        """
+        query = urllib.parse.parse_qs(parsed.query)
+        ticket = (query.get("ticket", [""])[0] or "").strip()
+        staff = notifications.redeem_stream_ticket(ticket)
+
+        origin = self.headers.get("Origin", "")
+        cors = api_cors_headers(origin)
+
+        if not staff:
+            payload = b'{"ok": false, "error": "Unauthorized: a valid stream ticket is required"}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            for k, v in [*cors, *SECURITY_HEADERS]:
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        for k, v in [*cors, *SECURITY_HEADERS]:
+            self.send_header(k, v)
+        self.end_headers()
+
+        q = notifications.subscribe()
+        logger.info("SSE notification stream opened for %s (%s)",
+                    staff.get("name", "Staff"), self.client_address[0] if self.client_address else "?")
+        try:
+            self.wfile.write(notifications.sse_preamble())
+            self.wfile.flush()
+            while True:
+                frame = notifications.next_frame(q, timeout=25.0)
+                self.wfile.write(frame)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass  # client navigated away or network dropped — normal lifecycle
+        finally:
+            notifications.unsubscribe(q)
 
     def log_message(self, format, *args):
         pass
