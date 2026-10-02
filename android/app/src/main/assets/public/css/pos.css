@@ -955,11 +955,13 @@ html, body { max-width: 100vw; overflow-x: hidden; }
   transition: all .3s ease-in-out;
 }
 
-/* Active state: items selected → right-hand drawer slides into view */
+/* Active state: items selected → right-hand drawer slides into view,
+   occupying 35% of the screen width (capped to 35% of the 1400px
+   workspace on ultra-wide monitors) */
 .pos-dashboard-layout.has-cart-items .pos-cart-sidebar {
   display: flex;
   flex-direction: column;
-  width: clamp(320px, 30vw, 390px);
+  width: min(35vw, 490px);
   opacity: 1;
   box-shadow: -4px 0 15px rgba(0, 0, 0, .08);
   animation: pos-drawer-slide-in .3s ease-in-out;
