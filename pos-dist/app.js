@@ -15,7 +15,7 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const ugx = DB.ugx;
-  const AV_PALETTE = ["#0F0F0F", "#202020", "#337418", "#27570F", "#1E4710", "#2B2B2B", "#3F8A1F", "#141414"];
+  const AV_PALETTE = ["#111827", "#1F2937", "#16A34A", "#15803D", "#166534", "#374151", "#22C55E", "#0B1120"];
   const avColor = name => AV_PALETTE[(String(name).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % AV_PALETTE.length];
   const initials = name => String(name || "OA").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
@@ -347,19 +347,19 @@
     const max = Math.max(1, ...hVals, ...dVals);
     const drawRow = (vals, labels, y0, bh, color) => {
       const step = W / vals.length;
-      ctx.font = "9.5px 'Plus Jakarta Sans', sans-serif"; ctx.fillStyle = "#A08F83"; ctx.textAlign = "center";
+      ctx.font = "9.5px 'Plus Jakarta Sans', sans-serif"; ctx.fillStyle = "#9CA3AF"; ctx.textAlign = "center";
       vals.forEach((v, i) => {
         const x = i * step + step / 2;
         const h = v ? Math.max(3, v / max * bh) : 2;
-        ctx.fillStyle = v ? color : "#EFE7DC";
+        ctx.fillStyle = v ? color : "#E5E7EB";
         if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x - 11, y0 + bh - h, 22, h, 4); ctx.fill(); }
         else ctx.fillRect(x - 11, y0 + bh - h, 22, h);
-        ctx.fillStyle = "#A08F83";
+        ctx.fillStyle = "#9CA3AF";
         ctx.fillText(labels[i], x, y0 + bh + 13);
       });
     };
-    drawRow(hVals, ["9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p", "6p", "7p"], 10, 44, "#C24E2B");
-    drawRow(dVals, days.map(d => ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][d.getDay()]), 88, 44, "#1A1410");
+    drawRow(hVals, ["9a", "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p", "6p", "7p"], 10, 44, "#16A34A");
+    drawRow(dVals, days.map(d => ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"][d.getDay()]), 88, 44, "#111827");
 
     /* ---- dark polling card ---- */
     $("#pollText").textContent = webPend.length
@@ -373,7 +373,7 @@
     $("#rackBars").innerHTML = [
       ["Available for Sale", onRack, "var(--green)"],
       ["Reserved in Orders", reserved, "var(--amber)"],
-      ["Sold & Closed", soldQty, "#B8AC9E"]
+      ["Sold & Closed", soldQty, "#9CA3AF"]
     ].map(([lbl, v, c]) => `
       <div class="rack-row">
         <div class="rack-top"><span class="rack-lbl">${lbl}</span><span class="rack-val">${v} <em>${Math.round(v / rackTotal * 100)}%</em></span></div>
@@ -1369,7 +1369,7 @@
   }
 
   function openMarkdown(productId, name, currentPrice) {
-    openModal(`<button class="modal-x" data-close>×</button><p class="kicker">LIVE STOREFRONT PRICE</p><h3>Markdown ${esc(name)}</h3><p class="muted small">The new price is written to the shared catalog immediately. Open storefronts refresh within five seconds.</p><div class="field"><label>Current price</label><div class="sel-full" style="background:#f3f1ed">${ugx(currentPrice)}</div></div><div class="field"><label>New selling price (UGX)</label><input class="sel-full" id="markdownPrice" type="number" min="1" max="${Math.max(1,currentPrice-1)}" /></div><div class="field"><label>Reason</label><input class="sel-full" id="markdownReason" value="Dead-stock markdown" /></div><div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="saveMarkdown">Publish markdown</button></div>`);
+    openModal(`<button class="modal-x" data-close>×</button><p class="kicker">LIVE STOREFRONT PRICE</p><h3>Markdown ${esc(name)}</h3><p class="muted small">The new price is written to the shared catalog immediately. Open storefronts refresh within five seconds.</p><div class="field"><label>Current price</label><div class="sel-full" style="background:#F3F4F6">${ugx(currentPrice)}</div></div><div class="field"><label>New selling price (UGX)</label><input class="sel-full" id="markdownPrice" type="number" min="1" max="${Math.max(1,currentPrice-1)}" /></div><div class="field"><label>Reason</label><input class="sel-full" id="markdownReason" value="Dead-stock markdown" /></div><div class="modal-actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="saveMarkdown">Publish markdown</button></div>`);
     $("#saveMarkdown").addEventListener("click", async () => {
       const button = $("#saveMarkdown"); setButtonBusy(button, true, "Publishing…");
       try {
