@@ -17,7 +17,13 @@ adonai.db
 
 # Secrets & Environment
 .env
+.env.*
+!.env.example
 .env.local
+.jwt_secret
+*.pem
+*.key
+secrets/
 
 # Node & Build Artifacts
 node_modules/

@@ -74,20 +74,99 @@ mimetypes.add_type("application/vnd.android.package-archive", ".apk")
 # environments can embed the app in an iframe. Production stays SAMEORIGIN.
 ALLOW_FRAME_EMBED = os.environ.get("ALLOW_FRAME_EMBED", "") == "1"
 
+# Content Security Policy. NOTE: script-src keeps 'unsafe-inline' because the
+# POS/admin UI templates rely on inline event handlers (onerror fallbacks) and
+# a small bootstrap inline script; all dynamic output is HTML-escaped via the
+# shared esc() helpers client-side. Everything else is locked down:
+# no plugins (object-src), no base hijacking (base-uri), restricted form
+# targets, and frame-ancestors synced with X-Frame-Options.
+CSP_POLICY = (
+    "default-src 'self'; "
+    "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com; "
+    "font-src 'self' https://fonts.gstatic.com data:; "
+    "connect-src 'self'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "script-src 'self' 'unsafe-inline'; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    + ("" if ALLOW_FRAME_EMBED else "frame-ancestors 'self';")
+)
+
 SECURITY_HEADERS = [
     ("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload"),
     ("X-Content-Type-Options", "nosniff"),
 ] + ([] if ALLOW_FRAME_EMBED else [("X-Frame-Options", "SAMEORIGIN")]) + [
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
     ("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)"),
-    ("Content-Security-Policy",
-     "default-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com https://images.unsplash.com https://wa.me; "
-     "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https://wa.me; "
-     "font-src 'self' https://fonts.gstatic.com data:; "
-     "connect-src 'self'; "
-     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-     "script-src 'self' 'unsafe-inline';")
+    ("Cross-Origin-Opener-Policy", "same-origin-allow-popups"),
+    ("Content-Security-Policy", CSP_POLICY),
 ]
+
+# ============================================================================
+# Static file exposure controls
+# ============================================================================
+# Only these file extensions may ever be served. Server-side source code
+# (.py), configs (.yaml, Procfile), lockfiles, docs and dotfiles are NOT
+# reachable over HTTP.
+ALLOWED_STATIC_EXTENSIONS = {
+    ".html", ".css", ".js", ".mjs", ".json", ".svg", ".png", ".jpg", ".jpeg",
+    ".webp", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".otf", ".xml",
+    ".txt", ".webmanifest", ".apk", ".map",
+}
+
+# Top-level directories that must never be exposed over HTTP.
+BLOCKED_TOP_DIRS = {
+    ".git", ".github", "android", "scripts", "migrations", "components",
+    "pos-dist", "node_modules", "__pycache__",
+}
+
+# Specific filenames that pass the extension allowlist but are still private.
+BLOCKED_FILENAMES = {
+    "requirements.txt", "package.json", "package-lock.json",
+    "capacitor.config.json", "tsconfig.json",
+}
+
+# Request body ceiling for API calls (5 MB covers base64 intake photos).
+MAX_API_BODY_BYTES = int(os.environ.get("MAX_API_BODY_BYTES", str(5 * 1024 * 1024)))
+
+
+def resolve_static_file(clean_path: str) -> str | None:
+    """Safely map a URL path to a file inside the web root.
+
+    Defends against path traversal (.., encoded separators, symlink escape)
+    and blocks dotfiles, server source code, configs, and private directories.
+    Returns an absolute path or None when the request must be refused.
+    """
+    if clean_path in ROUTES:
+        return os.path.join(ROOT, ROUTES[clean_path])
+
+    relative = clean_path.lstrip("/")
+    if not relative or "\\" in relative or "\x00" in relative:
+        return None
+
+    segments = relative.split("/")
+    for segment in segments:
+        # Reject traversal and every hidden file/directory (.git, .env, ...)
+        if segment in ("", ".", "..") or segment.startswith("."):
+            return None
+
+    if segments[0].lower() in BLOCKED_TOP_DIRS:
+        return None
+    if len(segments) == 1 and segments[0].lower() in BLOCKED_FILENAMES:
+        return None
+
+    _, ext = os.path.splitext(segments[-1])
+    if ext.lower() not in ALLOWED_STATIC_EXTENSIONS:
+        return None
+
+    candidate = os.path.realpath(os.path.join(ROOT, *segments))
+    # Containment check: the resolved real path must stay inside the web root.
+    if not candidate.startswith(os.path.realpath(ROOT) + os.sep):
+        return None
+    if not os.path.isfile(candidate):
+        return None
+    return candidate
 
 # The APK serves its bundled UI from WebViewAssetLoader. Its HTTPS-like
 # appassets origin is therefore cross-origin to the live API. Keep this list
@@ -151,9 +230,24 @@ def wsgi_app(environ, start_response):
             start_response("204 No Content", headers)
             return [b""]
 
-        body_bytes = b""
         try:
             content_length = int(environ.get("CONTENT_LENGTH", 0) or 0)
+        except (TypeError, ValueError):
+            content_length = 0
+
+        # Reject oversized payloads before buffering them.
+        if content_length > MAX_API_BODY_BYTES:
+            payload = b'{"ok": false, "error": "Request body too large"}'
+            headers = [
+                ("Content-Type", "application/json; charset=utf-8"),
+                ("Content-Length", str(len(payload))),
+                *cors, *SECURITY_HEADERS,
+            ]
+            start_response("413 Payload Too Large", headers)
+            return [payload]
+
+        body_bytes = b""
+        try:
             if content_length > 0:
                 body_bytes = environ["wsgi.input"].read(content_length)
         except Exception:
@@ -168,7 +262,8 @@ def wsgi_app(environ, start_response):
                 headers_dict[k.replace("_", "-").lower()] = v
 
         status_code, content_type, response_body = handle_api_request(
-            method, raw_path, query_params, body_bytes, headers=headers_dict
+            method, raw_path, query_params, body_bytes, headers=headers_dict,
+            client_addr=environ.get("REMOTE_ADDR", "")
         )
 
         headers = [
@@ -185,15 +280,9 @@ def wsgi_app(environ, start_response):
             return [b""]
         return [response_body]
 
-    # 2. Static Clean Route Resolution
+    # 2. Static Clean Route Resolution (traversal-safe, allowlisted)
     clean_path = raw_path.rstrip("/") or "/"
-    target_file = None
-    if clean_path in ROUTES:
-        target_file = os.path.join(ROOT, ROUTES[clean_path])
-    else:
-        candidate = os.path.join(ROOT, clean_path.lstrip("/"))
-        if os.path.isfile(candidate):
-            target_file = candidate
+    target_file = resolve_static_file(clean_path)
 
     # 3. File Serving & Compression
     if target_file and os.path.isfile(target_file):
@@ -294,9 +383,25 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
             query_params = urllib.parse.parse_qs(parsed.query)
-            body_bytes = b""
             try:
                 content_len = int(self.headers.get("Content-Length", 0) or 0)
+            except (TypeError, ValueError):
+                content_len = 0
+
+            if content_len > MAX_API_BODY_BYTES:
+                payload = b'{"ok": false, "error": "Request body too large"}'
+                self.send_response(413)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                for k, v in [*cors, *SECURITY_HEADERS]:
+                    self.send_header(k, v)
+                self.end_headers()
+                if not head_only:
+                    self.wfile.write(payload)
+                return
+
+            body_bytes = b""
+            try:
                 if content_len > 0:
                     body_bytes = self.rfile.read(content_len)
             except Exception:
@@ -304,7 +409,8 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
 
             headers_dict = {k.lower(): v for k, v in self.headers.items()}
             status_code, content_type, response_body = handle_api_request(
-                self.command, path, query_params, body_bytes, headers=headers_dict
+                self.command, path, query_params, body_bytes, headers=headers_dict,
+                client_addr=(self.client_address[0] if self.client_address else "")
             )
 
             self.send_response(status_code)
@@ -319,15 +425,9 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(response_body)
             return
 
-        # 2. Clean URL Routing
+        # 2. Clean URL Routing (traversal-safe, allowlisted)
         clean_path = path.rstrip("/") or "/"
-        target_file = None
-        if clean_path in ROUTES:
-            target_file = os.path.join(ROOT, ROUTES[clean_path])
-        else:
-            candidate = os.path.join(ROOT, clean_path.lstrip("/"))
-            if os.path.isfile(candidate):
-                target_file = candidate
+        target_file = resolve_static_file(clean_path)
 
         # 3. Serve File or 404
         if target_file and os.path.isfile(target_file):

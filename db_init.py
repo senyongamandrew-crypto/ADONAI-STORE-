@@ -3,13 +3,14 @@ Adonai Thrift Store — Database Initialization & Auto-Migration
 Creates all required tables if missing and seeds initial default datasets.
 """
 from datetime import datetime, timedelta
-import hashlib
 import json
 import logging
+import os
 import uuid
 from sqlalchemy import inspect, text
 
-from database import Base, engine, get_db, verify_database_connection
+from database import IS_POSTGRES, Base, engine, get_db, verify_database_connection
+from security import hash_pin as pbkdf2_hash_pin
 from models import (
     AccountingJournalEntry,
     AccountingJournalLine,
@@ -28,8 +29,8 @@ logger = logging.getLogger("adonai.db_init")
 
 
 def hash_pin(pin: str) -> str:
-    """Computes SHA-256 hash for staff PINs."""
-    return hashlib.sha256(pin.encode("utf-8")).hexdigest()
+    """Hash staff PINs with salted PBKDF2-HMAC-SHA256 (see security.py)."""
+    return pbkdf2_hash_pin(pin)
 
 
 def apply_additive_schema_migrations():
@@ -161,6 +162,13 @@ def seed_categories(session):
 
 
 def seed_users(session):
+    # SECURITY: demo staff accounts carry weak, publicly documented PINs.
+    # They are only seeded in local/SQLite development, or when the operator
+    # explicitly opts in via ADONAI_SEED_DEMO_USERS=1. Production PostgreSQL
+    # deployments must create real staff accounts with strong PINs instead.
+    if IS_POSTGRES and os.environ.get("ADONAI_SEED_DEMO_USERS") != "1":
+        logger.info("Skipping demo staff roster seeding on production database.")
+        return
     users = [
         ("STF-01", "Mercer Admin", "admin", hash_pin("1234"), "+256 758 873 398"),
         ("STF-02", "Grace Nakato", "manager", hash_pin("2345"), "+256 772 111 222"),
@@ -171,7 +179,7 @@ def seed_users(session):
         existing = session.query(User).filter_by(id=uid).first()
         if not existing:
             session.add(User(id=uid, name=name, role=role, pin_hash=pin_h, phone=phone, active=True))
-    logger.info("Verified default staff roster accounts.")
+    logger.info("Verified default staff roster accounts (development seed).")
 
 
 def seed_products(session):
@@ -261,13 +269,28 @@ def seed_settings(session):
         "currency": "UGX",
         "base_delivery_fee": "7000",
         "boda_base_fee": "7000",
-        "master_key": "ADONAI-MASTER-2026",
+        # SECURITY: no default master_key is seeded. Admin access comes from
+        # the ADMIN_ACCESS_PIN / ADMIN_KEY environment variables, or a key the
+        # owner sets in System Parameters after signing in.
         "receipt_footer": "Thank you for shopping at Adonai Store! Returns accepted within 2 days with valid receipt."
     }
     for k, v in defaults.items():
         existing = session.query(StoreSetting).filter_by(key=k).first()
         if not existing:
             session.add(StoreSetting(key=k, value=v))
+
+    # Hardening migration: purge the retired, publicly known default key from
+    # databases seeded by earlier releases so it can never authenticate again.
+    retired = {"adonai-master-2026"}
+    for key_name in ("master_key", "admin_key", "terminal_key", "staff_key"):
+        row = session.query(StoreSetting).filter_by(key=key_name).first()
+        if row and str(row.value or "").strip().lower() in retired:
+            session.delete(row)
+            logger.warning(
+                "Removed retired default credential from store setting '%s'. "
+                "Set a new key in System Parameters or via environment variables.",
+                key_name,
+            )
     logger.info("Verified core store settings.")
 
 
