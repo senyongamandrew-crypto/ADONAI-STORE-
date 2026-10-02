@@ -299,12 +299,31 @@
 
   const posCart = $("#posCart");
   const cartToggle = $("#cartToggle");
-  const isCartDocked = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 960px)").matches;
+  const isCartDocked = () => typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
   const setCartOpen = open => {
     if (!posCart || !cartToggle) return;
     posCart.classList.toggle("open", open);
     cartToggle.setAttribute("aria-expanded", open ? "true" : "false");
   };
+
+  /* ---- dynamic "Current Sale" drawer visibility ----
+     The checkout panel is hidden while the cart is empty so the catalog
+     spans the full workspace. The first selected item slides it in from
+     the right edge on every viewport (inline drawer ≥768px, overlay
+     drawer <768px); clearing the cart, removing the last line, or
+     completing a charge slides it away. */
+  const getCartTotalCount = () => cart.reduce((s, l) => s + l.qty, 0);
+  function syncCartVisibility() {
+    const layoutContainer = document.querySelector(".pos-dashboard-layout");
+    if (!layoutContainer) return;
+    const cartItemsCount = getCartTotalCount();
+    if (cartItemsCount > 0) {
+      layoutContainer.classList.add("has-cart-items");
+    } else {
+      layoutContainer.classList.remove("has-cart-items");
+      setCartOpen(false); // fold the phone sheet so it re-animates on the next sale
+    }
+  }
   if (cartToggle) {
     cartToggle.addEventListener("click", () => setCartOpen(!posCart.classList.contains("open")));
     document.addEventListener("keydown", e => {
@@ -339,9 +358,9 @@
         const line = cart.find(x => x.product_id === pid);
         if (line) line.qty++; else cart.push({ product_id: pid, qty: 1 });
         renderCart();
-        // On phones the selected-items panel is a collapsed bottom sheet. Open
-        // it after a successful tap so the cashier can immediately see and
-        // continue with the item they selected.
+        // On phones the selected-items panel is an overlay drawer docked to
+        // the right edge. Slide it in after a successful tap so the cashier
+        // can immediately see and continue with the item they selected.
         if (isCartDocked()) setCartOpen(true);
         return true;
       } catch (error) {
@@ -404,6 +423,8 @@
     const btn = $("#btnCharge");
     btn.disabled = !det.length;
     btn.textContent = "Charge · " + DB.ugx(cartTotal());
+    /* every cart mutation funnels through here — keep the drawer in sync */
+    syncCartVisibility();
   }
 
   $("#cartLines").addEventListener("click", async e => {

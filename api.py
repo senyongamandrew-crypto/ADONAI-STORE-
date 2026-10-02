@@ -17,6 +17,12 @@ import time
 import uuid
 
 from database import DATABASE_URL, IS_POSTGRES, engine, get_db
+from notifications import (
+    LOW_STOCK_THRESHOLD,
+    broadcast_event,
+    issue_stream_ticket,
+    recent_events,
+)
 from pricing import transport_allocation, whole_money
 from security import (
     RateLimiter,
@@ -483,6 +489,32 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 "tables_count": len(tables),
                 "timestamp": datetime.utcnow().isoformat()
             })
+
+        # ----------------------------------------------------
+        # 1b. Real-Time Notification Engine (Protected)
+        # ----------------------------------------------------
+        if clean_path == "/api/notifications/ticket" and method == "POST":
+            # EventSource cannot attach Authorization headers, and this API
+            # never accepts credentials in query strings. Staff exchange
+            # their verified JWT here for a single-use 60s stream ticket,
+            # which is all the SSE URL ever carries.
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            ticket = issue_stream_ticket(staff_info)
+            return json_response({"ok": True, "ticket": ticket, "expires_in": 60})
+
+        if clean_path == "/api/notifications" and method == "GET":
+            # Chronological alert history for the notification drawer.
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            limit = 100
+            try:
+                limit = int(query_params.get("limit", ["100"])[0])
+            except (TypeError, ValueError):
+                pass
+            return json_response({"ok": True, "notifications": recent_events(limit)})
 
         # ----------------------------------------------------
         # 2. Products API (Public Catalog Read, Protected Intake)
@@ -1041,6 +1073,46 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     lines=sale_journal_lines(grand_total, cogs, tender_type),
                 )
                 session.flush()
+
+                # ---- Real-time notification broadcasts (non-blocking) ----
+                order_number = order_id.split("-")[-1] if "-" in order_id else order_id
+                if channel == "pos":
+                    broadcast_event(
+                        "NEW_ORDER",
+                        f"🧾 POS Sale {order_id}",
+                        f"Charged — UGX {grand_total:,} ({order.tender_type or 'cash'})",
+                        {"order_id": order_id, "amount": grand_total,
+                         "customer": order.customer_name, "channel": channel},
+                    )
+                else:
+                    broadcast_event(
+                        "NEW_ORDER",
+                        f"🛍️ New {channel.title()} Order #{order_number}",
+                        f"Order received — UGX {grand_total:,}",
+                        {"order_id": order_id, "amount": grand_total,
+                         "customer": order.customer_name, "channel": channel},
+                    )
+                    inquiry = (order.delivery_notes or "").strip()
+                    if inquiry:
+                        broadcast_event(
+                            "NEW_MESSAGE",
+                            f"💬 Customer note on #{order_number}",
+                            f"{order.customer_name}: “{inquiry[:140]}”",
+                            {"order_id": order_id, "customer": order.customer_name,
+                             "message": inquiry[:500]},
+                        )
+                for product in products.values():
+                    remaining = max(0, int(product.in_stock_count or 0))
+                    if remaining <= LOW_STOCK_THRESHOLD:
+                        broadcast_event(
+                            "LOW_STOCK",
+                            ("🚨 Sold out — " if remaining == 0 else "⚠️ Low stock — ") + product.name,
+                            (f"“{product.name}” is out of stock." if remaining == 0
+                             else f"Only {remaining} unit(s) of “{product.name}” left."),
+                            {"product_id": product.id, "name": product.name,
+                             "remaining": remaining, "barcode": product.barcode_id},
+                        )
+
                 return json_response({
                     "status": "success",
                     "order": order.to_dict(),
@@ -1126,6 +1198,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     created_at=occurred_at,
                 ))
                 session.flush()
+
+                # ---- Real-time notification broadcast (non-blocking) ----
+                broadcast_event(
+                    "NEW_EXPENSE",
+                    f"🧾 Expense logged — {category}",
+                    f"UGX {amount:,} ({payment_method}) by {staff_info.get('name', 'Staff')}",
+                    {"expense_id": expense_id, "category": category, "amount": amount,
+                     "payment_method": payment_method,
+                     "staff": staff_info.get("name", "Staff")},
+                )
+
                 return json_response({"ok": True, "status": "posted", "expense": expense.to_dict()}, status=201)
 
         if clean_path.startswith("/api/finance/expenses/") and method in ("PUT", "PATCH", "POST"):

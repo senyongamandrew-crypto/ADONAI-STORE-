@@ -10,6 +10,16 @@
   "use strict";
   var doc = document.documentElement;
 
+  /* ---- migration: purge the retired manual "View Mode" toggle ----
+     Layout is now driven exclusively by CSS @media breakpoints, so any
+     persisted Desktop/Phone preference or stale scale attributes from
+     older builds must be cleared on boot. */
+  try { localStorage.removeItem("adonai.ui.view-mode"); } catch (e) {}
+  try { sessionStorage.removeItem("adonai.ui.view-mode"); } catch (e) {}
+  doc.removeAttribute("data-view-mode");
+  doc.removeAttribute("data-ui-scale");
+  doc.style.removeProperty("--ui-scale");
+
   function apply() {
     var w = window.innerWidth || doc.clientWidth;
     var h = window.innerHeight || doc.clientHeight;

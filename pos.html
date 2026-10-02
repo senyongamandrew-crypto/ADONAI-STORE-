@@ -7,14 +7,15 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=5.1" />
+<link rel="stylesheet" href="css/pos.css?v=6.0" />
+<link rel="stylesheet" href="css/notifications.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
 <link rel="icon" href="assets/favicon.ico" sizes="any" />
 <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
 <link rel="manifest" href="manifest-pos.json" />
-<meta name="theme-color" content="#1A1612" />
+<meta name="theme-color" content="#111827" />
 </head>
 <body data-authed="false">
 
@@ -69,6 +70,10 @@
       <button class="pill" id="btnPosMenu" type="button" title="Open Navigation Menu"><i data-icon="menu" data-size="15"></i> Menu</button>
     </div>
     <div class="head-right">
+      <button class="notif-bell" id="notifBellBtn" type="button" title="Notifications" aria-label="Notifications">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <span class="notif-badge" id="notifBadge">0</span>
+      </button>
       <button class="btn ghost dark" id="btnIntake" title="Add items & photos to inventory"><i data-icon="inbox" data-size="15"></i> Intake</button>
       <span class="me-pill" id="mePill"><span class="avatar">S</span><span id="meName">Staff</span><span class="role" id="meRole">open access</span></span>
     </div>
@@ -86,10 +91,10 @@
   <!-- scan feedback banner -->
   <div class="scan-flash" id="scanFlash"></div>
 
-  <main class="pos-main">
+  <main class="pos-main pos-dashboard-layout">
 
     <!-- ============ LEFT: lookup + manual grid ============ -->
-    <section class="left">
+    <section class="left pos-catalog-section">
       <div class="lookup-row">
         <input id="barcodeInput" class="barcode-in" type="text" inputmode="text"
                placeholder="Scan barcode or type SKU (e.g. ADN-DEN-1001, ADN-MEN-1002)…" autocomplete="off" />
@@ -104,7 +109,7 @@
     </section>
 
     <!-- ============ RIGHT: live cart register (docks to bottom sheet on phones) ============ -->
-    <aside class="cart" id="posCart">
+    <aside class="cart pos-cart-sidebar" id="posCart">
       <button class="cart-toggle" id="cartToggle" type="button" aria-expanded="false">
         <span class="ct-count" id="ctCount">0</span>
         <span class="ct-label">Current Sale</span>
@@ -243,7 +248,7 @@
 
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
-<script src="js/display-size.js?v=1.0"></script>
+<script src="js/notifications.js?v=1.0"></script>
 <script src="js/icons.js?v=1.0"></script>
 <script src="js/db.js?v=3.1"></script>
 <script src="js/auth.js?v=2.6"></script>
