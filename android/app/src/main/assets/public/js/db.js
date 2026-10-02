@@ -634,13 +634,14 @@
 
     /* ----- staff & access (roster seeded; passkeys EMPTY until admin sets them) ----- */
     listStaff() { reload(); return state.staff.map(s => Object.assign({}, s)); },
-    addStaff({ name, email, phone, role, pin }) {
+    addStaff({ name, email, phone, role, pin, photo }) {
       return tx("staff", st => {
         name = shakeOn(name); if (!name) throw new Error("Full name is required");
         const r = STAFF_ROLES.includes(role) ? role : "cashier";
         const rec = {
           id: "STF-" + String(st.staff.length + 1).padStart(2, "0"),
           name, email: shakeOn(email), phone: shakeOn(phone), role: r,
+          photo: typeof photo === "string" ? photo : "",   // operator-uploaded portrait (data-url)
           pin: pin ? String(pin).trim() : "",              // may stay empty (set later via Edit Key)
           active: true, created_at: new Date().toISOString()
         };
@@ -655,7 +656,7 @@
     updateStaff(id, patch) {
       return tx("staff", st => {
         const s = byId(st.staff, id); if (!s) throw new Error("Staff not found");
-        ["name", "email", "phone", "role"].forEach(k => { if (patch[k] !== undefined) s[k] = patch[k]; });
+        ["name", "email", "phone", "role", "photo"].forEach(k => { if (patch[k] !== undefined) s[k] = patch[k]; });
         if (patch.active !== undefined) s.active = !!patch.active;
         return Object.assign({}, s);
       });

@@ -1491,6 +1491,68 @@
   /* ============================================================
      STAFF & PERMISSIONS
      ============================================================ */
+  /* ---- staff profile photos: uploaded from local files by the operator ---- */
+  function compressAvatar(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error("Please select an image file"));
+      if (file.type && !file.type.startsWith("image/")) return reject(new Error("Selected file is not an image (JPG, PNG, WebP)"));
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Could not read image file"));
+      reader.onload = ev => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("Could not decode image file"));
+        img.onload = () => {
+          try {
+            const S = 240, cv = document.createElement("canvas");
+            cv.width = S; cv.height = S;
+            const side = Math.min(img.width, img.height);
+            cv.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S);
+            resolve(cv.toDataURL("image/jpeg", 0.85));
+          } catch (e) { resolve(ev.target.result); }
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  function staffPhotoFieldHTML(current, name) {
+    return `
+    <div class="field">
+      <label>Profile photo <span class="fhint">— upload from local files / gallery</span></label>
+      <div class="pf-row">
+        <span class="pf-prev" id="pfPrev" style="background:${avColor(name || "S")}">${current
+          ? `<img src="${esc(current)}" alt="Staff photo" />` : `<span>${initials(name || "+")}</span>`}</span>
+        <div class="pf-actions">
+          <button type="button" class="btn sm" id="pfUpload">📁 Upload Photo</button>
+          <input type="file" id="pfFile" hidden accept="image/png, image/jpeg, image/jpg, image/webp, image/*" />
+          <button type="button" class="btn sm ghost" id="pfRemove" ${current ? "" : 'style="display:none"'}>Remove photo</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bindStaffPhoto(initial) {
+    modalBox._staffPhoto = initial || "";
+    const prev = $("#pfPrev"), up = $("#pfUpload"), file = $("#pfFile"), rm = $("#pfRemove");
+    if (!prev || !up || !file) return;
+    const paint = () => {
+      const ph = modalBox._staffPhoto;
+      prev.innerHTML = ph ? `<img src="${esc(ph)}" alt="Staff photo" />` : `<span>${initials(($("#msName") || $("#mpfName") || { value: "+" }).value || "+")}</span>`;
+      if (rm) rm.style.display = ph ? "inline-block" : "none";
+    };
+    up.addEventListener("click", () => file.click());
+    file.addEventListener("change", async () => {
+      if (!file.files || !file.files[0]) return;
+      const label = up.textContent;
+      try {
+        up.textContent = "⏳ Uploading…"; up.disabled = true;
+        modalBox._staffPhoto = await compressAvatar(file.files[0]);
+        paint();
+      } catch (err) { toast(err.message || "Could not read that photo", false); }
+      finally { up.textContent = label; up.disabled = false; file.value = ""; }
+    });
+    if (rm) rm.addEventListener("click", () => { modalBox._staffPhoto = ""; paint(); });
+  }
+
   /* ---- Floor Team & Keys v3: grouped card-grid team dashboard ---- */
   const TEAM_GROUPS = [
     { key: "mgmt", icon: "🛡️", title: "Store Management & Admins",
@@ -1530,6 +1592,7 @@
         const done = week7.length > 0 ? week7.length : 4 + (h % 15);
         p.pct = Math.min(100, Math.round((done / target) * 100));
         p.metric = `${done} / ${target} sales this week`;
+        p.metricShort = `${done}/${target}`;
         p.title = cashiers[0] && cashiers[0].id === s.id ? "Head Cashier" : "POS Operator";
         const soldToday = mySales.some(x => isTodayIso(x.created_at));
         if (!s.active)                       p.badge = { tone: "gray",  text: "Deactivated" };
@@ -1545,6 +1608,7 @@
         const done = dropsReal > 0 ? dropsReal : 6 + (h % 13);
         p.pct = Math.min(100, Math.round((done / target) * 100));
         p.metric = `${done} / ${target} orders fulfilled`;
+        p.metricShort = `${done}/${target}`;
         p.title = rc && rc.id === "RDR-1001" ? "Lead Dispatch Rider" : "Boda Courier";
         const zone = rc ? rc.zone : "Kampala";
         if (!s.active)                              p.badge = { tone: "gray", text: "Deactivated" };
@@ -1557,6 +1621,7 @@
         const hours = Math.min(40, 28 + (h % 11) + postings);
         p.pct = Math.min(100, Math.round((hours / 40) * 100));
         p.metric = `${hours}h / 40h logged this week`;
+        p.metricShort = `${hours}/40h`;
         p.title = s.role === "admin" ? "Store Owner & Admin" : "Store Manager";
         if (!s.active)          p.badge = { tone: "gray",  text: "Deactivated" };
         else if (p.isMe)        p.badge = { tone: "green", text: "Active on Ops Console" };
@@ -1571,11 +1636,13 @@
   function staffCardHTML(p, activeAdmins) {
     const dotTone = p.badge.tone === "green" ? "on" : p.badge.tone === "blue" ? "busy" : "";
     const barCls = p.pct >= 80 ? "" : p.pct >= 40 ? "mid" : "low";
+    const taskIco = !p.active ? "⛔" : p.badge.tone === "green" ? "✅" : p.badge.tone === "blue" ? "🛵" : "⏸";
     const lastAdmin = p.role === "admin" && activeAdmins <= 1 && p.active;
     return `
     <article class="staff-card ${p.active ? "" : "deactivated"}" data-staff-card="${esc(p.id)}">
       <div class="sc-head">
-        <span class="sc-ava" style="background:${avColor(p.name)}">${initials(p.name)}<span class="sc-dot ${dotTone}"></span></span>
+        <span class="sc-ava" style="background:${avColor(p.name)}">${p.photo
+          ? `<img src="${esc(p.photo)}" alt="" onerror="this.remove()" />` : initials(p.name)}<span class="sc-dot ${dotTone}"></span></span>
         <div class="sc-id">
           <div class="sc-name" title="${esc(p.name)}">${esc(p.name)}</div>
           <div class="sc-title" title="${esc(p.title)}">${esc(p.title)}${p.isMe ? " · You" : ""}</div>
@@ -1584,17 +1651,22 @@
         <div class="sc-menu-wrap">
           <button class="sc-menu-btn" type="button" data-team-menu="${esc(p.id)}" aria-haspopup="true" aria-label="Staff actions">…</button>
           <div class="sc-menu" role="menu">
+            <button type="button" data-edit-profile="${esc(p.id)}">👤 Edit Profile & Photo</button>
             <button type="button" data-key-staff="${esc(p.id)}">🔑 Edit Key / Passcode</button>
             <button type="button" data-change-role="${esc(p.id)}">🔁 Change Role</button>
             ${lastAdmin ? "" : `<button type="button" class="${p.active ? "danger" : ""}" data-toggle-staff="${esc(p.id)}">${p.active ? "⛔ Deactivate Account" : "✅ Reactivate Account"}</button>`}
           </div>
         </div>
       </div>
-      <div class="sc-progress">
-        <div class="sc-prog-top"><span class="lbl" title="${esc(p.metric)}">${esc(p.metric)}</span><strong>${p.pct}%</strong></div>
-        <div class="sc-bar"><i class="${barCls}" style="width:${p.pct}%"></i></div>
+      <div class="sc-prog-row" title="${esc(p.metric)}">
+        <span class="m">${esc(p.metricShort)}</span>
+        <span class="sc-bar"><i class="${barCls}" style="width:${p.pct}%"></i></span>
+        <strong class="pct">${p.pct}%</strong>
       </div>
-      <span class="sc-badge ${esc(p.badge.tone)}"><span class="bdot"></span><span class="btxt" title="${esc(p.badge.text)}">${esc(p.badge.text)}</span></span>
+      <div class="sc-task ${esc(p.badge.tone)}" title="${esc(p.badge.text)}">
+        <span class="t-ico" aria-hidden="true">${taskIco}</span>
+        <span class="t-txt">${esc(p.badge.text)}</span>
+      </div>
       <div class="sc-foot">
         <button class="btn" type="button" data-key-staff="${esc(p.id)}">🔑 Key Settings</button>
         <button class="btn" type="button" data-staff-activity="${esc(p.id)}">📊 View Activity</button>
@@ -1645,9 +1717,11 @@
     }).join("");
   }
   function staffModal() {
-    Keys.require(() => openModal(`
+    Keys.require(() => {
+      openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>Register Staff Member</h3>
+      ${staffPhotoFieldHTML("", "")}
       <div class="field"><label>Full name</label><input class="sel-full" id="msName" /></div>
       <div class="field"><label>Login email / username</label><input class="sel-full" id="msEmail" placeholder="name@adonaithrift.store" /></div>
       <div class="field"><label>Password<span class="fhint">min 6 chars — can stay blank while open access is on</span></label><input class="sel-full" id="msPin" /></div>
@@ -1658,7 +1732,27 @@
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" id="msSave">Save Staff Member</button>
-      </div>`));
+      </div>`);
+      bindStaffPhoto("");
+    });
+  }
+  function profileModal(id) {
+    const s = DB.listStaff().find(x => x.id === id); if (!s) return;
+    Keys.require(() => {
+      openModal(`
+      <button class="modal-x" data-close>×</button>
+      <h3>👤 Edit Profile — ${esc(s.name)}</h3>
+      <p class="muted small">Update this member's details. The photo is uploaded from the operator's local files or gallery.</p>
+      ${staffPhotoFieldHTML(s.photo || "", s.name)}
+      <div class="field"><label>Full name</label><input class="sel-full" id="mpfName" value="${esc(s.name)}" /></div>
+      <div class="field"><label>Login email / username</label><input class="sel-full" id="mpfEmail" value="${esc(s.email || "")}" /></div>
+      <div class="field"><label>Contact phone</label><input class="sel-full" id="mpfPhone" value="${esc(s.phone || "")}" placeholder="+256 7…" /></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn primary" data-save-profile="${esc(s.id)}">Save Profile</button>
+      </div>`);
+      bindStaffPhoto(s.photo || "");
+    });
   }
   function keyModal(id) {
     const s = DB.listStaff().find(x => x.id === id); if (!s) return;
@@ -1947,6 +2041,22 @@
       return;
     }
     const staffAct = t.closest("[data-staff-activity]"); if (staffAct) return staffActivityModal(staffAct.dataset.staffActivity);
+    const edProf = t.closest("[data-edit-profile]"); if (edProf) return profileModal(edProf.dataset.editProfile);
+    const svProf = t.closest("[data-save-profile]");
+    if (svProf) {
+      Keys.require(async () => {
+        try {
+          const name = $("#mpfName").value.trim();
+          if (!name) return toast("Full name is required", false);
+          await DB.updateStaff(svProf.dataset.saveProfile, {
+            name, email: $("#mpfEmail").value.trim(), phone: $("#mpfPhone").value.trim(),
+            photo: modalBox._staffPhoto || ""
+          });
+          closeModal(); toast("Staff profile updated");
+        } catch (err) { toast(err.message, false); }
+      });
+      return;
+    }
     const ks = t.closest("[data-key-staff]"); if (ks) return keyModal(ks.dataset.keyStaff);
     const ts = t.closest("[data-toggle-staff]");
     if (ts) {
@@ -1968,7 +2078,7 @@
       try {
         const rec = await DB.addStaff({
           name: $("#msName").value, email: $("#msEmail").value, phone: $("#msPhone").value,
-          role: $("#msRole").value, pin: $("#msPin").value
+          role: $("#msRole").value, pin: $("#msPin").value, photo: modalBox._staffPhoto || ""
         });
         if (!$("#msActive").checked) await DB.setStaffActive(rec.id, false);
         closeModal(); toast(`Staff account created for ${rec.name}`);
