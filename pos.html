@@ -86,10 +86,10 @@
   <!-- scan feedback banner -->
   <div class="scan-flash" id="scanFlash"></div>
 
-  <main class="pos-main">
+  <main class="pos-main pos-dashboard-layout">
 
     <!-- ============ LEFT: lookup + manual grid ============ -->
-    <section class="left">
+    <section class="left pos-catalog-section">
       <div class="lookup-row">
         <input id="barcodeInput" class="barcode-in" type="text" inputmode="text"
                placeholder="Scan barcode or type SKU (e.g. ADN-DEN-1001, ADN-MEN-1002)…" autocomplete="off" />
@@ -104,7 +104,7 @@
     </section>
 
     <!-- ============ RIGHT: live cart register (docks to bottom sheet on phones) ============ -->
-    <aside class="cart" id="posCart">
+    <aside class="cart pos-cart-sidebar" id="posCart">
       <button class="cart-toggle" id="cartToggle" type="button" aria-expanded="false">
         <span class="ct-count" id="ctCount">0</span>
         <span class="ct-label">Current Sale</span>
