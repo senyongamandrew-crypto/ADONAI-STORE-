@@ -10,8 +10,8 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const EMOJI = {
-    "Outerwear & Jackets": "🧥", "Tops & Shirts": "👕", "Dresses & Skirts": "👗",
-    "Pants & Jeans": "👖", "Shoes": "👟", "Accessories": "👜", "Children Wear": "🧒"
+    "Outerwear & Jackets": Icons.svg("shirt", "ico-cat"), "Tops & Shirts": Icons.svg("shirt", "ico-cat"), "Dresses & Skirts": Icons.svg("shopping-bag", "ico-cat"),
+    "Pants & Jeans": Icons.svg("ruler", "ico-cat"), "Shoes": Icons.svg("footprints", "ico-cat"), "Accessories": Icons.svg("shopping-bag", "ico-cat"), "Children Wear": Icons.svg("baby", "ico-cat")
   };
 
   /* ---------- header: cashier pill + network status ---------- */
@@ -131,7 +131,7 @@
       const win = window.open(siteUrl, "_system", "location=yes");
       if (!win) {
         const fallback = window.open(siteUrl, "_blank", "noopener,noreferrer");
-        if (!fallback) flash("🌐 Pop-up blocked — open manually: " + siteUrl, true);
+        if (!fallback) flash("Pop-up blocked — open manually: " + siteUrl, true);
       }
     } catch (e) {
       window.open(siteUrl, "_blank", "noopener,noreferrer");
@@ -212,7 +212,7 @@
   });
   $("#btnCamera").addEventListener("click", () => {
     openIntake();
-    flash("📁 Choose an item to update its photo or add a new piece from gallery/files.", true);
+    flash("Choose an item to update its photo or add a new piece from gallery/files.", true);
     setTimeout(() => openIntakeEditor(null), 350);
   });
   let installPromptEvt = null;
@@ -274,7 +274,7 @@
       const img = p.image_url ? `<img src="${esc(p.image_url)}" alt="" loading="lazy" />` : "";
       return `
       <button class="tile" data-tile="${esc(p.id)}" ${out ? "disabled" : ""}>
-        <span class="tile-img">${img || (EMOJI[p.category] || "🏷️")}</span>
+        <span class="tile-img">${img || (EMOJI[p.category] || Icons.svg("tag", "ico-cat"))}</span>
         <span class="tile-body">
           <span class="t-name">${esc(p.name)}</span>
           <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${esc(p.condition)}</span>
@@ -359,7 +359,7 @@
   function clampCart() {
     cart = cart.reduce((acc, l) => {
       const p = products.find(x => x.id === l.product_id);
-      if (!p || p.in_stock_count <= 0) { flash(`⚠ "${p ? p.name : l.product_id}" just became unavailable`, false); return acc; }
+      if (!p || p.in_stock_count <= 0) { flash(`"${p ? p.name : l.product_id}" just became unavailable`, false); return acc; }
       l.qty = Math.min(l.qty, p.in_stock_count);
       acc.push(l); return acc;
     }, []);
@@ -377,7 +377,7 @@
     const det = cartDetailed();
     const box = $("#cartLines");
     if (!det.length) {
-      box.innerHTML = `<p class="cart-empty">Cart is empty.<br/>Scan a barcode or tap an item. 🧾</p>`;
+      box.innerHTML = `<p class="cart-empty">Cart is empty.<br/>Scan a barcode or tap an item.</p>`;
     } else {
       box.innerHTML = det.map(({ l, p, amt }) => `
         <div class="cline">
@@ -390,7 +390,7 @@
               <span>${l.qty}</span>
               <button data-inc="${esc(p.id)}" ${l.qty >= p.in_stock_count ? "disabled" : ""}>+</button>
             </span>
-            <button class="rm" data-rm="${esc(p.id)}">✕ remove</button>
+            <button class="rm" data-rm="${esc(p.id)}">${Icons.svg("x", "ico-11")} remove</button>
           </span>
         </div>`).join("");
     }
@@ -432,7 +432,7 @@
   $("#btnClear").addEventListener("click", async () => {
     await Promise.allSettled(Array.from(lockQueues.values()));
     if (hasRemotePosAuth()) {
-      try { await DB.releaseInventoryLockOwner(lockOwner); } catch (error) { flash("⚠ Hold release will retry automatically", false); }
+      try { await DB.releaseInventoryLockOwner(lockOwner); } catch (error) { flash("Hold release will retry automatically", false); }
     }
     cart = [];
     renderCart();
@@ -752,12 +752,12 @@
       .filter(p => !intakeTerm || (p.name + " " + p.category + " " + p.barcode_id).toLowerCase().includes(intakeTerm))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
     intakeBox.innerHTML = `
-      <div class="intake-head"><h3>Inventory intake</h3><button class="btn sm ghost" data-intake-close>✕</button></div>
+      <div class="intake-head"><h3>Inventory intake</h3><button class="btn sm ghost" data-intake-close>${Icons.svg("x", "ico-14")}</button></div>
       <p class="intake-ed-note">Edit an item to replace its web photo with the real piece — changes go live on the storefront instantly.</p>
       <input class="in" id="inSearch" type="search" placeholder="Search stock…" value="${esc(intakeTerm)}" />
       <div class="intake-list">${list.map(p => `
         <div class="in-row">
-          <span class="in-thumb">${EMOJI[p.category] || "🏷️"}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span>
+          <span class="in-thumb">${EMOJI[p.category] || Icons.svg("tag", "ico-16")}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span>
           <div class="grow">
             <div class="in-name">${esc(p.name)}</div>
             <div class="in-meta">${esc(p.barcode_id)} · ${DB.ugx(p.selling_price)} · ${p.in_stock_count} in stock</div>
@@ -787,7 +787,7 @@
     }
     intakeImageState = { image_url: p ? (p.image_url || "") : "" };
     intakeBox.innerHTML = `
-      <div class="intake-head"><h3>${p ? "Edit item" : "New item"}</h3><button class="btn sm ghost" data-intake-close>✕</button></div>
+      <div class="intake-head"><h3>${p ? "Edit item" : "New item"}</h3><button class="btn sm ghost" data-intake-close>${Icons.svg("x", "ico-14")}</button></div>
       ${p ? `<p class="intake-ed-note">Barcode <code>${esc(p.barcode_id)}</code> — print &amp; stick it on the tag if it's missing.</p>`
           : `<p class="intake-ed-note">A barcode is generated automatically on save — print &amp; stick it, and the scanner finds this item.</p>`}
       ${Intake.imageFieldHTML(intakeImageState.image_url)}

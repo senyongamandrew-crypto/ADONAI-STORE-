@@ -62,7 +62,7 @@
                          : `<span>No photo</span>`}
           </div>
           <div class="imgfield-actions">
-            <button type="button" class="btn sm" data-img-upload>📁 Upload from Gallery / Files</button>
+            <button type="button" class="btn sm" data-img-upload><i data-icon="upload" data-size="14"></i> Upload from Gallery / Files</button>
             <input type="file" accept="image/png, image/jpeg, image/jpg, image/webp, image/*" hidden data-img-file />
             <button type="button" class="btn sm ghost" data-img-remove ${currentUrl ? "" : 'style="display:none"'}>Remove photo</button>
           </div>
@@ -102,9 +102,9 @@
       fileInput.addEventListener("change", async () => {
         if (!fileInput.files || !fileInput.files[0]) return;
         const file = fileInput.files[0];
-        const prevText = uploadBtn.textContent;
+        const prevHtml = uploadBtn.innerHTML;
         try {
-          uploadBtn.textContent = "⏳ Uploading…";
+          uploadBtn.textContent = "Uploading…";
           uploadBtn.disabled = true;
           const dataUrl = await compressImage(file);
           state.image_url = dataUrl;
@@ -112,7 +112,7 @@
         } catch (e) {
           alert(e.message || "Could not read that photo");
         } finally {
-          uploadBtn.textContent = prevText;
+          uploadBtn.innerHTML = prevHtml;
           uploadBtn.disabled = false;
           fileInput.value = "";
         }

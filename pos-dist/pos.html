@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=2.7" />
+<link rel="stylesheet" href="css/pos.css?v=5.1" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -26,7 +26,7 @@
       <div class="brand">
         <img class="pos-brand-logo" src="assets/adonai-logo-horizontal-light.svg" alt="Adonai Store" width="180" height="42" style="max-height:40px;width:auto;display:block;" />
       </div>
-      <button class="sb-close-btn" id="closePosSidebar" type="button" aria-label="Close menu">✕</button>
+      <button class="sb-close-btn" id="closePosSidebar" type="button" aria-label="Close menu"><i data-icon="x" data-size="15"></i></button>
     </div>
     <div class="brand-meta">
       <span>Kampala, Uganda</span>
@@ -34,17 +34,17 @@
     </div>
 
     <nav class="nav" id="posNavList">
-      <a class="nav-item active" href="pos.html" title="Open the cashier register"><span class="nav-ico">📥</span><span>POS Register</span></a>
-      <a class="nav-item" href="admin.html?view=sales" data-console-view="sales"><span class="nav-ico">📦</span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
-      <a class="nav-item" href="admin.html?view=inventory" data-console-view="inventory"><span class="nav-ico">🔖</span><span>Inventory Rack</span></a>
-      <a class="nav-item" href="admin.html?view=intake" data-console-view="intake"><span class="nav-ico">➕</span><span>Catalog Intake</span></a>
-      <a class="nav-item" href="admin.html?view=customers" data-console-view="customers"><span class="nav-ico">👥</span><span>Customer Book</span></a>
-      <a class="nav-item" href="admin.html?view=dispatch" data-console-view="dispatch"><span class="nav-ico">🛵</span><span>Boda Riders &amp; Dispatch</span></a>
-      <a class="nav-item" href="admin.html?view=overview" data-console-view="overview"><span class="nav-ico">📊</span><span>Sales Analytics</span></a>
-      <a class="nav-item" href="admin.html?view=payments" data-console-view="payments"><span class="nav-ico">📒</span><span>Financial Ledgers</span></a>
-      <a class="nav-item" href="admin.html?view=staff" data-console-view="staff"><span class="nav-ico">🔑</span><span>Staff &amp; Permissions</span></a>
-      <a class="nav-item" href="admin.html?view=settings" data-console-view="settings"><span class="nav-ico">⚙️</span><span>Store Settings</span></a>
-      <button class="nav-item store-nav-item" id="btnSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico">🌐</span><span>Open Live Web Storefront ↗</span></button>
+      <a class="nav-item active" href="pos.html" title="Open the cashier register"><span class="nav-ico"><i data-icon="inbox"></i></span><span>POS Register</span></a>
+      <a class="nav-item" href="admin.html?view=sales" data-console-view="sales"><span class="nav-ico"><i data-icon="package" class="ico-lime"></i></span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
+      <a class="nav-item" href="admin.html?view=inventory" data-console-view="inventory"><span class="nav-ico"><i data-icon="boxes"></i></span><span>Inventory Rack</span></a>
+      <a class="nav-item" href="admin.html?view=intake" data-console-view="intake"><span class="nav-ico"><i data-icon="plus-circle"></i></span><span>Catalog Intake</span></a>
+      <a class="nav-item" href="admin.html?view=customers" data-console-view="customers"><span class="nav-ico"><i data-icon="users"></i></span><span>Customer Book</span></a>
+      <a class="nav-item" href="admin.html?view=dispatch" data-console-view="dispatch"><span class="nav-ico"><i data-icon="truck"></i></span><span>Boda Riders &amp; Dispatch</span></a>
+      <a class="nav-item" href="admin.html?view=overview" data-console-view="overview"><span class="nav-ico"><i data-icon="bar-chart-3"></i></span><span>Sales Analytics</span></a>
+      <a class="nav-item" href="admin.html?view=payments" data-console-view="payments"><span class="nav-ico"><i data-icon="book-open"></i></span><span>Financial Ledgers</span></a>
+      <a class="nav-item" href="admin.html?view=staff" data-console-view="staff"><span class="nav-ico"><i data-icon="key-round" class="ico-lime"></i></span><span>Staff &amp; Permissions</span></a>
+      <a class="nav-item" href="admin.html?view=settings" data-console-view="settings"><span class="nav-ico"><i data-icon="settings"></i></span><span>Store Settings</span></a>
+      <button class="nav-item store-nav-item" id="btnSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
     </nav>
 
     <div class="sidebar-foot">
@@ -66,10 +66,10 @@
   <!-- ============ CONSOLE TOPBAR (reference register) ============ -->
   <header class="pos-head">
     <div class="pillrow">
-      <button class="pill" id="btnPosMenu" type="button" title="Open Navigation Menu">☰ Menu</button>
+      <button class="pill" id="btnPosMenu" type="button" title="Open Navigation Menu"><i data-icon="menu" data-size="15"></i> Menu</button>
     </div>
     <div class="head-right">
-      <button class="btn ghost dark" id="btnIntake" title="Add items & photos to inventory">📥 Intake</button>
+      <button class="btn ghost dark" id="btnIntake" title="Add items & photos to inventory"><i data-icon="inbox" data-size="15"></i> Intake</button>
       <span class="me-pill" id="mePill"><span class="avatar">S</span><span id="meName">Staff</span><span class="role" id="meRole">open access</span></span>
     </div>
   </header>
@@ -79,7 +79,7 @@
     <p class="kicker">IN-STORE POINT OF SALE</p>
     <h1>Cashier Register (UGX)</h1>
     <div class="pos-title-links">
-      <a class="pill" href="admin.html?view=inventory">👋 Stock Management &amp; Delete →</a>
+      <a class="pill" href="admin.html?view=inventory"><i data-icon="sliders-horizontal" data-size="14"></i> Stock Management &amp; Delete →</a>
     </div>
   </div>
 
@@ -94,12 +94,12 @@
         <input id="barcodeInput" class="barcode-in" type="text" inputmode="text"
                placeholder="Scan barcode or type SKU (e.g. ADN-DEN-1001, ADN-MEN-1002)…" autocomplete="off" />
         <button class="lookup-btn" id="btnLookup" title="Look up scanned code">Lookup</button>
-        <button class="cam-btn" id="btnCamera" title="Upload item photo from gallery or local files">📁 Upload Photo</button>
+        <button class="cam-btn" id="btnCamera" title="Upload item photo from gallery or local files"><i data-icon="upload" data-size="14"></i> Upload Photo</button>
       </div>
 
-      <div class="drow" id="posDemos"></div>
-      <div class="cat-tabs" id="posCats"></div>
-      <input id="gridSearch" class="grid-search" type="search" placeholder="Filter by brand, size, color, keyword…" />
+      <div class="drow category-pill-row" id="posDemos"></div>
+      <div class="cat-tabs category-pill-row" id="posCats"></div>
+      <input id="gridSearch" class="grid-search pos-search-input" type="search" placeholder="Filter by brand, size, color, keyword…" />
       <div class="tiles" id="tileGrid"></div>
     </section>
 
@@ -115,13 +115,13 @@
         <div class="cart-head">
           <h3>Current Sale</h3>
           <div class="cart-head-actions">
-            <button class="btn sm ghost" id="btnReprint" title="Reprint last receipt">🖨 Last</button>
+            <button class="btn sm ghost" id="btnReprint" title="Reprint last receipt"><i data-icon="printer" data-size="13"></i> Last</button>
             <button class="btn sm ghost" id="btnClear">Clear</button>
           </div>
         </div>
 
         <div class="cart-lines" id="cartLines">
-          <p class="cart-empty">Cart is empty.<br />Scan a barcode or tap an item. 🧾</p>
+          <p class="cart-empty">Cart is empty.<br />Scan a barcode or tap an item.</p>
         </div>
 
         <div class="cart-summary">
@@ -148,7 +148,7 @@
       <!-- Walk-in Customer Details (for receipt & customer book) -->
       <div class="pos-cust-block">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <label class="fld-label" style="margin:0; font-weight:700; color:var(--ink);">👤 Customer Details (Printed on Receipt)</label>
+          <label class="fld-label" style="margin:0; font-weight:700; color:var(--ink);"><i data-icon="user" data-size="13"></i> Customer Details (Printed on Receipt)</label>
           <span style="font-size:11px; color:var(--muted); font-weight:600;">* Required</span>
         </div>
         <div class="grid2">
@@ -174,9 +174,9 @@
       </div>
 
       <div class="tender-tabs">
-        <button class="ttab active" data-tender="cash">💵 Cash</button>
-        <button class="ttab mtn" data-tender="mtn">📱 MTN MoMo</button>
-        <button class="ttab airtel" data-tender="airtel">📱 Airtel Money</button>
+        <button class="ttab active" data-tender="cash"><i data-icon="banknote" data-size="15"></i> Cash</button>
+        <button class="ttab mtn" data-tender="mtn"><i data-icon="smartphone" data-size="15"></i> MTN MoMo</button>
+        <button class="ttab airtel" data-tender="airtel"><i data-icon="smartphone" data-size="15"></i> Airtel Money</button>
       </div>
 
       <!-- Cash pane -->
@@ -207,7 +207,7 @@
         <input id="momoRef" class="in" type="text" placeholder="MoMo / Airtel transaction ID" />
         <label class="verify">
           <input id="momoVerified" type="checkbox" />
-          <span>✅ I confirm the exact amount has been received on the store phone</span>
+          <span><i data-icon="check-circle" data-size="14"></i> I confirm the exact amount has been received on the store phone</span>
         </label>
       </div>
 
@@ -223,7 +223,7 @@
     <div class="receipt-modal">
       <div class="receipt-preview" id="receiptPreview"></div>
       <div class="tender-actions">
-        <button class="btn ghost" id="btnReceiptPrint">🖨 Print again</button>
+        <button class="btn ghost" id="btnReceiptPrint"><i data-icon="printer" data-size="14"></i> Print again</button>
         <button class="btn primary big" id="btnNewSale">New sale ⏎</button>
       </div>
     </div>
@@ -244,9 +244,10 @@
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
 <script src="js/display-size.js?v=1.0"></script>
+<script src="js/icons.js?v=1.0"></script>
 <script src="js/db.js?v=3.1"></script>
 <script src="js/auth.js?v=2.6"></script>
-<script src="js/intake.js?v=3.0"></script>
-<script src="js/pos.js?v=3.2"></script>
+<script src="js/intake.js?v=5.0"></script>
+<script src="js/pos.js?v=5.0"></script>
 </body>
 </html>

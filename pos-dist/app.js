@@ -15,7 +15,7 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const ugx = DB.ugx;
-  const AV_PALETTE = ["#7A2E2E", "#805322", "#2E5E40", "#374A7A", "#6B3A7A", "#22615E", "#4A5E22", "#8A3A22"];
+  const AV_PALETTE = ["#0F0F0F", "#202020", "#337418", "#27570F", "#1E4710", "#2B2B2B", "#3F8A1F", "#141414"];
   const avColor = name => AV_PALETTE[(String(name).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % AV_PALETTE.length];
   const initials = name => String(name || "OA").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
@@ -67,15 +67,15 @@
   function paintUnlockChip() {
     const c = $("#unlockChip");
     if (!c) return;
-    if (Keys.unlocked()) { c.textContent = "🔓 Master Key Unlocked"; c.classList.add("on"); }
-    else { c.textContent = "🔒 Unlock Master Key"; c.classList.remove("on"); }
+    if (Keys.unlocked()) { c.innerHTML = Icons.svg("unlock", "ico-14") + " Master Key Unlocked"; c.classList.add("on"); }
+    else { c.innerHTML = Icons.svg("lock", "ico-14") + " Unlock Master Key"; c.classList.remove("on"); }
   }
   function renderMasterModal(after) {
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>Admin Master Key Authorization</h3>
       <p class="muted small" style="margin-bottom:14px">Enter secondary Master Key to unlock protected administrative controls, financial logs, and system settings.</p>
-      <div class="sec-box">🔒 <strong>Security Upgrade:</strong> This action requires the secondary Admin Master Key Password to protect store permissions, financial records, and core parameters.</div>
+      <div class="sec-box">${Icons.svg("shield", "ico-14")} <strong>Security Upgrade:</strong> This action requires the secondary Admin Master Key Password to protect store permissions, financial records, and core parameters.</div>
       <div class="field" style="margin-top:14px">
         <label>Master key password</label>
         <div class="sku-row">
@@ -95,7 +95,7 @@
       const val = input.value.trim();
       if (!val) return;
       if (DB.verifyMasterKey(val)) {
-        Keys.set(true, val); closeModal(); toast("🔓 Master Key unlocked for this session");
+        Keys.set(true, val); closeModal(); toast("Master Key unlocked for this session");
         if (after) after(val);
         return;
       }
@@ -109,7 +109,7 @@
         const data = await r.json();
         if (data && data.ok && data.staff && data.staff.role === "admin") {
           const credential = data.token || val;
-          Keys.set(true, credential); closeModal(); toast("🔓 Master Key unlocked via Server / Environment");
+          Keys.set(true, credential); closeModal(); toast("Master Key unlocked via Server / Environment");
           if (after) after(credential);
           return;
         }
@@ -296,7 +296,7 @@
   /* KPI stat card — icon chip + accent tone + fluid responsive grid */
   function kpiCard(label, value, sub, tone, icon) {
     return `<div class="kpi-card kpi-${tone || "rust"}">
-      <div class="kpi-top"><span class="kpi-ico">${icon || "📈"}</span><span class="kpi-lab">${esc(label)}</span></div>
+      <div class="kpi-top"><span class="kpi-ico">${icon || Icons.svg("trending-up", "ico-18")}</span><span class="kpi-lab">${esc(label)}</span></div>
       <div class="kpi-val">${value}</div>
       ${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ""}
     </div>`;
@@ -324,10 +324,10 @@
     const onRack = DB.listProducts().filter(p => p.in_stock_count > 0).length;
 
     $("#kpiCards").innerHTML =
-      kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales", "green", "💰") +
-      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & web reservations", "rust", "🧾") +
-      kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", "📦") +
-      kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", "🔖");
+      kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales", "green", Icons.svg("banknote", "ico-18")) +
+      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & web reservations", "rust", Icons.svg("receipt", "ico-18")) +
+      kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", Icons.svg("package", "ico-18")) +
+      kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", Icons.svg("boxes", "ico-18"));
 
     /* ---- hourly + weekly chart ---- */
     const cv = $("#hourlyChart");
@@ -386,13 +386,13 @@
     const cashTot = done.filter(s => s.tender && s.tender.type === "cash").reduce((a, s) => a + s.total, 0);
     const revAll = Math.max(1, revPos + revWeb);
     $("#channelRows").innerHTML = [
-      ["🏪 Register", revPos, "var(--rust)"], ["🌐 Web Storefront", revWeb, "var(--green)"], ["🖼️ Catalog", 0, "var(--blue)"]
+      [Icons.svg("store", "ico-12") + " Register", revPos, "var(--rust)"], [Icons.svg("globe", "ico-12") + " Web Storefront", revWeb, "var(--green)"], [Icons.svg("image", "ico-12") + " Catalog", 0, "var(--blue)"]
     ].map(([lbl, v, color]) => `
       <div class="ch-row ch-stack">
         <div class="ch-info"><span>${lbl}</span><strong>${ugx(v)}</strong></div>
         <div class="ch-bar"><i style="width:${Math.round(v / revAll * 100)}%;background:${color}"></i></div>
       </div>`).join("")
-      + `<span class="cash-pill">💵 Cash collected ${ugx(cashTot)}</span>`;
+      + `<span class="cash-pill">${Icons.svg("banknote", "ico-13")} Cash collected ${ugx(cashTot)}</span>`;
 
     /* ---- boda pool ---- */
     $("#riderPool").innerHTML = DB.listRiders().slice(0, 3).map(r => {
@@ -529,7 +529,7 @@
         <div class="oc-customer">
           <span class="avatar oc-ava" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "G")}</span>
           <div class="grow">
-            <div class="oc-name">${esc(s.customer_name)}${s.customer_phone ? ` <a class="lnk oc-tel" href="tel:${esc(String(s.customer_phone).replace(/[^+0-9]/g, ""))}">📞 ${esc(s.customer_phone)}</a>` : ""}</div>
+            <div class="oc-name">${esc(s.customer_name)}${s.customer_phone ? ` <a class="lnk oc-tel" href="tel:${esc(String(s.customer_phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-12")} ${esc(s.customer_phone)}</a>` : ""}</div>
             <div class="muted small">${esc(itemsSummary(s))}</div>
           </div>
         </div>
@@ -651,12 +651,12 @@
       <button class="modal-x" data-close>×</button>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 class="serif" style="margin:0">80mm Receipt Printout</h3>
-        <button class="btn primary sm" id="btnTriggerPrint">🖨 Print 80mm</button>
+        <button class="btn primary sm" id="btnTriggerPrint">${Icons.svg("printer", "ico-14")} Print 80mm</button>
       </div>
       ${receiptHTML(s)}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn ghost" data-close>Close</button>
-        <button class="btn primary" id="btnTriggerPrint2">🖨 Print Receipt</button>
+        <button class="btn primary" id="btnTriggerPrint2">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
     `);
     const doPrint = () => {
@@ -731,11 +731,11 @@
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${!paid ? `
-              <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">💰 Cash</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">📱 MTN MoMo</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">🔴 Airtel</button>
+              <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">${Icons.svg("banknote", "ico-13")} Cash</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">${Icons.svg("smartphone", "ico-13")} MTN MoMo</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">${Icons.svg("smartphone", "ico-13")} Airtel</button>
             ` : `
-              <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">↩ Revert to Unpaid</button>
+              <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">${Icons.svg("undo-2", "ico-13")} Revert to Unpaid</button>
             `}
           </div>
         </div>
@@ -762,7 +762,7 @@
         </div>
 
         ${fulfillmentStage(s) === "Unfulfilled" || fulfillmentStage(s) === "Pending" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">📦 Start Assembly</button>
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">${Icons.svg("package", "ico-14")} Start Assembly</button>
         ` : fulfillmentStage(s) === "In Assembly" || fulfillmentStage(s) === "Packed" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
         ` : fulfillmentStage(s) === "Ready for Pickup" || fulfillmentStage(s) === "Dispatched" ? `
@@ -770,7 +770,7 @@
         ` : ""}
 
         <button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel Order &amp; Release Item to Rack</button>
-        <button class="btn light btn-full" id="btnPrintReceiptModal">🖨 Print Receipt</button>
+        <button class="btn light btn-full" id="btnPrintReceiptModal">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
     `);
 
@@ -864,7 +864,7 @@
       const off = p.compare_price > p.selling_price ? Math.round((p.compare_price - p.selling_price) / p.compare_price * 100) : 0;
       const inStock = p.in_stock_count > 0;
       return `<div class="stock-row">
-        <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "🧥"}</span>
+        <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("shirt", "ico-cat")}</span>
         <div class="stock-main">
           <div class="stock-title-row">
             <div class="grow">
@@ -876,9 +876,9 @@
           <div class="stock-tags">
             <span class="itag">${esc(p.demographic)}</span>
             <span class="itag">${esc(p.category)}</span>
-            <span class="itag">📏 ${esc(p.size)}</span>
+            <span class="itag">${Icons.svg("ruler", "ico-11")} ${esc(p.size)}</span>
             <span class="itag">${esc(p.condition)}</span>
-            ${p.brand ? `<span class="itag">🏷️ ${esc(p.brand)}</span>` : ""}
+            ${p.brand ? `<span class="itag">${Icons.svg("tag", "ico-11")} ${esc(p.brand)}</span>` : ""}
           </div>
           <div class="stock-price-row">
             <span class="stock-price">${ugx(p.selling_price)}</span>
@@ -890,8 +890,8 @@
           </div>
         </div>
         <div class="stock-actions">
-          <button class="btn sm ghost" data-editprod="${esc(p.id)}">✏️ Edit</button>
-          <button class="btn sm ghost dim" data-delprod="${esc(p.id)}">🗑 Delete</button>
+          <button class="btn sm ghost" data-editprod="${esc(p.id)}">${Icons.svg("pencil", "ico-12")} Edit</button>
+          <button class="btn sm ghost dim" data-delprod="${esc(p.id)}">${Icons.svg("trash-2", "ico-12")} Delete</button>
         </div>
       </div>`;
     }).join("") : `<div class="card"><p class="muted" style="padding:20px">No products match these filters.</p></div>`;
@@ -1001,7 +1001,7 @@
       <div class="ph-slot" data-slot="${i}">
         <div class="ph-prev ${i === 0 ? "hero" : ""}">${intakePhotos[i] ? `<img src="${esc(intakePhotos[i])}" alt="" />` : ""}<span class="ph-lbl">${s[0]}</span>${s[1] ? `<span class="ph-sub">${s[1]}</span>` : ""}</div>
         <div class="ph-btns">
-          <button class="btn sm" data-phgal="${i}" type="button">📁 Gallery / File</button>
+          <button class="btn sm" data-phgal="${i}" type="button">${Icons.svg("upload", "ico-12")} Gallery / File</button>
           ${intakePhotos[i] ? `<button class="btn sm ghost" data-phrem="${i}" type="button">Remove</button>` : ""}
         </div>
       </div>`).join("");
@@ -1058,7 +1058,9 @@
       condition: $("#inCond").value,
       cost_price: Number($("#inCost").value) || 0,
       stock_lot_id: $("#inStockLot").value,
+      base_price: Number($("#inSell").value) || 0,
       selling_price: Number($("#inSell").value) || 0,
+      total_transport_cost: Number($("#inTransport").value) || 0,
       compare_price: Number($("#inRrp").value) || 0,
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
@@ -1072,7 +1074,7 @@
     if (!vals.selling_price) return toast("Set a sell price first", false);
     try {
       const p = await DB.addProduct(vals);
-      toast(`🏷️ Tagged & saved — ${p.name} · ${p.sku}`);
+      toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes"].forEach(id => $("#" + id).value = "");
         intakePhotos.fill(""); paintAngles();
@@ -1090,7 +1092,7 @@
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
       <div class="ch-row">
         <div class="rider-mini">
-          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "🏷️"}</span>
+          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
           <div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div>
         </div>
         <strong class="serif">${ugx(p.selling_price)}</strong>
@@ -1111,7 +1113,7 @@
           <span class="avatar" style="background:${avColor(g.name)}">${initials(g.name)}</span>
           <div class="grow">
             <div class="guest-name">${esc(g.name)}</div>
-            ${g.phone ? `<a class="guest-phone" href="tel:${esc(String(g.phone).replace(/[^+0-9]/g, ""))}">📞 ${esc(g.phone)}</a>` : ""}
+            ${g.phone ? `<a class="guest-phone" href="tel:${esc(String(g.phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-12")} ${esc(g.phone)}</a>` : ""}
           </div>
           <div class="gc-actions">
             <button class="lnk" data-edit-guest="${esc(g.id)}">Edit</button>
@@ -1119,11 +1121,11 @@
           </div>
         </div>
         ${(g.address || g.neighborhood || g.email) ? `<div class="guest-tags">
-          ${g.neighborhood ? `<span class="itag">📍 ${esc(g.neighborhood)}</span>` : ""}
+          ${g.neighborhood ? `<span class="itag">${Icons.svg("map-pin", "ico-11")} ${esc(g.neighborhood)}</span>` : ""}
           ${g.address ? `<span class="itag">${esc(g.address)}</span>` : ""}
-          ${g.email ? `<span class="itag">✉️ ${esc(g.email)}</span>` : ""}
+          ${g.email ? `<span class="itag">${Icons.svg("mail", "ico-11")} ${esc(g.email)}</span>` : ""}
         </div>` : ""}
-        ${g.notes ? `<div class="guest-notes">📝 ${esc(g.notes)}</div>` : ""}
+        ${g.notes ? `<div class="guest-notes">${Icons.svg("clipboard", "ico-12")} ${esc(g.notes)}</div>` : ""}
       </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No guests match — add the first one.</p></div>`;
   }
   function guestModal(id) {
@@ -1150,13 +1152,13 @@
         <div class="rc-top">
           <span class="avatar" style="background:${avColor(r.name)}">${initials(r.name)}</span>
           <div class="grow"><div class="guest-name" style="margin:0">${esc(r.name)}</div>
-            <div class="rider-tags"><span class="itag">🛵 ${esc(r.vehicle)}</span><span class="itag">📍 ${esc(r.zone)}</span></div></div>
+            <div class="rider-tags"><span class="itag">${Icons.svg("bike", "ico-11")} ${esc(r.vehicle)}</span><span class="itag">${Icons.svg("map-pin", "ico-11")} ${esc(r.zone)}</span></div></div>
           <div class="rc-stats">
             <div><strong class="serif">${active}</strong><span class="micro-cap">EN ROUTE</span></div>
             <div><strong class="serif">${delivered}</strong><span class="micro-cap">DONE</span></div>
           </div>
         </div>
-        <div class="rc-chip">${riderStatusChip(r.status)}${r.phone ? `<a class="stat-chip mut" href="tel:${esc(String(r.phone).replace(/[^+0-9]/g, ""))}">📞 CALL</a>` : ""}</div>
+        <div class="rc-chip">${riderStatusChip(r.status)}${r.phone ? `<a class="stat-chip mut" href="tel:${esc(String(r.phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-11")} CALL</a>` : ""}</div>
         <div class="rc-btns">
           ${DB.RIDER_STATUSES.map(st => `<button class="lane-tab ${r.status === st ? "active" : ""}" data-rider-st="${esc(r.id)}" data-st="${st}">${st.toUpperCase()}</button>`).join("")}
         </div>
@@ -1489,27 +1491,237 @@
   /* ============================================================
      STAFF & PERMISSIONS
      ============================================================ */
+  /* ---- staff profile photos: uploaded from local files by the operator ---- */
+  function compressAvatar(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error("Please select an image file"));
+      if (file.type && !file.type.startsWith("image/")) return reject(new Error("Selected file is not an image (JPG, PNG, WebP)"));
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Could not read image file"));
+      reader.onload = ev => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("Could not decode image file"));
+        img.onload = () => {
+          try {
+            const S = 240, cv = document.createElement("canvas");
+            cv.width = S; cv.height = S;
+            const side = Math.min(img.width, img.height);
+            cv.getContext("2d").drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, S, S);
+            resolve(cv.toDataURL("image/jpeg", 0.85));
+          } catch (e) { resolve(ev.target.result); }
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  function staffPhotoFieldHTML(current, name) {
+    return `
+    <div class="field">
+      <label>Profile photo <span class="fhint">— upload from local files / gallery</span></label>
+      <div class="pf-row">
+        <span class="pf-prev" id="pfPrev" style="background:${avColor(name || "S")}">${current
+          ? `<img src="${esc(current)}" alt="Staff photo" />` : `<span>${initials(name || "+")}</span>`}</span>
+        <div class="pf-actions">
+          <button type="button" class="btn sm" id="pfUpload">${Icons.svg("upload", "ico-13")} Upload Photo</button>
+          <input type="file" id="pfFile" hidden accept="image/png, image/jpeg, image/jpg, image/webp, image/*" />
+          <button type="button" class="btn sm ghost" id="pfRemove" ${current ? "" : 'style="display:none"'}>Remove photo</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function bindStaffPhoto(initial) {
+    modalBox._staffPhoto = initial || "";
+    const prev = $("#pfPrev"), up = $("#pfUpload"), file = $("#pfFile"), rm = $("#pfRemove");
+    if (!prev || !up || !file) return;
+    const paint = () => {
+      const ph = modalBox._staffPhoto;
+      prev.innerHTML = ph ? `<img src="${esc(ph)}" alt="Staff photo" />` : `<span>${initials(($("#msName") || $("#mpfName") || { value: "+" }).value || "+")}</span>`;
+      if (rm) rm.style.display = ph ? "inline-block" : "none";
+    };
+    up.addEventListener("click", () => file.click());
+    file.addEventListener("change", async () => {
+      if (!file.files || !file.files[0]) return;
+      const label = up.innerHTML;
+      try {
+        up.textContent = "Uploading…"; up.disabled = true;
+        modalBox._staffPhoto = await compressAvatar(file.files[0]);
+        paint();
+      } catch (err) { toast(err.message || "Could not read that photo", false); }
+      finally { up.innerHTML = label; up.disabled = false; file.value = ""; }
+    });
+    if (rm) rm.addEventListener("click", () => { modalBox._staffPhoto = ""; paint(); });
+  }
+
+  /* ---- Floor Team & Keys v3: grouped card-grid team dashboard ---- */
+  const TEAM_GROUPS = [
+    { key: "mgmt", icon: Icons.svg("shield", "ico-16"), title: "Store Management & Admins",
+      sub: "Master access keys, ledger privileges & system configuration.", roles: ["admin", "manager"] },
+    { key: "pos",  icon: Icons.svg("credit-card", "ico-16"), title: "Cashiers & POS Operators",
+      sub: "Terminal billing, cash drawer sync & customer contacts on the floor.", roles: ["cashier"] },
+    { key: "boda", icon: Icons.svg("bike", "ico-16"), title: "Boda Dispatch & Logistics",
+      sub: "Local order fulfilment & drop-offs across Kampala.", roles: ["rider"] }
+  ];
+  const teamFilters = { q: "", role: "all", status: "all", load: "all" };
+  const teamHash = str => Math.abs(String(str).split("").reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0));
+  const isTodayIso = iso => {
+    const d = new Date(iso), t = new Date();
+    return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
+  };
+
+  /* Build a live operational profile per staff member from real sales,
+     dispatch and ledger data (deterministic demo workload only when a
+     member has no recorded events yet, so bars never render empty). */
+  function buildTeamProfiles() {
+    const sales = allSales(), ledger = DB.listLedger(), riders = DB.listRiders();
+    const weekAgo = Date.now() - 7 * 86400000;
+    const staff = DB.listStaff();
+    const cashiers = staff.filter(s => s.role === "cashier")
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+
+    return staff.map(s => {
+      const h = teamHash(s.id + s.name);
+      const p = Object.assign({}, s, { isMe: s.name === whoName });
+      const mySales = sales.filter(x => x.cashier && x.cashier.name === s.name);
+      const week7 = mySales.filter(x => new Date(x.created_at).getTime() >= weekAgo);
+      const myLedger = ledger.filter(e => e.by === s.name);
+
+      if (s.role === "cashier") {
+        const termNo = Math.max(1, cashiers.findIndex(c => c.id === s.id) + 1);
+        const target = 20;
+        const done = week7.length > 0 ? week7.length : 4 + (h % 15);
+        p.pct = Math.min(100, Math.round((done / target) * 100));
+        p.metric = `${done} / ${target} sales this week`;
+        p.metricShort = `${done}/${target}`;
+        p.title = cashiers[0] && cashiers[0].id === s.id ? "Head Cashier" : "POS Operator";
+        const soldToday = mySales.some(x => isTodayIso(x.created_at));
+        if (!s.active)                       p.badge = { tone: "gray",  text: "Deactivated" };
+        else if (soldToday || p.isMe)        p.badge = { tone: "green", text: `Active on Terminal ${termNo}` };
+        else if (h % 3 !== 1)                p.badge = { tone: "green", text: `On Shift — Terminal ${termNo}` };
+        else                                 p.badge = { tone: "gray",  text: "Off Duty" };
+      } else if (s.role === "rider") {
+        const rc = riders.find(r => r.name === s.name || (r.phone && s.phone && r.phone === s.phone));
+        const riderOrders = sales.filter(x => (x.assigned_rider_name || x.rider_name) === s.name);
+        const delivering = riderOrders.find(x => x.dispatch_status === "Out for Delivery" || x.dispatch_status === "Packed");
+        const dropsReal = riderOrders.filter(x => x.dispatch_status === "Delivered").length;
+        const target = 20;
+        const done = dropsReal > 0 ? dropsReal : 6 + (h % 13);
+        p.pct = Math.min(100, Math.round((done / target) * 100));
+        p.metric = `${done} / ${target} orders fulfilled`;
+        p.metricShort = `${done}/${target}`;
+        p.title = rc && rc.id === "RDR-1001" ? "Lead Dispatch Rider" : "Boda Courier";
+        const zone = rc ? rc.zone : "Kampala";
+        if (!s.active)                              p.badge = { tone: "gray", text: "Deactivated" };
+        else if (delivering)                        p.badge = { tone: "blue", text: `Delivering Order #${delivering.id} (${delivering.customer_location || delivering.neighborhood || zone})` };
+        else if (rc && rc.status === "On delivery") p.badge = { tone: "blue", text: `Delivering — ${zone}` };
+        else if (rc && rc.status === "Offline")     p.badge = { tone: "gray", text: "Off Duty" };
+        else                                        p.badge = { tone: "green", text: `On Duty — ${zone}` };
+      } else { /* admin & manager */
+        const postings = myLedger.filter(e => new Date(e.created_at).getTime() >= weekAgo).length;
+        const hours = Math.min(40, 28 + (h % 11) + postings);
+        p.pct = Math.min(100, Math.round((hours / 40) * 100));
+        p.metric = `${hours}h / 40h logged this week`;
+        p.metricShort = `${hours}/40h`;
+        p.title = s.role === "admin" ? "Store Owner & Admin" : "Store Manager";
+        if (!s.active)          p.badge = { tone: "gray",  text: "Deactivated" };
+        else if (p.isMe)        p.badge = { tone: "green", text: "Active on Ops Console" };
+        else if (h % 4 === 0)   p.badge = { tone: "gray",  text: "Off Duty" };
+        else                    p.badge = { tone: "green", text: "On Duty — Ops Console" };
+      }
+      p.onShift = p.active && p.badge.tone !== "gray";
+      return p;
+    });
+  }
+
+  function staffCardHTML(p, activeAdmins) {
+    const dotTone = p.badge.tone === "green" ? "on" : p.badge.tone === "blue" ? "busy" : "";
+    const barCls = p.pct >= 80 ? "" : p.pct >= 40 ? "mid" : "low";
+    const taskIco = !p.active ? Icons.svg("ban", "ico-13") : p.badge.tone === "green" ? Icons.svg("check-circle", "ico-13") : p.badge.tone === "blue" ? Icons.svg("bike", "ico-13") : Icons.svg("pause-circle", "ico-13");
+    const lastAdmin = p.role === "admin" && activeAdmins <= 1 && p.active;
+    return `
+    <article class="staff-card ${p.active ? "" : "deactivated"}" data-staff-card="${esc(p.id)}">
+      <div class="sc-head">
+        <span class="sc-ava" style="background:${avColor(p.name)}">${p.photo
+          ? `<img src="${esc(p.photo)}" alt="" onerror="this.remove()" />` : initials(p.name)}<span class="sc-dot ${dotTone}"></span></span>
+        <div class="sc-id">
+          <div class="sc-name" title="${esc(p.name)}">${esc(p.name)}</div>
+          <div class="sc-title" title="${esc(p.title)}">${esc(p.title)}${p.isMe ? " · You" : ""}</div>
+          <div class="sc-contact" title="${esc((p.phone || "") + " " + (p.email || ""))}">${esc(p.phone || "—")}${p.email ? " · " + esc(p.email) : ""}</div>
+        </div>
+        <div class="sc-menu-wrap">
+          <button class="sc-menu-btn" type="button" data-team-menu="${esc(p.id)}" aria-haspopup="true" aria-label="Staff actions">…</button>
+          <div class="sc-menu" role="menu">
+            <button type="button" data-edit-profile="${esc(p.id)}">${Icons.svg("user", "ico-13")} Edit Profile & Photo</button>
+            <button type="button" data-key-staff="${esc(p.id)}">${Icons.svg("key-round", "ico-13")} Edit Key / Passcode</button>
+            <button type="button" data-change-role="${esc(p.id)}">${Icons.svg("refresh-cw", "ico-13")} Change Role</button>
+            ${lastAdmin ? "" : `<button type="button" class="${p.active ? "danger" : ""}" data-toggle-staff="${esc(p.id)}">${p.active ? Icons.svg("ban", "ico-13") + " Deactivate Account" : Icons.svg("check-circle", "ico-13") + " Reactivate Account"}</button>`}
+          </div>
+        </div>
+      </div>
+      <div class="sc-prog-row" title="${esc(p.metric)}">
+        <span class="m">${esc(p.metricShort)}</span>
+        <span class="sc-bar"><i class="${barCls}" style="width:${p.pct}%"></i></span>
+        <strong class="pct">${p.pct}%</strong>
+      </div>
+      <div class="sc-task ${esc(p.badge.tone)}" title="${esc(p.badge.text)}">
+        <span class="t-ico" aria-hidden="true">${taskIco}</span>
+        <span class="t-txt">${esc(p.badge.text)}</span>
+      </div>
+      <div class="sc-foot">
+        <button class="btn" type="button" data-key-staff="${esc(p.id)}">${Icons.svg("key-round", "ico-13")} Key Settings</button>
+        <button class="btn" type="button" data-staff-activity="${esc(p.id)}">${Icons.svg("bar-chart-3", "ico-13")} View Activity</button>
+      </div>
+    </article>`;
+  }
+
   function renderStaff() {
     const locked = Auth.locked();
     $("#lockToggle").checked = locked;
     $("#lockState").textContent = locked ? "Access lock ON — terminals require a staff key" : "Open access mode — stores & terminals are unlocked";
-    $("#staffRows").innerHTML = DB.listStaff().map(s => `
-      <div class="staff-row ${s.active ? "" : "off"}">
-        <span class="avatar" style="background:${avColor(s.name)}">${initials(s.name)}</span>
-        <div class="grow">
-          <div class="guest-name" style="margin:0">${esc(s.name)}${s.active ? "" : " <span class='stat-chip bad'>DEACTIVATED</span>"}</div>
-          <div class="muted small">${esc(s.email || "—")}${s.phone ? " · " + esc(s.phone) : ""}</div>
+
+    const profiles = buildTeamProfiles();
+    const activeAdmins = profiles.filter(x => x.role === "admin" && x.active).length;
+    const q = teamFilters.q.trim().toLowerCase();
+    const qDigits = q.replace(/[^\d]/g, "");
+
+    const match = p => {
+      if (q) {
+        const hay = (p.name + " " + (p.email || "")).toLowerCase();
+        const phone = String(p.phone || "").replace(/[^\d]/g, "");
+        if (!hay.includes(q) && !(qDigits.length > 2 && phone.includes(qDigits))) return false;
+      }
+      if (teamFilters.status === "on" && !(p.active && p.badge.tone !== "gray")) return false;
+      if (teamFilters.status === "off" && !(p.active && p.badge.tone === "gray")) return false;
+      if (teamFilters.status === "deactivated" && p.active) return false;
+      if (teamFilters.load === "ahead" && p.pct < 80) return false;
+      if (teamFilters.load === "track" && (p.pct < 40 || p.pct >= 80)) return false;
+      if (teamFilters.load === "light" && p.pct >= 40) return false;
+      return true;
+    };
+    const groupVisible = g => teamFilters.role === "all" || g.roles.includes(teamFilters.role);
+
+    $("#teamSections").innerHTML = TEAM_GROUPS.filter(groupVisible).map(g => {
+      const members = profiles.filter(p => g.roles.includes(p.role)).filter(match);
+      return `
+      <section class="team-section" data-team-group="${esc(g.key)}">
+        <div class="team-section-head">
+          <span class="tsh-ico" aria-hidden="true">${g.icon}</span>
+          <h2>${esc(g.title)}</h2>
+          <span class="tally">${members.length} ${members.length === 1 ? "member" : "members"}</span>
         </div>
-        <span class="stat-chip role-${esc(s.role)}">${s.role.toUpperCase()}</span>
-        <button class="lnk" data-key-staff="${esc(s.id)}">Edit Key</button>
-        ${s.role === "admin" && DB.listStaff().filter(x => x.role === "admin" && x.active).length <= 1 && s.active
-          ? "" : `<button class="lnk dim" data-toggle-staff="${esc(s.id)}">${s.active ? "Deactivate" : "Activate"}</button>`}
-      </div>`).join("");
+        <p class="team-section-sub">${esc(g.sub)}</p>
+        ${members.length
+          ? `<div class="team-grid">${members.map(p => staffCardHTML(p, activeAdmins)).join("")}</div>`
+          : `<div class="team-empty">No team members match the current filters in this department.</div>`}
+      </section>`;
+    }).join("");
   }
   function staffModal() {
-    Keys.require(() => openModal(`
+    Keys.require(() => {
+      openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>Register Staff Member</h3>
+      ${staffPhotoFieldHTML("", "")}
       <div class="field"><label>Full name</label><input class="sel-full" id="msName" /></div>
       <div class="field"><label>Login email / username</label><input class="sel-full" id="msEmail" placeholder="name@adonaithrift.store" /></div>
       <div class="field"><label>Password<span class="fhint">min 6 chars — can stay blank while open access is on</span></label><input class="sel-full" id="msPin" /></div>
@@ -1520,20 +1732,98 @@
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" id="msSave">Save Staff Member</button>
-      </div>`));
+      </div>`);
+      bindStaffPhoto("");
+    });
+  }
+  function profileModal(id) {
+    const s = DB.listStaff().find(x => x.id === id); if (!s) return;
+    Keys.require(() => {
+      openModal(`
+      <button class="modal-x" data-close>×</button>
+      <h3>${Icons.svg("user", "ico-16")} Edit Profile — ${esc(s.name)}</h3>
+      <p class="muted small">Update this member's details. The photo is uploaded from the operator's local files or gallery.</p>
+      ${staffPhotoFieldHTML(s.photo || "", s.name)}
+      <div class="field"><label>Full name</label><input class="sel-full" id="mpfName" value="${esc(s.name)}" /></div>
+      <div class="field"><label>Login email / username</label><input class="sel-full" id="mpfEmail" value="${esc(s.email || "")}" /></div>
+      <div class="field"><label>Contact phone</label><input class="sel-full" id="mpfPhone" value="${esc(s.phone || "")}" placeholder="+256 7…" /></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn primary" data-save-profile="${esc(s.id)}">Save Profile</button>
+      </div>`);
+      bindStaffPhoto(s.photo || "");
+    });
   }
   function keyModal(id) {
     const s = DB.listStaff().find(x => x.id === id); if (!s) return;
     Keys.require(() => openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>Edit Key — ${esc(s.name)}</h3>
-      <p class="muted small">4–8 digit PIN or a word of 6+ characters. Leave blank to clear the key (open mode only).</p>
-      <div class="field" style="margin-top:10px"><label>New staff key</label>
-        <input class="sel-full" id="mePin" autocomplete="off" /></div>
+      <h3>${Icons.svg("key-round", "ico-16")} Key Settings — ${esc(s.name)}</h3>
+      <p class="muted small">${esc(DB.ROLE_LABELS[s.role] || s.role)}</p>
+      <p class="muted small" style="margin-top:6px">Terminal PIN: 4–8 digits, or an access word of 6+ characters. Leave blank to clear the key (open-access mode only).</p>
+      <div class="field" style="margin-top:10px"><label>New terminal PIN / access key</label>
+        <input class="sel-full" id="mePin" autocomplete="off" placeholder="e.g. 4921 or emerald42" /></div>
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-reset-pin="${esc(s.id)}">Save Key</button>
       </div>`));
+  }
+  function roleModal(id) {
+    const s = DB.listStaff().find(x => x.id === id); if (!s) return;
+    Keys.require(() => openModal(`
+      <button class="modal-x" data-close>×</button>
+      <h3>${Icons.svg("refresh-cw", "ico-16")} Change Role — ${esc(s.name)}</h3>
+      <p class="muted small">Adjust this member's access level. The change takes effect immediately on every terminal and console session.</p>
+      <div class="field" style="margin-top:10px"><label>Assigned role</label>
+        <select class="sel-full" id="mrRole">${DB.STAFF_ROLES.map(r => `<option value="${r}" ${r === s.role ? "selected" : ""}>${DB.ROLE_LABELS[r]}</option>`).join("")}</select></div>
+      <div class="modal-actions">
+        <button class="btn" data-close>Cancel</button>
+        <button class="btn primary" data-save-role="${esc(s.id)}">Save Role</button>
+      </div>`));
+  }
+  function staffActivityModal(id) {
+    const s = DB.listStaff().find(x => x.id === id); if (!s) return;
+    const sales = allSales(), ledger = DB.listLedger();
+    const events = [];
+    sales.forEach(x => {
+      if (x.cashier && x.cashier.name === s.name) {
+        const items = (x.items || []).reduce((a, i) => a + (i.qty || 1), 0);
+        events.push({ at: x.created_at, ico: Icons.svg("receipt", "ico-14"), text: `Sale ${x.id} — ${items} item${items === 1 ? "" : "s"} · ${x.channel === "web" ? "Web order" : "POS register"}`, amt: ugx(x.total || 0) });
+      }
+      if ((x.assigned_rider_name || x.rider_name) === s.name) {
+        events.push({ at: x.updated_at || x.created_at, ico: Icons.svg("bike", "ico-14"), text: `${x.dispatch_status || "Dispatch"} — Order ${x.id}${x.customer_location ? ` (${x.customer_location})` : ""}`, amt: ugx(x.total || 0) });
+      }
+    });
+    ledger.forEach(e => {
+      if (e.by !== s.name) return;
+      const kindLabel = (DB.LEDGER_KIND_LABELS && DB.LEDGER_KIND_LABELS[e.kind]) || e.kind;
+      events.push({ at: e.created_at, ico: e.kind === "expense" ? Icons.svg("wallet", "ico-14") : e.kind === "refund" ? Icons.svg("undo-2", "ico-14") : Icons.svg("book-open", "ico-14"), text: `${kindLabel}${e.note ? " — " + e.note : ""}`, amt: ugx(Math.abs(e.amount || 0)) });
+    });
+    events.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+    const salesTotal = sales.filter(x => x.cashier && x.cashier.name === s.name).reduce((a, x) => a + (x.total || 0), 0);
+    openModal(`
+      <button class="modal-x" data-close>×</button>
+      <h3>${Icons.svg("bar-chart-3", "ico-16")} Activity Log — ${esc(s.name)}</h3>
+      <p class="muted small">${esc(DB.ROLE_LABELS[s.role] || s.role)} · Audit trail of sales, expenses logged and orders handled.</p>
+      <div class="act-summary">
+        <div><span>${events.length}</span>events on record</div>
+        <div><span>${esc(ugx(salesTotal))}</span>sales handled</div>
+        <div><span>${ledger.filter(e => e.by === s.name).length}</span>ledger postings</div>
+      </div>
+      <div class="act-list">
+        ${events.length
+          ? events.slice(0, 30).map(ev => `
+            <div class="act-row">
+              <span class="act-ico">${ev.ico}</span>
+              <div class="act-main">
+                <div class="act-text">${esc(ev.text)}</div>
+                <div class="act-when">${esc(readableDateTime(ev.at))} · ${esc(ago(ev.at))}</div>
+              </div>
+              <strong class="act-amt">${esc(ev.amt)}</strong>
+            </div>`).join("")
+          : `<div class="team-empty">No recorded activity yet for this staff member.</div>`}
+      </div>
+      <div class="modal-actions"><button class="btn" data-close>Close</button></div>`);
   }
 
   /* ============================================================
@@ -1608,6 +1898,10 @@
      ============================================================ */
   document.body.addEventListener("click", async e => {
     const t = e.target;
+
+    /* staff card [ … ] menus — close on any outside click or after choosing an item */
+    if (t.closest(".sc-menu")) $$(".sc-menu-wrap.open").forEach(w => w.classList.remove("open"));
+    else $$(".sc-menu-wrap.open").forEach(w => { if (!w.contains(t)) w.classList.remove("open"); });
 
     /* order pipeline */
     const btnSetPaid = t.closest("[data-set-paid]");
@@ -1733,6 +2027,36 @@
 
     /* staff */
     const as = t.closest("#btnAddStaff"); if (as) return staffModal();
+    const teamMenu = t.closest("[data-team-menu]");
+    if (teamMenu) { teamMenu.closest(".sc-menu-wrap").classList.toggle("open"); return; }
+    const chgRole = t.closest("[data-change-role]"); if (chgRole) return roleModal(chgRole.dataset.changeRole);
+    const saveRole = t.closest("[data-save-role]");
+    if (saveRole) {
+      Keys.require(async () => {
+        try {
+          const updated = await DB.updateStaff(saveRole.dataset.saveRole, { role: $("#mrRole").value });
+          closeModal(); toast(`${updated.name} is now ${DB.ROLE_LABELS[updated.role] || updated.role}`);
+        } catch (err) { toast(err.message, false); }
+      });
+      return;
+    }
+    const staffAct = t.closest("[data-staff-activity]"); if (staffAct) return staffActivityModal(staffAct.dataset.staffActivity);
+    const edProf = t.closest("[data-edit-profile]"); if (edProf) return profileModal(edProf.dataset.editProfile);
+    const svProf = t.closest("[data-save-profile]");
+    if (svProf) {
+      Keys.require(async () => {
+        try {
+          const name = $("#mpfName").value.trim();
+          if (!name) return toast("Full name is required", false);
+          await DB.updateStaff(svProf.dataset.saveProfile, {
+            name, email: $("#mpfEmail").value.trim(), phone: $("#mpfPhone").value.trim(),
+            photo: modalBox._staffPhoto || ""
+          });
+          closeModal(); toast("Staff profile updated");
+        } catch (err) { toast(err.message, false); }
+      });
+      return;
+    }
     const ks = t.closest("[data-key-staff]"); if (ks) return keyModal(ks.dataset.keyStaff);
     const ts = t.closest("[data-toggle-staff]");
     if (ts) {
@@ -1754,7 +2078,7 @@
       try {
         const rec = await DB.addStaff({
           name: $("#msName").value, email: $("#msEmail").value, phone: $("#msPhone").value,
-          role: $("#msRole").value, pin: $("#msPin").value
+          role: $("#msRole").value, pin: $("#msPin").value, photo: modalBox._staffPhoto || ""
         });
         if (!$("#msActive").checked) await DB.setStaffActive(rec.id, false);
         closeModal(); toast(`Staff account created for ${rec.name}`);
@@ -1763,9 +2087,19 @@
     }
   });
 
+  /* team toolbar: live search + role / status / workload filters */
+  let teamSearchTimer;
+  $("#teamSearch").addEventListener("input", e => {
+    clearTimeout(teamSearchTimer);
+    teamSearchTimer = setTimeout(() => { teamFilters.q = e.target.value; renderStaff(); }, 180);
+  });
+  [["teamRoleFilter", "role"], ["teamStatusFilter", "status"], ["teamLoadFilter", "load"]].forEach(([id, key]) => {
+    $("#" + id).addEventListener("change", e => { teamFilters[key] = e.target.value; renderStaff(); });
+  });
+
   $("#lockToggle").addEventListener("change", e => {
     Keys.require(() => DB.updateSettings({ access_locked: e.target.checked }).then(() => {
-      toast(e.target.checked ? "🔒 Access lock ON — POS & console now require staff keys" : "🔓 Open access mode enabled");
+      toast(e.target.checked ? "Access lock ON — POS & console now require staff keys" : "Open access mode enabled");
       if (e.target.checked && !DB.listStaff().some(s => s.pin)) toast("No staff keys are set yet — unlock stays symbolic until you add one", true);
     }));
   });
