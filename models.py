@@ -8,6 +8,8 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Numeric,
+    Computed,
     ForeignKey,
     Index,
     Integer,
@@ -76,6 +78,13 @@ class Product(Base):
     size = Column(String(20), nullable=True)
     condition = Column(String(100), nullable=True)  # Grade A, Grade B, Vintage
     cost_price = Column(Integer, default=0)
+    # Canonical pricing inputs. The generated columns are also enforced in PostgreSQL;
+    # selling_price remains the whole-UGX compatibility field used by the POS.
+    base_price = Column(Numeric(14, 2), nullable=False, default=0)
+    total_transport_cost = Column(Numeric(14, 2), nullable=False, default=0)
+    embedded_transport_portion = Column(Numeric(14, 2), Computed("total_transport_cost * 0.50", persisted=True))
+    checkout_transport_portion = Column(Numeric(14, 2), Computed("total_transport_cost * 0.50", persisted=True))
+    final_selling_price = Column(Numeric(14, 2), Computed("base_price + (total_transport_cost * 0.50)", persisted=True))
     selling_price = Column(Integer, nullable=False, index=True)
     compare_price = Column(Integer, default=0)
     in_stock_count = Column(Integer, default=1, index=True)
@@ -122,6 +131,11 @@ class Product(Base):
             "size": self.size or "-",
             "condition": self.condition or "",
             "cost_price": self.cost_price,
+            "base_price": float(self.base_price or 0),
+            "total_transport_cost": float(self.total_transport_cost or 0),
+            "embedded_transport_portion": float(self.embedded_transport_portion if self.embedded_transport_portion is not None else (self.total_transport_cost or 0) * 0.5),
+            "checkout_transport_portion": float(self.checkout_transport_portion if self.checkout_transport_portion is not None else (self.total_transport_cost or 0) * 0.5),
+            "final_selling_price": float(self.final_selling_price if self.final_selling_price is not None else self.selling_price or 0),
             "selling_price": self.selling_price,
             "compare_price": self.compare_price,
             "in_stock_count": self.in_stock_count,

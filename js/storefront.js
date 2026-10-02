@@ -5,6 +5,7 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const CART_KEY = "adonai-cart-v1";
+  const displayPrice = p => Number(p && (p.final_selling_price != null ? p.final_selling_price : p.selling_price)) || 0;
   const CONSENT_KEY = "adonai-consent-v1";
 
   /* ---------- stroke icon set ---------- */
@@ -151,7 +152,7 @@
     sizeSel.innerHTML = `<option value="All">All Sizes</option>` + sizes.map(s => `<option ${fSize === s ? "selected" : ""} value="${esc(s)}">${esc(s)}</option>`).join("");
     const condSel = $("#condSel");
     condSel.innerHTML = `<option value="All">All Grades</option>` + DB.CONDITIONS.map(c => `<option ${fCond === c ? "selected" : ""} value="${esc(c)}">${esc(c)}</option>`).join("");
-    const maxPrice = Math.max(50000, ...products.map(p => p.selling_price));
+    const maxPrice = Math.max(50000, ...products.map(p => displayPrice(p)));
     const range = $("#priceRange");
     range.max = Math.ceil(maxPrice / 10000) * 10000;
   }
@@ -276,7 +277,7 @@
 
   const discountPercent = p => {
     const original = Number(p.compare_price || 0);
-    const selling = Number(p.selling_price || 0);
+    const selling = Number(displayPrice(p) || 0);
     return original > 0 && selling >= 0 && selling < original
       ? Math.round(((original - selling) / original) * 100)
       : 0;
@@ -313,8 +314,8 @@
         <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : "", p.condition].filter(Boolean).join(" · "))}</p>
         ${ratingHTML(p)}
         <div class="price-row">
-          <span class="pprice">${DB.ugx(p.selling_price)}</span>
-          ${p.compare_price > p.selling_price ? `<span class="pcompare">${DB.ugx(p.compare_price)}</span>` : ""}
+          <span class="pprice">${DB.ugx(displayPrice(p))}</span>
+          ${p.compare_price > displayPrice(p) ? `<span class="pcompare">${DB.ugx(p.compare_price)}</span>` : ""}
         </div>
         <div class="pcard-actions">
           <button class="add-cart-btn" data-add="${esc(p.id)}" ${sold ? "disabled" : ""} type="button" aria-label="Add ${esc(p.name)} to cart">
@@ -337,7 +338,7 @@
       .filter(p => fCat === "All" || p.category === fCat)
       .filter(p => fSize === "All" || p.size === fSize)
       .filter(p => fCond === "All" || p.condition === fCond)
-      .filter(p => p.selling_price <= fMax)
+      .filter(p => displayPrice(p) <= fMax)
       .filter(p => matchesSearch(p, term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#gridEmpty").hidden = list.length > 0;
@@ -394,7 +395,7 @@
     if (window.AdonaiAnalytics) {
       window.AdonaiAnalytics.trackViewItem(p);
     }
-    document.title = `${p.name} — ${DB.ugx(p.selling_price)} | Adonai Thrift Store Kampala`;
+    document.title = `${p.name} — ${DB.ugx(displayPrice(p))} | Adonai Thrift Store Kampala`;
   }
 
   function closeProductModal() {
@@ -456,8 +457,8 @@
         <h2 class="pmodal-title" id="pmodalTitle">${esc(p.name)}</h2>
 
         <div class="pmodal-price-box">
-          <span class="pmodal-price">${DB.ugx(p.selling_price)}</span>
-          ${p.compare_price > p.selling_price ? `<span class="pmodal-compare">${DB.ugx(p.compare_price)}</span><span class="pmodal-disc">-${disc}% OFF</span>` : ""}
+          <span class="pmodal-price">${DB.ugx(displayPrice(p))}</span>
+          ${p.compare_price > displayPrice(p) ? `<span class="pmodal-compare">${DB.ugx(p.compare_price)}</span><span class="pmodal-disc">-${disc}% OFF</span>` : ""}
           <span class="pmodal-stock ${sold ? "out" : "in"}">
             ${sold ? "● SOLD OUT" : (p.in_stock_count === 1 ? "✓ 1-of-1 Piece on Rail" : `✓ ${p.in_stock_count} in stock`)}
           </span>
@@ -481,7 +482,7 @@
           <button class="pmodal-claim-btn" id="pmodalClaimBtn" data-modal-claim="${esc(p.id)}" ${sold ? "disabled" : ""}>
             ${sold ? "Sold" : `${ICONS.message.replace("<svg ", "<svg width='18' height='18' ")} Add Piece to Cart`}
           </button>
-          <a class="pmodal-wa-btn" href="https://wa.me/${esc(S.whatsapp)}?text=${encodeURIComponent(`Hello Adonai Thrift Store, I would like to ask about: ${p.name} (${p.sku || p.barcode_id}, ${DB.ugx(p.selling_price)}, Size: ${p.size}). Is it still on the shelf?`)}" target="_blank" rel="noopener">
+          <a class="pmodal-wa-btn" href="https://wa.me/${esc(S.whatsapp)}?text=${encodeURIComponent(`Hello Adonai Thrift Store, I would like to ask about: ${p.name} (${p.sku || p.barcode_id}, ${DB.ugx(displayPrice(p))}, Size: ${p.size}). Is it still on the shelf?`)}" target="_blank" rel="noopener">
             ${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Inquire on WhatsApp directly
           </a>
         </div>
@@ -657,17 +658,20 @@
   function cartLines() {
     return cart.map(l => {
       const p = products.find(x => x.id === l.product_id);
-      return p ? { line: l, p, sub: p.selling_price * l.qty } : null;
+      const price = displayPrice(p);
+      return p ? { line: l, p, price, sub: price * l.qty } : null;
     }).filter(Boolean);
+  }
+
+  function cartCheckoutTransport(lines) {
+    return lines.reduce((sum, x) => sum + (Number(x.p.checkout_transport_portion) || 0) * x.line.qty, 0);
   }
 
   function renderCart() {
     const lines = cartLines();
     const itemCount = lines.reduce((s, x) => s + x.line.qty, 0);
     const subtotal = lines.reduce((s, x) => s + x.sub, 0);
-    const currentDeliveryFee = deliveryType === "pickup"
-      ? 0
-      : (DELIVERY_AREAS[selectedAreaIndex] ? DELIVERY_AREAS[selectedAreaIndex].fee : DELIVERY_AREAS[0].fee);
+    const currentDeliveryFee = deliveryType === "pickup" ? 0 : cartCheckoutTransport(lines);
     const grandTotal = subtotal + currentDeliveryFee;
     $("#cartCount").textContent = itemCount;
 
@@ -698,13 +702,13 @@
     }
 
     $("#cartBody").innerHTML = `
-      ${lines.map(({ line, p, sub }) => `
+      ${lines.map(({ line, p, price, sub }) => `
         <div class="cart-line-card">
           <span class="line-thumb">${catIcon(p.category)}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" width="48" height="48" onerror="this.remove()" />` : ""}</span>
           <div class="line-details">
             <div class="line-title">${esc(p.name)}</div>
             <div class="line-sku">${esc(p.sku || p.barcode_id || p.id)}</div>
-            <div class="line-price-meta">Size: ${esc(p.size && p.size !== "-" ? p.size : "Standard")} · ${DB.ugx(p.selling_price)}</div>
+            <div class="line-price-meta">Size: ${esc(p.size && p.size !== "-" ? p.size : "Standard")} · ${DB.ugx(price)}</div>
           </div>
           <button class="line-remove-btn" data-rm="${esc(p.id)}" aria-label="Remove item">✕</button>
         </div>`).join("")}
@@ -727,7 +731,7 @@
         <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
           <label class="claim-field-label">Destination Area:</label>
           <select class="claim-select" id="coArea">
-            ${DELIVERY_AREAS.map((a, idx) => `<option value="${idx}" ${idx === selectedAreaIndex ? 'selected' : ''}>${esc(a.name)} (${DB.ugx(a.fee)})</option>`).join("")}
+            ${DELIVERY_AREAS.map((a, idx) => `<option value="${idx}" ${idx === selectedAreaIndex ? 'selected' : ''}>${esc(a.name)}</option>`).join("")}
           </select>
           <p class="location-allocation-status" id="locationAllocationStatus" aria-live="polite">📍 ${esc(formState.locationStatus)}</p>
           <input class="claim-input" id="coAddress" placeholder="Street, Building, Flat or Landmark Details *" value="${esc(formState.address)}" />
@@ -742,7 +746,7 @@
     $("#cartFoot").innerHTML = `
       <div class="claim-summary-box">
         <div class="sum-line"><span>Items (${itemCount}):</span><span>${DB.ugx(subtotal)}</span></div>
-        <div class="sum-line"><span>Rider Delivery:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
+        <div class="sum-line"><span>Allocated delivery (50% transport):</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
       <button class="claim-confirm-btn" id="confirmOrder">Confirm order (${DB.ugx(grandTotal)})</button>
@@ -835,7 +839,7 @@
         toast("Location allocated. Please review the updated delivery total and confirm again.");
         return;
       }
-      const deliveryFee = deliveryType === "pickup" ? 0 : areaObj.fee;
+      const deliveryFee = deliveryType === "pickup" ? 0 : cartCheckoutTransport(cartLines());
       const pickupAddress = S.address || "Kampala, Uganda";
       const areaName = deliveryType === "pickup" ? `Store Pickup (${pickupAddress})` : areaObj.name;
       const deliveryAddress = dropoff || address;
