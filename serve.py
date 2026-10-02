@@ -70,10 +70,14 @@ mimetypes.add_type("application/xml", ".xml")
 mimetypes.add_type("application/vnd.android.package-archive", ".apk")
 
 
+# ALLOW_FRAME_EMBED=1 drops the X-Frame-Options header so sandboxed/preview
+# environments can embed the app in an iframe. Production stays SAMEORIGIN.
+ALLOW_FRAME_EMBED = os.environ.get("ALLOW_FRAME_EMBED", "") == "1"
+
 SECURITY_HEADERS = [
     ("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload"),
     ("X-Content-Type-Options", "nosniff"),
-    ("X-Frame-Options", "SAMEORIGIN"),
+] + ([] if ALLOW_FRAME_EMBED else [("X-Frame-Options", "SAMEORIGIN")]) + [
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
     ("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)"),
     ("Content-Security-Policy",
