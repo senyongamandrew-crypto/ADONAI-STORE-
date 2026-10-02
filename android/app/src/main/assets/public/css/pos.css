@@ -37,26 +37,38 @@ input, select, textarea { max-width: 100%; }
    Type: Playfair Display (display) · Plus Jakarta Sans (text)
    ====================================================================== */
 :root {
-  --bg: #FAF7F3;
+  /* ==== OFFICIAL DESIGN-SYSTEM PALETTE (5 tokens) ==== */
+  --bg-dark-primary: #0F0F0F;        /* Deep Onyx — sidebar / drawer backgrounds */
+  --bg-dark-surface: #202020;        /* Dark Graphite — cards, inputs, header bars on dark */
+  --accent-vibrant: #5DD62C;         /* Neon Lime — primary CTAs, active states, key badges */
+  --accent-muted: #337418;           /* Deep Forest — hovers, secondary accents, borders */
+  --bg-light-clean: #F8F8F8;         /* Clean Studio — main register canvas */
+  --text-dark-theme: #F8F8F8;
+  --text-light-theme: #0F0F0F;
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-active: #5DD62C;
+
+  /* ==== Legacy tokens remapped onto the official palette ==== */
+  --bg: var(--bg-light-clean);
   --panel: #FFFFFF;
-  --panel-2: #F3EEE7;
-  --line: #ECE5DC;
-  --text: #241D18;
-  --muted: #7A6F66;
-  --accent: #C24E2B;
-  --accent-dark: #A63F20;
-  --ink: #1A1410;
-  --dark: #171210;
-  --dark-card: #221A16;
-  --dark-line: #382A22;
-  --dark-text: #EFE7DE;
-  --dark-muted: #A08F83;
-  --green: #2F7D4F;
-  --red: #B3261E;
-  --mtn: #F5C400;
-  --airtel: #D32F2F;
+  --panel-2: #F0F0F0;
+  --line: #E6E6E6;
+  --text: var(--text-light-theme);
+  --muted: #5F5F5F;
+  --accent: var(--accent-muted);
+  --accent-dark: #27570F;
+  --ink: var(--text-light-theme);
+  --dark: var(--bg-dark-primary);
+  --dark-card: var(--bg-dark-surface);
+  --dark-line: var(--border-subtle);
+  --dark-text: var(--text-dark-theme);
+  --dark-muted: #9C9C9C;
+  --green: var(--accent-muted);
+  --red: #B3261E;      /* functional error state — retained */
+  --mtn: #F5C400;      /* functional brand color — retained */
+  --airtel: #D32F2F;   /* functional brand color — retained */
   --radius: 14px;
-  --shadow: 0 8px 24px rgba(23, 18, 16, .08);
+  --shadow: 0 4px 12px rgba(0, 0, 0, .05);
   --font-display: "Playfair Display", Georgia, serif;
   --font-text: "Plus Jakarta Sans", "Inter", -apple-system, sans-serif;
 }
@@ -920,3 +932,98 @@ html, body { max-width: 100vw; overflow-x: hidden; }
   input[type="number"], .in, .pos-search-input { font-size: 16px; }
   .big-in { font-size: 24px; }
 }
+
+/* ======================================================================
+   DESIGN SYSTEM v3 — ENFORCEMENT LAYER (must stay at end of this sheet)
+   Official palette: #0F0F0F onyx · #202020 graphite · #5DD62C lime
+                     #337418 forest · #F8F8F8 studio
+   ====================================================================== */
+
+/* ---- Vector icon utilities (replaces system emojis) ---- */
+.ico { display: inline-block; vertical-align: -0.22em; flex-shrink: 0; }
+.ico-11 { width: 11px; height: 11px; }
+.ico-12 { width: 12px; height: 12px; }
+.ico-13 { width: 13px; height: 13px; }
+.ico-14 { width: 14px; height: 14px; }
+.ico-16 { width: 16px; height: 16px; }
+.ico-18 { width: 18px; height: 18px; }
+.ico-cat { width: 28px; height: 28px; color: #9C9C9C; }
+.ico-lime { color: var(--accent-vibrant) !important; }
+
+/* ---- Sidebar / drawer: Deep Onyx + graphite active + lime left border ---- */
+.pos-sidebar { background: var(--bg-dark-primary); }
+.pos-sidebar .nav-item { color: #B8B8B8; }
+.pos-sidebar .nav-ico .ico { width: 19px; height: 19px; color: #D4D4D4; }
+.pos-sidebar .nav-item:hover { background: var(--bg-dark-surface); color: var(--text-dark-theme); }
+.pos-sidebar .nav-item:hover .nav-ico .ico { color: var(--accent-vibrant); }
+.pos-sidebar .nav-item.active {
+  background: var(--bg-dark-surface);
+  color: var(--text-dark-theme);
+  box-shadow: inset 3px 0 0 0 var(--accent-vibrant);
+}
+.pos-sidebar .nav-item.active .nav-ico .ico { color: var(--accent-vibrant); }
+.pos-sidebar .badge {
+  background: var(--accent-vibrant);
+  color: var(--bg-dark-primary);
+  font-weight: 800;
+}
+
+/* ---- Register canvas inputs: white field, graphite border, lime focus ---- */
+.barcode-in, .grid-search {
+  background: #FFFFFF;
+  border: 1.5px solid var(--bg-dark-surface);
+  color: var(--text-light-theme);
+  transition: border-color .15s, box-shadow .15s;
+}
+.barcode-in:focus, .grid-search:focus {
+  border-color: var(--border-active);
+  box-shadow: 0 0 0 3px rgba(93, 214, 44, .18);
+  outline: none;
+}
+
+/* ---- Action buttons: solid onyx or lime w/ matching icons ---- */
+.lookup-btn { background: var(--bg-dark-primary); color: var(--text-dark-theme); }
+.lookup-btn:hover { background: var(--bg-dark-surface); }
+.charge-btn {
+  background: var(--accent-vibrant);
+  color: var(--bg-dark-primary);
+  font-weight: 800;
+  transition: background .15s, transform .1s;
+}
+.charge-btn:hover { background: #4CC01F; }
+.charge-btn:disabled { background: #DADADA; color: #8C8C8C; }
+.btn.primary { background: var(--accent-vibrant); color: var(--bg-dark-primary); border-color: var(--accent-vibrant); }
+.btn.primary:hover { background: #4CC01F; border-color: #4CC01F; }
+
+/* ---- Pill filters: active = solid onyx ---- */
+.ctab.active, .dtab.active {
+  background: var(--bg-dark-primary);
+  border-color: var(--bg-dark-primary);
+  color: var(--text-dark-theme);
+}
+.ctab:hover, .dtab:hover { border-color: var(--accent-muted); color: var(--text-light-theme); }
+
+/* ---- Status + feedback tints moved onto lime/forest ---- */
+.scan-flash.ok { background: rgba(93, 214, 44, .16); color: var(--accent-muted); }
+.stock-dot { background: rgba(93, 214, 44, .16); color: var(--accent-muted); }
+.stock-dot.out { background: #FBEDEA; color: var(--red); }
+.tile .t-price { color: var(--accent-muted); }
+
+/* ---- Live/online dot: pulsing lime ---- */
+@keyframes dsPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(93, 214, 44, .55); }
+  70%  { box-shadow: 0 0 0 6px rgba(93, 214, 44, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(93, 214, 44, 0); }
+}
+.net-pill .dot, .pos-head .pill.live .dot {
+  background: var(--accent-vibrant);
+  animation: dsPulse 1.8s infinite;
+}
+.net-pill.offline .dot, .pos-head .pill.live.offline .dot {
+  background: var(--red);
+  animation: none;
+  box-shadow: 0 0 8px var(--red);
+}
+
+/* ---- Tile category placeholder icons ---- */
+.tile .tile-img .ico-cat { color: #A8A8A8; }

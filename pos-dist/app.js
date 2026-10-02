@@ -15,7 +15,7 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const ugx = DB.ugx;
-  const AV_PALETTE = ["#7A2E2E", "#805322", "#2E5E40", "#374A7A", "#6B3A7A", "#22615E", "#4A5E22", "#8A3A22"];
+  const AV_PALETTE = ["#0F0F0F", "#202020", "#337418", "#27570F", "#1E4710", "#2B2B2B", "#3F8A1F", "#141414"];
   const avColor = name => AV_PALETTE[(String(name).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % AV_PALETTE.length];
   const initials = name => String(name || "OA").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
 
@@ -67,15 +67,15 @@
   function paintUnlockChip() {
     const c = $("#unlockChip");
     if (!c) return;
-    if (Keys.unlocked()) { c.textContent = "🔓 Master Key Unlocked"; c.classList.add("on"); }
-    else { c.textContent = "🔒 Unlock Master Key"; c.classList.remove("on"); }
+    if (Keys.unlocked()) { c.innerHTML = Icons.svg("unlock", "ico-14") + " Master Key Unlocked"; c.classList.add("on"); }
+    else { c.innerHTML = Icons.svg("lock", "ico-14") + " Unlock Master Key"; c.classList.remove("on"); }
   }
   function renderMasterModal(after) {
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>Admin Master Key Authorization</h3>
       <p class="muted small" style="margin-bottom:14px">Enter secondary Master Key to unlock protected administrative controls, financial logs, and system settings.</p>
-      <div class="sec-box">🔒 <strong>Security Upgrade:</strong> This action requires the secondary Admin Master Key Password to protect store permissions, financial records, and core parameters.</div>
+      <div class="sec-box">${Icons.svg("shield", "ico-14")} <strong>Security Upgrade:</strong> This action requires the secondary Admin Master Key Password to protect store permissions, financial records, and core parameters.</div>
       <div class="field" style="margin-top:14px">
         <label>Master key password</label>
         <div class="sku-row">
@@ -95,7 +95,7 @@
       const val = input.value.trim();
       if (!val) return;
       if (DB.verifyMasterKey(val)) {
-        Keys.set(true, val); closeModal(); toast("🔓 Master Key unlocked for this session");
+        Keys.set(true, val); closeModal(); toast("Master Key unlocked for this session");
         if (after) after(val);
         return;
       }
@@ -109,7 +109,7 @@
         const data = await r.json();
         if (data && data.ok && data.staff && data.staff.role === "admin") {
           const credential = data.token || val;
-          Keys.set(true, credential); closeModal(); toast("🔓 Master Key unlocked via Server / Environment");
+          Keys.set(true, credential); closeModal(); toast("Master Key unlocked via Server / Environment");
           if (after) after(credential);
           return;
         }
@@ -296,7 +296,7 @@
   /* KPI stat card — icon chip + accent tone + fluid responsive grid */
   function kpiCard(label, value, sub, tone, icon) {
     return `<div class="kpi-card kpi-${tone || "rust"}">
-      <div class="kpi-top"><span class="kpi-ico">${icon || "📈"}</span><span class="kpi-lab">${esc(label)}</span></div>
+      <div class="kpi-top"><span class="kpi-ico">${icon || Icons.svg("trending-up", "ico-18")}</span><span class="kpi-lab">${esc(label)}</span></div>
       <div class="kpi-val">${value}</div>
       ${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ""}
     </div>`;
@@ -324,10 +324,10 @@
     const onRack = DB.listProducts().filter(p => p.in_stock_count > 0).length;
 
     $("#kpiCards").innerHTML =
-      kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales", "green", "💰") +
-      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & web reservations", "rust", "🧾") +
-      kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", "📦") +
-      kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", "🔖");
+      kpiCard("TODAY'S REVENUE (UGX)", ugx(todayRev), "Closed register & delivery sales", "green", Icons.svg("banknote", "ico-18")) +
+      kpiCard("TODAY'S TICKETS", todayDone.filter(s => s.channel === "pos").length, "In-store POS & web reservations", "rust", Icons.svg("receipt", "ico-18")) +
+      kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", Icons.svg("package", "ico-18")) +
+      kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", Icons.svg("boxes", "ico-18"));
 
     /* ---- hourly + weekly chart ---- */
     const cv = $("#hourlyChart");
@@ -386,13 +386,13 @@
     const cashTot = done.filter(s => s.tender && s.tender.type === "cash").reduce((a, s) => a + s.total, 0);
     const revAll = Math.max(1, revPos + revWeb);
     $("#channelRows").innerHTML = [
-      ["🏪 Register", revPos, "var(--rust)"], ["🌐 Web Storefront", revWeb, "var(--green)"], ["🖼️ Catalog", 0, "var(--blue)"]
+      [Icons.svg("store", "ico-12") + " Register", revPos, "var(--rust)"], [Icons.svg("globe", "ico-12") + " Web Storefront", revWeb, "var(--green)"], [Icons.svg("image", "ico-12") + " Catalog", 0, "var(--blue)"]
     ].map(([lbl, v, color]) => `
       <div class="ch-row ch-stack">
         <div class="ch-info"><span>${lbl}</span><strong>${ugx(v)}</strong></div>
         <div class="ch-bar"><i style="width:${Math.round(v / revAll * 100)}%;background:${color}"></i></div>
       </div>`).join("")
-      + `<span class="cash-pill">💵 Cash collected ${ugx(cashTot)}</span>`;
+      + `<span class="cash-pill">${Icons.svg("banknote", "ico-13")} Cash collected ${ugx(cashTot)}</span>`;
 
     /* ---- boda pool ---- */
     $("#riderPool").innerHTML = DB.listRiders().slice(0, 3).map(r => {
@@ -529,7 +529,7 @@
         <div class="oc-customer">
           <span class="avatar oc-ava" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "G")}</span>
           <div class="grow">
-            <div class="oc-name">${esc(s.customer_name)}${s.customer_phone ? ` <a class="lnk oc-tel" href="tel:${esc(String(s.customer_phone).replace(/[^+0-9]/g, ""))}">📞 ${esc(s.customer_phone)}</a>` : ""}</div>
+            <div class="oc-name">${esc(s.customer_name)}${s.customer_phone ? ` <a class="lnk oc-tel" href="tel:${esc(String(s.customer_phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-12")} ${esc(s.customer_phone)}</a>` : ""}</div>
             <div class="muted small">${esc(itemsSummary(s))}</div>
           </div>
         </div>
@@ -651,12 +651,12 @@
       <button class="modal-x" data-close>×</button>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 class="serif" style="margin:0">80mm Receipt Printout</h3>
-        <button class="btn primary sm" id="btnTriggerPrint">🖨 Print 80mm</button>
+        <button class="btn primary sm" id="btnTriggerPrint">${Icons.svg("printer", "ico-14")} Print 80mm</button>
       </div>
       ${receiptHTML(s)}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn ghost" data-close>Close</button>
-        <button class="btn primary" id="btnTriggerPrint2">🖨 Print Receipt</button>
+        <button class="btn primary" id="btnTriggerPrint2">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
     `);
     const doPrint = () => {
@@ -731,11 +731,11 @@
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${!paid ? `
-              <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">💰 Cash</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">📱 MTN MoMo</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">🔴 Airtel</button>
+              <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">${Icons.svg("banknote", "ico-13")} Cash</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">${Icons.svg("smartphone", "ico-13")} MTN MoMo</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">${Icons.svg("smartphone", "ico-13")} Airtel</button>
             ` : `
-              <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">↩ Revert to Unpaid</button>
+              <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">${Icons.svg("undo-2", "ico-13")} Revert to Unpaid</button>
             `}
           </div>
         </div>
@@ -762,7 +762,7 @@
         </div>
 
         ${fulfillmentStage(s) === "Unfulfilled" || fulfillmentStage(s) === "Pending" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">📦 Start Assembly</button>
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">${Icons.svg("package", "ico-14")} Start Assembly</button>
         ` : fulfillmentStage(s) === "In Assembly" || fulfillmentStage(s) === "Packed" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
         ` : fulfillmentStage(s) === "Ready for Pickup" || fulfillmentStage(s) === "Dispatched" ? `
@@ -770,7 +770,7 @@
         ` : ""}
 
         <button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel Order &amp; Release Item to Rack</button>
-        <button class="btn light btn-full" id="btnPrintReceiptModal">🖨 Print Receipt</button>
+        <button class="btn light btn-full" id="btnPrintReceiptModal">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
     `);
 
@@ -864,7 +864,7 @@
       const off = p.compare_price > p.selling_price ? Math.round((p.compare_price - p.selling_price) / p.compare_price * 100) : 0;
       const inStock = p.in_stock_count > 0;
       return `<div class="stock-row">
-        <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "🧥"}</span>
+        <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("shirt", "ico-cat")}</span>
         <div class="stock-main">
           <div class="stock-title-row">
             <div class="grow">
@@ -876,9 +876,9 @@
           <div class="stock-tags">
             <span class="itag">${esc(p.demographic)}</span>
             <span class="itag">${esc(p.category)}</span>
-            <span class="itag">📏 ${esc(p.size)}</span>
+            <span class="itag">${Icons.svg("ruler", "ico-11")} ${esc(p.size)}</span>
             <span class="itag">${esc(p.condition)}</span>
-            ${p.brand ? `<span class="itag">🏷️ ${esc(p.brand)}</span>` : ""}
+            ${p.brand ? `<span class="itag">${Icons.svg("tag", "ico-11")} ${esc(p.brand)}</span>` : ""}
           </div>
           <div class="stock-price-row">
             <span class="stock-price">${ugx(p.selling_price)}</span>
@@ -890,8 +890,8 @@
           </div>
         </div>
         <div class="stock-actions">
-          <button class="btn sm ghost" data-editprod="${esc(p.id)}">✏️ Edit</button>
-          <button class="btn sm ghost dim" data-delprod="${esc(p.id)}">🗑 Delete</button>
+          <button class="btn sm ghost" data-editprod="${esc(p.id)}">${Icons.svg("pencil", "ico-12")} Edit</button>
+          <button class="btn sm ghost dim" data-delprod="${esc(p.id)}">${Icons.svg("trash-2", "ico-12")} Delete</button>
         </div>
       </div>`;
     }).join("") : `<div class="card"><p class="muted" style="padding:20px">No products match these filters.</p></div>`;
@@ -1001,7 +1001,7 @@
       <div class="ph-slot" data-slot="${i}">
         <div class="ph-prev ${i === 0 ? "hero" : ""}">${intakePhotos[i] ? `<img src="${esc(intakePhotos[i])}" alt="" />` : ""}<span class="ph-lbl">${s[0]}</span>${s[1] ? `<span class="ph-sub">${s[1]}</span>` : ""}</div>
         <div class="ph-btns">
-          <button class="btn sm" data-phgal="${i}" type="button">📁 Gallery / File</button>
+          <button class="btn sm" data-phgal="${i}" type="button">${Icons.svg("upload", "ico-12")} Gallery / File</button>
           ${intakePhotos[i] ? `<button class="btn sm ghost" data-phrem="${i}" type="button">Remove</button>` : ""}
         </div>
       </div>`).join("");
@@ -1074,7 +1074,7 @@
     if (!vals.selling_price) return toast("Set a sell price first", false);
     try {
       const p = await DB.addProduct(vals);
-      toast(`🏷️ Tagged & saved — ${p.name} · ${p.sku}`);
+      toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes"].forEach(id => $("#" + id).value = "");
         intakePhotos.fill(""); paintAngles();
@@ -1092,7 +1092,7 @@
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
       <div class="ch-row">
         <div class="rider-mini">
-          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : "🏷️"}</span>
+          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
           <div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div>
         </div>
         <strong class="serif">${ugx(p.selling_price)}</strong>
@@ -1113,7 +1113,7 @@
           <span class="avatar" style="background:${avColor(g.name)}">${initials(g.name)}</span>
           <div class="grow">
             <div class="guest-name">${esc(g.name)}</div>
-            ${g.phone ? `<a class="guest-phone" href="tel:${esc(String(g.phone).replace(/[^+0-9]/g, ""))}">📞 ${esc(g.phone)}</a>` : ""}
+            ${g.phone ? `<a class="guest-phone" href="tel:${esc(String(g.phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-12")} ${esc(g.phone)}</a>` : ""}
           </div>
           <div class="gc-actions">
             <button class="lnk" data-edit-guest="${esc(g.id)}">Edit</button>
@@ -1121,11 +1121,11 @@
           </div>
         </div>
         ${(g.address || g.neighborhood || g.email) ? `<div class="guest-tags">
-          ${g.neighborhood ? `<span class="itag">📍 ${esc(g.neighborhood)}</span>` : ""}
+          ${g.neighborhood ? `<span class="itag">${Icons.svg("map-pin", "ico-11")} ${esc(g.neighborhood)}</span>` : ""}
           ${g.address ? `<span class="itag">${esc(g.address)}</span>` : ""}
-          ${g.email ? `<span class="itag">✉️ ${esc(g.email)}</span>` : ""}
+          ${g.email ? `<span class="itag">${Icons.svg("mail", "ico-11")} ${esc(g.email)}</span>` : ""}
         </div>` : ""}
-        ${g.notes ? `<div class="guest-notes">📝 ${esc(g.notes)}</div>` : ""}
+        ${g.notes ? `<div class="guest-notes">${Icons.svg("clipboard", "ico-12")} ${esc(g.notes)}</div>` : ""}
       </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No guests match — add the first one.</p></div>`;
   }
   function guestModal(id) {
@@ -1152,13 +1152,13 @@
         <div class="rc-top">
           <span class="avatar" style="background:${avColor(r.name)}">${initials(r.name)}</span>
           <div class="grow"><div class="guest-name" style="margin:0">${esc(r.name)}</div>
-            <div class="rider-tags"><span class="itag">🛵 ${esc(r.vehicle)}</span><span class="itag">📍 ${esc(r.zone)}</span></div></div>
+            <div class="rider-tags"><span class="itag">${Icons.svg("bike", "ico-11")} ${esc(r.vehicle)}</span><span class="itag">${Icons.svg("map-pin", "ico-11")} ${esc(r.zone)}</span></div></div>
           <div class="rc-stats">
             <div><strong class="serif">${active}</strong><span class="micro-cap">EN ROUTE</span></div>
             <div><strong class="serif">${delivered}</strong><span class="micro-cap">DONE</span></div>
           </div>
         </div>
-        <div class="rc-chip">${riderStatusChip(r.status)}${r.phone ? `<a class="stat-chip mut" href="tel:${esc(String(r.phone).replace(/[^+0-9]/g, ""))}">📞 CALL</a>` : ""}</div>
+        <div class="rc-chip">${riderStatusChip(r.status)}${r.phone ? `<a class="stat-chip mut" href="tel:${esc(String(r.phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-11")} CALL</a>` : ""}</div>
         <div class="rc-btns">
           ${DB.RIDER_STATUSES.map(st => `<button class="lane-tab ${r.status === st ? "active" : ""}" data-rider-st="${esc(r.id)}" data-st="${st}">${st.toUpperCase()}</button>`).join("")}
         </div>
@@ -1523,7 +1523,7 @@
         <span class="pf-prev" id="pfPrev" style="background:${avColor(name || "S")}">${current
           ? `<img src="${esc(current)}" alt="Staff photo" />` : `<span>${initials(name || "+")}</span>`}</span>
         <div class="pf-actions">
-          <button type="button" class="btn sm" id="pfUpload">📁 Upload Photo</button>
+          <button type="button" class="btn sm" id="pfUpload">${Icons.svg("upload", "ico-13")} Upload Photo</button>
           <input type="file" id="pfFile" hidden accept="image/png, image/jpeg, image/jpg, image/webp, image/*" />
           <button type="button" class="btn sm ghost" id="pfRemove" ${current ? "" : 'style="display:none"'}>Remove photo</button>
         </div>
@@ -1542,24 +1542,24 @@
     up.addEventListener("click", () => file.click());
     file.addEventListener("change", async () => {
       if (!file.files || !file.files[0]) return;
-      const label = up.textContent;
+      const label = up.innerHTML;
       try {
-        up.textContent = "⏳ Uploading…"; up.disabled = true;
+        up.textContent = "Uploading…"; up.disabled = true;
         modalBox._staffPhoto = await compressAvatar(file.files[0]);
         paint();
       } catch (err) { toast(err.message || "Could not read that photo", false); }
-      finally { up.textContent = label; up.disabled = false; file.value = ""; }
+      finally { up.innerHTML = label; up.disabled = false; file.value = ""; }
     });
     if (rm) rm.addEventListener("click", () => { modalBox._staffPhoto = ""; paint(); });
   }
 
   /* ---- Floor Team & Keys v3: grouped card-grid team dashboard ---- */
   const TEAM_GROUPS = [
-    { key: "mgmt", icon: "🛡️", title: "Store Management & Admins",
+    { key: "mgmt", icon: Icons.svg("shield", "ico-16"), title: "Store Management & Admins",
       sub: "Master access keys, ledger privileges & system configuration.", roles: ["admin", "manager"] },
-    { key: "pos",  icon: "💳", title: "Cashiers & POS Operators",
+    { key: "pos",  icon: Icons.svg("credit-card", "ico-16"), title: "Cashiers & POS Operators",
       sub: "Terminal billing, cash drawer sync & customer contacts on the floor.", roles: ["cashier"] },
-    { key: "boda", icon: "🏍️", title: "Boda Dispatch & Logistics",
+    { key: "boda", icon: Icons.svg("bike", "ico-16"), title: "Boda Dispatch & Logistics",
       sub: "Local order fulfilment & drop-offs across Kampala.", roles: ["rider"] }
   ];
   const teamFilters = { q: "", role: "all", status: "all", load: "all" };
@@ -1636,7 +1636,7 @@
   function staffCardHTML(p, activeAdmins) {
     const dotTone = p.badge.tone === "green" ? "on" : p.badge.tone === "blue" ? "busy" : "";
     const barCls = p.pct >= 80 ? "" : p.pct >= 40 ? "mid" : "low";
-    const taskIco = !p.active ? "⛔" : p.badge.tone === "green" ? "✅" : p.badge.tone === "blue" ? "🛵" : "⏸";
+    const taskIco = !p.active ? Icons.svg("ban", "ico-13") : p.badge.tone === "green" ? Icons.svg("check-circle", "ico-13") : p.badge.tone === "blue" ? Icons.svg("bike", "ico-13") : Icons.svg("pause-circle", "ico-13");
     const lastAdmin = p.role === "admin" && activeAdmins <= 1 && p.active;
     return `
     <article class="staff-card ${p.active ? "" : "deactivated"}" data-staff-card="${esc(p.id)}">
@@ -1651,10 +1651,10 @@
         <div class="sc-menu-wrap">
           <button class="sc-menu-btn" type="button" data-team-menu="${esc(p.id)}" aria-haspopup="true" aria-label="Staff actions">…</button>
           <div class="sc-menu" role="menu">
-            <button type="button" data-edit-profile="${esc(p.id)}">👤 Edit Profile & Photo</button>
-            <button type="button" data-key-staff="${esc(p.id)}">🔑 Edit Key / Passcode</button>
-            <button type="button" data-change-role="${esc(p.id)}">🔁 Change Role</button>
-            ${lastAdmin ? "" : `<button type="button" class="${p.active ? "danger" : ""}" data-toggle-staff="${esc(p.id)}">${p.active ? "⛔ Deactivate Account" : "✅ Reactivate Account"}</button>`}
+            <button type="button" data-edit-profile="${esc(p.id)}">${Icons.svg("user", "ico-13")} Edit Profile & Photo</button>
+            <button type="button" data-key-staff="${esc(p.id)}">${Icons.svg("key-round", "ico-13")} Edit Key / Passcode</button>
+            <button type="button" data-change-role="${esc(p.id)}">${Icons.svg("refresh-cw", "ico-13")} Change Role</button>
+            ${lastAdmin ? "" : `<button type="button" class="${p.active ? "danger" : ""}" data-toggle-staff="${esc(p.id)}">${p.active ? Icons.svg("ban", "ico-13") + " Deactivate Account" : Icons.svg("check-circle", "ico-13") + " Reactivate Account"}</button>`}
           </div>
         </div>
       </div>
@@ -1668,8 +1668,8 @@
         <span class="t-txt">${esc(p.badge.text)}</span>
       </div>
       <div class="sc-foot">
-        <button class="btn" type="button" data-key-staff="${esc(p.id)}">🔑 Key Settings</button>
-        <button class="btn" type="button" data-staff-activity="${esc(p.id)}">📊 View Activity</button>
+        <button class="btn" type="button" data-key-staff="${esc(p.id)}">${Icons.svg("key-round", "ico-13")} Key Settings</button>
+        <button class="btn" type="button" data-staff-activity="${esc(p.id)}">${Icons.svg("bar-chart-3", "ico-13")} View Activity</button>
       </div>
     </article>`;
   }
@@ -1741,7 +1741,7 @@
     Keys.require(() => {
       openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>👤 Edit Profile — ${esc(s.name)}</h3>
+      <h3>${Icons.svg("user", "ico-16")} Edit Profile — ${esc(s.name)}</h3>
       <p class="muted small">Update this member's details. The photo is uploaded from the operator's local files or gallery.</p>
       ${staffPhotoFieldHTML(s.photo || "", s.name)}
       <div class="field"><label>Full name</label><input class="sel-full" id="mpfName" value="${esc(s.name)}" /></div>
@@ -1758,7 +1758,7 @@
     const s = DB.listStaff().find(x => x.id === id); if (!s) return;
     Keys.require(() => openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>🔑 Key Settings — ${esc(s.name)}</h3>
+      <h3>${Icons.svg("key-round", "ico-16")} Key Settings — ${esc(s.name)}</h3>
       <p class="muted small">${esc(DB.ROLE_LABELS[s.role] || s.role)}</p>
       <p class="muted small" style="margin-top:6px">Terminal PIN: 4–8 digits, or an access word of 6+ characters. Leave blank to clear the key (open-access mode only).</p>
       <div class="field" style="margin-top:10px"><label>New terminal PIN / access key</label>
@@ -1772,7 +1772,7 @@
     const s = DB.listStaff().find(x => x.id === id); if (!s) return;
     Keys.require(() => openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>🔁 Change Role — ${esc(s.name)}</h3>
+      <h3>${Icons.svg("refresh-cw", "ico-16")} Change Role — ${esc(s.name)}</h3>
       <p class="muted small">Adjust this member's access level. The change takes effect immediately on every terminal and console session.</p>
       <div class="field" style="margin-top:10px"><label>Assigned role</label>
         <select class="sel-full" id="mrRole">${DB.STAFF_ROLES.map(r => `<option value="${r}" ${r === s.role ? "selected" : ""}>${DB.ROLE_LABELS[r]}</option>`).join("")}</select></div>
@@ -1788,22 +1788,22 @@
     sales.forEach(x => {
       if (x.cashier && x.cashier.name === s.name) {
         const items = (x.items || []).reduce((a, i) => a + (i.qty || 1), 0);
-        events.push({ at: x.created_at, ico: "🧾", text: `Sale ${x.id} — ${items} item${items === 1 ? "" : "s"} · ${x.channel === "web" ? "Web order" : "POS register"}`, amt: ugx(x.total || 0) });
+        events.push({ at: x.created_at, ico: Icons.svg("receipt", "ico-14"), text: `Sale ${x.id} — ${items} item${items === 1 ? "" : "s"} · ${x.channel === "web" ? "Web order" : "POS register"}`, amt: ugx(x.total || 0) });
       }
       if ((x.assigned_rider_name || x.rider_name) === s.name) {
-        events.push({ at: x.updated_at || x.created_at, ico: "🏍️", text: `${x.dispatch_status || "Dispatch"} — Order ${x.id}${x.customer_location ? ` (${x.customer_location})` : ""}`, amt: ugx(x.total || 0) });
+        events.push({ at: x.updated_at || x.created_at, ico: Icons.svg("bike", "ico-14"), text: `${x.dispatch_status || "Dispatch"} — Order ${x.id}${x.customer_location ? ` (${x.customer_location})` : ""}`, amt: ugx(x.total || 0) });
       }
     });
     ledger.forEach(e => {
       if (e.by !== s.name) return;
       const kindLabel = (DB.LEDGER_KIND_LABELS && DB.LEDGER_KIND_LABELS[e.kind]) || e.kind;
-      events.push({ at: e.created_at, ico: e.kind === "expense" ? "💸" : e.kind === "refund" ? "↩️" : "📒", text: `${kindLabel}${e.note ? " — " + e.note : ""}`, amt: ugx(Math.abs(e.amount || 0)) });
+      events.push({ at: e.created_at, ico: e.kind === "expense" ? Icons.svg("wallet", "ico-14") : e.kind === "refund" ? Icons.svg("undo-2", "ico-14") : Icons.svg("book-open", "ico-14"), text: `${kindLabel}${e.note ? " — " + e.note : ""}`, amt: ugx(Math.abs(e.amount || 0)) });
     });
     events.sort((a, b) => String(b.at).localeCompare(String(a.at)));
     const salesTotal = sales.filter(x => x.cashier && x.cashier.name === s.name).reduce((a, x) => a + (x.total || 0), 0);
     openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>📊 Activity Log — ${esc(s.name)}</h3>
+      <h3>${Icons.svg("bar-chart-3", "ico-16")} Activity Log — ${esc(s.name)}</h3>
       <p class="muted small">${esc(DB.ROLE_LABELS[s.role] || s.role)} · Audit trail of sales, expenses logged and orders handled.</p>
       <div class="act-summary">
         <div><span>${events.length}</span>events on record</div>
@@ -2099,7 +2099,7 @@
 
   $("#lockToggle").addEventListener("change", e => {
     Keys.require(() => DB.updateSettings({ access_locked: e.target.checked }).then(() => {
-      toast(e.target.checked ? "🔒 Access lock ON — POS & console now require staff keys" : "🔓 Open access mode enabled");
+      toast(e.target.checked ? "Access lock ON — POS & console now require staff keys" : "Open access mode enabled");
       if (e.target.checked && !DB.listStaff().some(s => s.pin)) toast("No staff keys are set yet — unlock stays symbolic until you add one", true);
     }));
   });

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/login.css?v=2.4" />
+<link rel="stylesheet" href="css/login.css?v=5.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -32,8 +32,8 @@
         </div>
       </div>
       <div class="session-actions">
-        <a class="btn primary" id="btnSessPos">🧾 Enter POS Register</a>
-        <a class="btn" id="btnSessAdmin" hidden>📊 Open OPS Dashboard</a>
+        <a class="btn primary" id="btnSessPos"><i data-icon="receipt" data-size="14"></i> Enter POS Register</a>
+        <a class="btn" id="btnSessAdmin" hidden><i data-icon="bar-chart-3" data-size="14"></i> Open OPS Dashboard</a>
         <button class="btn ghost" id="btnSessSignOut" type="button">Sign Out / Switch Terminal Key</button>
       </div>
     </div>
@@ -41,12 +41,12 @@
     <!-- Open access notice (lock is OFF) -->
     <div id="openPane" hidden>
       <div class="notice">
-        🔓 The store system is currently in <strong>open access mode</strong>.<br />
+        <i data-icon="unlock" data-size="14"></i> The store system is currently in <strong>open access mode</strong>.<br />
         You can launch the POS terminal directly or sign in with your Staff Terminal Key / PIN below.
       </div>
       <div style="margin-bottom:18px;">
-        <a class="btn primary" id="goPos">🧾 Enter POS terminal</a>
-        <a class="btn" id="goAdmin">📊 Open OPS dashboard</a>
+        <a class="btn primary" id="goPos"><i data-icon="receipt" data-size="14"></i> Enter POS terminal</a>
+        <a class="btn" id="goAdmin"><i data-icon="bar-chart-3" data-size="14"></i> Open OPS dashboard</a>
       </div>
     </div>
 
@@ -54,8 +54,8 @@
     <div id="authPane">
       <!-- Mode Tabs (Touch PIN vs Alphanumeric Key) -->
       <div class="auth-tabs" id="authTabs">
-        <button class="auth-tab active" id="tabPin" type="button">📱 Touch PIN</button>
-        <button class="auth-tab" id="tabKey" type="button">🔑 Terminal Key / Text</button>
+        <button class="auth-tab active" id="tabPin" type="button"><i data-icon="smartphone" data-size="14"></i> Touch PIN</button>
+        <button class="auth-tab" id="tabKey" type="button"><i data-icon="key-round" data-size="14"></i> Terminal Key / Text</button>
       </div>
 
       <!-- PIN Keypad View -->
@@ -81,6 +81,7 @@
   </div>
 
   <script src="js/analytics.js"></script>
+  <script src="js/icons.js?v=1.0"></script>
   <script src="js/db.js?v=3.1"></script>
   <script src="js/auth.js?v=2.6"></script>
   <script src="js/login.js?v=2.6"></script>
