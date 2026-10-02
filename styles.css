@@ -1117,3 +1117,177 @@ html, body { max-width: 100vw; overflow-x: hidden; }
   input[type="text"], input[type="search"], input[type="number"],
   input[type="date"], select, textarea { font-size: 16px; }
 }
+
+/* ======================================================================
+   FLOOR TEAM & KEYS v3 — card-based team management dashboard
+   Grouped department sections · responsive card grid (1-col phone,
+   3–4 cards per row desktop) · live metrics, badges & action menus.
+   ====================================================================== */
+
+/* ---- top filtering & control bar ---- */
+.team-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px; box-shadow: var(--shadow); margin-bottom: 20px; min-width: 0;
+}
+.team-search {
+  flex: 1 1 240px; min-width: 0; display: flex; align-items: center; gap: 8px;
+  background: var(--page); border: 1px solid var(--line); border-radius: 10px; padding: 0 12px;
+}
+.team-search:focus-within { border-color: var(--ink); }
+.team-search .ts-ico { flex-shrink: 0; font-size: 13px; opacity: .7; }
+.team-search input {
+  border: 0; outline: 0; background: transparent; width: 100%; min-width: 0;
+  padding: 11px 0; font: inherit; color: var(--ink);
+}
+.team-filter { flex: 0 1 auto; width: auto; min-width: 150px; padding: 11px 12px; cursor: pointer; }
+.team-toolbar .btn.primary { margin-left: auto; white-space: nowrap; }
+@media (max-width: 860px) {
+  .team-filter { flex: 1 1 calc(33% - 10px); min-width: 0; }
+  .team-toolbar .btn.primary { margin-left: 0; flex: 1 1 100%; }
+}
+@media (max-width: 560px) { .team-filter { flex: 1 1 100%; } }
+
+/* ---- department sections ---- */
+.team-section { margin-bottom: 28px; min-width: 0; }
+.team-section-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 4px; min-width: 0;
+}
+.team-section-head .tsh-ico { font-size: 17px; }
+.team-section-head h2 { font: 700 18px var(--font-display); color: var(--ink); letter-spacing: -0.01em; }
+.team-section-head .tally {
+  background: var(--tint); color: var(--muted); border-radius: 999px;
+  font-size: 11px; font-weight: 800; padding: 3px 10px;
+}
+.team-section-sub { font-size: 12px; color: var(--muted); margin: 0 0 12px 27px; }
+.team-empty {
+  border: 1px dashed var(--line); border-radius: 14px; background: var(--card);
+  color: var(--muted); font-size: 12.5px; padding: 18px; text-align: center;
+}
+
+/* ---- responsive card grid: 1-col phones → 3–4 per row desktop ---- */
+.team-grid {
+  display: grid; width: 100%; gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+}
+@media (max-width: 480px) { .team-grid { grid-template-columns: 1fr; } }
+
+/* ---- individual staff card ---- */
+.staff-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow); padding: 16px 16px 14px;
+  display: flex; flex-direction: column; gap: 12px; min-width: 0; position: relative;
+  transition: border-color .15s, transform .15s, box-shadow .15s;
+}
+.staff-card:hover { border-color: #D8CEC5; transform: translateY(-2px); box-shadow: 0 12px 28px rgba(23, 18, 16, .1); }
+.staff-card.deactivated { opacity: .62; }
+.staff-card.deactivated:hover { transform: none; }
+
+/* card header: avatar + identity + action menu */
+.sc-head { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.sc-ava {
+  position: relative; width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+  display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 16px;
+}
+.sc-dot {
+  position: absolute; right: -1px; bottom: -1px; width: 13px; height: 13px;
+  border-radius: 50%; border: 2.5px solid var(--card); background: #A9A098;
+}
+.sc-dot.on   { background: #2F9E57; box-shadow: 0 0 6px rgba(47, 158, 87, .6); }
+.sc-dot.busy { background: #3B66D9; box-shadow: 0 0 6px rgba(59, 102, 217, .6); }
+.sc-id { flex: 1; min-width: 0; }
+.sc-name {
+  font-weight: 800; font-size: 14.5px; color: var(--ink); line-height: 1.3;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.sc-title { font-size: 12px; color: var(--rust); font-weight: 700; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-contact { font-size: 11px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* [ … ] action menu */
+.sc-menu-wrap { position: relative; flex-shrink: 0; margin-left: auto; }
+.sc-menu-btn {
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--card); color: var(--muted); cursor: pointer;
+  font: 800 15px/1 var(--font-text); letter-spacing: 1px; padding-bottom: 7px;
+}
+.sc-menu-btn:hover { border-color: var(--ink); color: var(--ink); }
+.sc-menu {
+  position: absolute; right: 0; top: 35px; z-index: 40; min-width: 190px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(23, 18, 16, .2); padding: 5px; display: none;
+}
+.sc-menu-wrap.open .sc-menu { display: block; }
+.sc-menu button {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  border-radius: 8px; padding: 9px 11px; cursor: pointer;
+  font: 600 12.5px var(--font-text); color: var(--ink);
+}
+.sc-menu button:hover { background: var(--tint); }
+.sc-menu button.danger { color: var(--red); }
+.sc-menu button.danger:hover { background: #FBEDEA; }
+
+/* live metric + shift progress bar */
+.sc-progress { min-width: 0; }
+.sc-prog-top {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  font-size: 11.5px; color: var(--muted); margin-bottom: 6px; min-width: 0;
+}
+.sc-prog-top .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sc-prog-top strong { color: var(--ink); white-space: nowrap; flex-shrink: 0; }
+.sc-bar { height: 7px; border-radius: 999px; background: var(--tint); overflow: hidden; }
+.sc-bar i { display: block; height: 100%; border-radius: 999px; background: var(--green); transition: width .35s ease; }
+.sc-bar i.mid { background: var(--amber); }
+.sc-bar i.low { background: var(--rust); }
+
+/* active status / current task badge */
+.sc-badge {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 7px;
+  max-width: 100%; border-radius: 999px; padding: 5px 11px;
+  font-size: 11px; font-weight: 800; letter-spacing: .03em;
+}
+.sc-badge .bdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.sc-badge .btxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sc-badge.green { background: #DFF0E5; color: var(--green); }
+.sc-badge.blue  { background: #E4EAFB; color: var(--blue); }
+.sc-badge.gray  { background: var(--tint); color: var(--muted); }
+
+/* footer quick actions */
+.sc-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; padding-top: 2px; }
+.sc-foot .btn { width: 100%; padding: 9px 6px; font-size: 12px; border-radius: 9px; white-space: nowrap; }
+
+/* ---- COMPONENT ISOLATION GUARANTEE ----
+   The staff workspace is a sealed stacking context; receipt / invoice
+   and terminal artefacts can never paint inside or underneath it. */
+#view-staff { position: relative; isolation: isolate; min-width: 0; }
+#view-staff .receipt-paper, #view-staff .rc, #view-staff .receipt-preview,
+#view-staff #receiptSheet { display: none !important; }
+
+/* ---- staff activity audit-log modal ---- */
+.act-summary {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0 12px;
+}
+.act-summary > div {
+  background: var(--tint); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px 8px; text-align: center; font-size: 10.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em; font-weight: 700; min-width: 0;
+}
+.act-summary span {
+  display: block; font: 800 15px var(--font-display); color: var(--ink);
+  margin-bottom: 3px; letter-spacing: 0; text-transform: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.act-list { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
+.act-row {
+  display: flex; align-items: center; gap: 11px; min-width: 0;
+  background: var(--card); border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px;
+}
+.act-ico { flex-shrink: 0; font-size: 16px; }
+.act-main { flex: 1; min-width: 0; }
+.act-text { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act-when { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+.act-amt { flex-shrink: 0; font: 700 12.5px var(--font-display); color: var(--ink); white-space: nowrap; }
+@media (max-width: 480px) {
+  .act-summary { grid-template-columns: 1fr 1fr; }
+  .act-summary > div:last-child { grid-column: 1 / -1; }
+}

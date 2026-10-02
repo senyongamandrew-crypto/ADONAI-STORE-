@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.2" />
+<link rel="stylesheet" href="styles.css?v=4.3" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -384,7 +384,6 @@
           <h1>Floor Team &amp; Keys</h1>
           <p class="muted">Manage cashier accounts, manager authority, and boda dispatch personnel.</p>
         </div>
-        <button class="btn primary" id="btnAddStaff">+ Add Staff Member</button>
       </div>
 
       <div class="access-card" style="margin-bottom:16px">
@@ -396,7 +395,35 @@
         <label class="switch"><input type="checkbox" id="lockToggle" /><span class="slider"></span></label>
       </div>
 
-      <div class="staff-list" id="staffRows"></div>
+      <!-- top filtering & control bar -->
+      <div class="team-toolbar" id="teamToolbar">
+        <label class="team-search">
+          <span class="ts-ico" aria-hidden="true">🔎</span>
+          <input type="search" id="teamSearch" placeholder="Search name, phone (+256…) or email…" autocomplete="off" />
+        </label>
+        <select class="sel-full team-filter" id="teamRoleFilter" title="Filter by role">
+          <option value="all">Role · All</option>
+          <option value="admin">Admins &amp; Managers</option>
+          <option value="cashier">Cashiers</option>
+          <option value="rider">Boda Riders</option>
+        </select>
+        <select class="sel-full team-filter" id="teamStatusFilter" title="Filter by duty status">
+          <option value="all">Status · All</option>
+          <option value="on">On Shift</option>
+          <option value="off">Off Duty</option>
+          <option value="deactivated">Deactivated</option>
+        </select>
+        <select class="sel-full team-filter" id="teamLoadFilter" title="Filter by shift / workload">
+          <option value="all">Shift / Workload · All</option>
+          <option value="ahead">Ahead of target (≥ 80%)</option>
+          <option value="track">On track (40–79%)</option>
+          <option value="light">Light load (&lt; 40%)</option>
+        </select>
+        <button class="btn primary" id="btnAddStaff">+ Add Staff Member</button>
+      </div>
+
+      <!-- grouped team card grid (rendered by app.js) -->
+      <div id="teamSections"></div>
     </section>
 
     <!-- ==================== STORE SETTINGS ==================== -->
@@ -447,6 +474,6 @@
 <script src="js/db.js?v=3.0"></script>
 <script src="js/auth.js?v=2.6"></script>
 <script src="js/intake.js?v=3.0"></script>
-<script src="app.js?v=4.1"></script>
+<script src="app.js?v=4.2"></script>
 </body>
 </html>
