@@ -1,5 +1,9 @@
 # Render PostgreSQL migrations
 
+## 50/50 transport allocation — 2026-10-02
+
+Run `20261002_transport_allocation.sql` on Render after deploying this version. It adds generated PostgreSQL columns for the embedded and checkout portions and preserves existing catalog prices as `base_price`. Inventory entry and order checkout also recalculate these values server-side, so client-supplied delivery fees are not trusted.
+
 ## Financial Ledgers hub — 2026-10-01
 
 The application keeps the existing `DATABASE_URL` behavior unchanged. At startup, `db_init.py` uses SQLAlchemy `create_all()` for new tables and an idempotent additive column migration for existing tables.

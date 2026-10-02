@@ -38,6 +38,11 @@ def apply_additive_schema_migrations():
         "products": [
             ("stock_lot_id", "VARCHAR(64)"),
             ("inventory_status", "VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE'"),
+            ("base_price", "NUMERIC(14,2) NOT NULL DEFAULT 0"),
+            ("total_transport_cost", "NUMERIC(14,2) NOT NULL DEFAULT 0"),
+            ("embedded_transport_portion", "NUMERIC(14,2) GENERATED ALWAYS AS (total_transport_cost * 0.50) STORED"),
+            ("checkout_transport_portion", "NUMERIC(14,2) GENERATED ALWAYS AS (total_transport_cost * 0.50) STORED"),
+            ("final_selling_price", "NUMERIC(14,2) GENERATED ALWAYS AS (base_price + (total_transport_cost * 0.50)) STORED"),
         ],
         "order_items": [
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
@@ -54,6 +59,9 @@ def apply_additive_schema_migrations():
                         text(f"ALTER TABLE {table_name} ADD COLUMN {name} {declaration}")
                     )
                     logger.info("Added safe column %s.%s", table_name, name)
+        # Existing catalog prices predate transport allocation: preserve them as
+        # the base price and start with a zero transport allocation.
+        connection.execute(text("UPDATE products SET base_price = selling_price WHERE base_price = 0 AND selling_price > 0"))
         for statement in (
             "CREATE INDEX IF NOT EXISTS ix_products_stock_lot_id ON products(stock_lot_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",

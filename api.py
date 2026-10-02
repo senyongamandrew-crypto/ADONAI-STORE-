@@ -17,6 +17,7 @@ import time
 import uuid
 
 from database import DATABASE_URL, IS_POSTGRES, engine, get_db
+from pricing import transport_allocation, whole_money
 from models import (
     AccountingJournalEntry,
     AccountingJournalLine,
@@ -211,6 +212,7 @@ ACCOUNT_NAMES = {
     "1020": "Bank Account",
     "1100": "Accounts Receivable",
     "1200": "Inventory Asset",
+    "1300": "Logistics / Transport Expense",
     "4000": "Sales Revenue",
     "5000": "Cost of Goods Sold",
     "5100": "Operating Expense",
@@ -494,7 +496,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 }, status=401)
 
             try:
-                selling_price = parse_positive_int(body.get("selling_price"), "Selling price")
+                supplied_base = body.get("base_price", body.get("selling_price"))
+                base_price = parse_positive_int(supplied_base, "Base price")
+                transport_cost = parse_positive_int(body.get("total_transport_cost", 0), "Total transport cost", allow_zero=True)
+                allocation = transport_allocation(base_price, transport_cost)
+                selling_price = whole_money(allocation["final_selling_price"])
                 stock_count = parse_positive_int(body.get("in_stock_count", 1), "Stock quantity", allow_zero=True)
                 supplied_cost = parse_positive_int(body.get("cost_price", 0), "Cost price", allow_zero=True)
                 compare_price = parse_positive_int(body.get("compare_price", 0), "Compare price", allow_zero=True)
@@ -518,6 +524,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         lot.status = "ALLOCATED"
                     if supplied_cost <= 0:
                         supplied_cost = lot.unit_cost
+                    # Bale breakdowns allocate the lot's transport evenly per
+                    # item when intake did not provide an item-level override.
+                    if "total_transport_cost" not in body:
+                        transport_cost = (lot.shipping_cost or 0) / max(1, lot.item_count)
+                        allocation = transport_allocation(base_price, transport_cost)
+                        selling_price = whole_money(allocation["final_selling_price"])
 
                 prod = Product(
                     id=pid,
@@ -531,6 +543,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     size=body.get("size", "-"),
                     condition=body.get("condition", "Grade A — Excellent"),
                     cost_price=supplied_cost,
+                    base_price=allocation["base_price"],
+                    total_transport_cost=allocation["total_transport_cost"],
                     selling_price=selling_price,
                     compare_price=compare_price,
                     in_stock_count=stock_count,
@@ -590,6 +604,16 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         setattr(prod, key, value)
                 if "images" in body:
                     prod.images = body.get("images") or []
+                if "base_price" in body or "total_transport_cost" in body or "selling_price" in body:
+                    try:
+                        base = body.get("base_price", prod.base_price or prod.selling_price)
+                        transport = body.get("total_transport_cost", prod.total_transport_cost or 0)
+                        allocation = transport_allocation(base, transport)
+                    except (ValueError, TypeError) as exc:
+                        return json_response({"ok": False, "error": str(exc)}, status=400)
+                    prod.base_price = allocation["base_price"]
+                    prod.total_transport_cost = allocation["total_transport_cost"]
+                    prod.selling_price = whole_money(allocation["final_selling_price"])
                 if prod.in_stock_count > 0 and prod.inventory_status == "SOLD":
                     prod.inventory_status = "AVAILABLE"
                 session.flush()
@@ -804,7 +828,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         raise ValueError("Every order item requires a product ID")
                     qty = parse_positive_int(item.get("qty", 1), f"Quantity for {pid}")
                     requested[pid] = requested.get(pid, 0) + qty
-                delivery_fee = parse_positive_int(body.get("delivery_fee", 0), "Delivery fee", allow_zero=True)
+                # Ignore client-supplied flat fees. They are recalculated from
+                # the catalog's explicit checkout transport portions below.
             except ValueError as exc:
                 return json_response({"ok": False, "error": str(exc)}, status=400)
 
@@ -837,6 +862,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     products[pid] = prod
                     active_locks[pid] = own_lock
 
+                delivery_fee = 0 if body.get("delivery_type", "boda") == "pickup" else sum(
+                    whole_money((products[pid].checkout_transport_portion if products[pid].checkout_transport_portion is not None else (products[pid].total_transport_cost or 0) * 0.5) * requested[pid])
+                    for pid in requested
+                )
                 order_id = body.get("id") or f"AT-{int(time.time() * 1000) % 1000000:06d}-{uuid.uuid4().hex[:4].upper()}"
                 subtotal = 0
                 cogs = 0
@@ -1135,7 +1164,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     occurred_at=acquired_at,
                     staff=staff_info,
                     lines=[
-                        {"account_code": "1200", "account_name": ACCOUNT_NAMES["1200"], "debit": total_landed},
+                        *([{ "account_code": "1200", "account_name": ACCOUNT_NAMES["1200"], "debit": acquisition_cost }] if acquisition_cost else []),
+                        *([{ "account_code": "1300", "account_name": ACCOUNT_NAMES["1300"], "debit": shipping_cost }] if shipping_cost else []),
                         {"account_code": pay_code, "account_name": pay_name, "credit": total_landed},
                     ],
                 )
