@@ -65,7 +65,7 @@ input, select, textarea { max-width: 100%; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   min-height: 100vh; display: grid; place-items: center; padding: 20px;
-  background: radial-gradient(900px 500px at 50% -10%, #F1E8DD, var(--page));
+  background: radial-gradient(900px 500px at 50% -10%, #EDF4E8, var(--page));
   color: var(--ink); font: 15px/1.5 var(--font-text); -webkit-font-smoothing: antialiased;
 }
 .card {
@@ -94,7 +94,7 @@ h1 { font: 800 24px var(--font-display); letter-spacing: 0; color: var(--ink); }
 .session-info strong { display: block; font-size: 14px; color: var(--ink); }
 .session-role {
   display: inline-block; font-size: 11px; font-weight: 700; text-transform: uppercase;
-  color: var(--rust); background: rgba(194,78,43,0.1); padding: 2px 8px; border-radius: 6px; margin-top: 2px;
+  color: var(--rust); background: rgba(51,116,24,0.1); padding: 2px 8px; border-radius: 6px; margin-top: 2px;
 }
 .session-actions { display: flex; flex-direction: column; gap: 8px; }
 
@@ -107,7 +107,7 @@ h1 { font: 800 24px var(--font-display); letter-spacing: 0; color: var(--ink); }
   background: #FFF8E6; border-color: #FFE08A; color: #8C5B00;
 }
 .notice.info {
-  background: #EBF4FC; border-color: #BEE3F8; color: #2B6CB0;
+  background: #E7F2E0; border-color: #C4DDB6; color: #337418;
 }
 
 /* Button styles */
