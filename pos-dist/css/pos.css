@@ -918,7 +918,8 @@ html, body { max-width: 100vw; overflow-x: hidden; }
    hidden while the cart is empty — the product catalog spans 100% of
    the workspace — and slides into view only once an item is selected:
      · ≥768px  — right-hand side drawer (catalog shares space with it)
-     · <768px  — bottom action sheet (slides up, max 80vh)
+     · <768px  — overlay drawer merging in from the same right edge,
+                 collapsible to a slim tab pinned to that edge
    Visibility is driven purely by the .has-cart-items class that
    js/pos.js toggles on the layout container as the cart length changes.
    ====================================================================== */
@@ -926,10 +927,6 @@ html, body { max-width: 100vw; overflow-x: hidden; }
 @keyframes pos-drawer-slide-in {
   from { transform: translateX(60px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
-}
-@keyframes pos-sheet-slide-up {
-  from { transform: translateY(100%); opacity: .4; }
-  to   { transform: translateY(0);    opacity: 1; }
 }
 
 /* POS main layout container */
@@ -967,23 +964,76 @@ html, body { max-width: 100vw; overflow-x: hidden; }
   animation: pos-drawer-slide-in .3s ease-in-out;
 }
 
-/* Mobile bottom action sheet adaptation (<768px) */
+/* Mobile adaptation (<768px): the Current Sale panel merges in from the
+   RIGHT EDGE of the dashboard — same direction as the desktop drawer —
+   never from the bottom. Collapsed, it tucks away off-screen leaving a
+   slim floating tab on the right edge so the catalog stays usable. */
 @media screen and (max-width: 767px) {
   .pos-dashboard-layout.has-cart-items .pos-cart-sidebar {
     position: fixed;
-    bottom: 0;
-    left: 0;
+    top: 0;
     right: 0;
-    width: 100%;
-    max-height: 80vh;
-    border-top-left-radius: 18px;
-    border-top-right-radius: 18px;
+    bottom: 0;
+    left: auto;
+    width: min(86vw, 390px);
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    border-top: 0;
+    border-left: 1px solid var(--line);
     z-index: 1000;
-    box-shadow: 0 -10px 34px rgba(0, 0, 0, .16);
-    animation: pos-sheet-slide-up .3s ease-in-out;
+    padding-bottom: var(--sa-b, 0px);
+    animation: none;
+    transform: translateX(100%);
+    transition: transform .3s ease-in-out;
+    box-shadow: none;
+    overflow: visible;
   }
-  /* no docked bar when the cart is empty → no reserved clearance needed */
-  .pos-dashboard-layout:not(.has-cart-items) { padding-bottom: 0; }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar.open {
+    transform: translateX(0);
+    box-shadow: -10px 0 34px rgba(0, 0, 0, .22);
+  }
+
+  /* drawer content is always fully expanded — visibility is handled by
+     sliding the whole panel, not by collapsing its body */
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-body {
+    max-height: none !important;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    transition: none;
+  }
+
+  /* open state: the dark summary strip becomes the drawer's header */
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-toggle {
+    border-radius: 0;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar.open .cart-toggle .ct-chevron {
+    transform: rotate(-90deg);   /* points toward the right edge = dismiss */
+  }
+
+  /* collapsed state: protruding tab pinned to the dashboard's right edge */
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar:not(.open) .cart-toggle {
+    position: absolute;
+    left: -54px;
+    top: 30%;
+    width: 54px;
+    flex-direction: column;
+    gap: 7px;
+    padding: 13px 8px;
+    border-radius: 14px 0 0 14px;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, .28);
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar:not(.open) .cart-toggle .ct-label,
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar:not(.open) .cart-toggle .ct-total {
+    display: none;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar:not(.open) .cart-toggle .ct-chevron {
+    margin-left: 0;
+    transform: rotate(90deg);    /* points into the screen = pull drawer in */
+  }
+
+  /* no bottom dock anymore → no reserved clearance under the catalog */
+  .pos-dashboard-layout { padding-bottom: 0; }
 }
 
 /* ======================================================================

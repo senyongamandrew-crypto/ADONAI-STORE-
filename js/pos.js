@@ -308,9 +308,10 @@
 
   /* ---- dynamic "Current Sale" drawer visibility ----
      The checkout panel is hidden while the cart is empty so the catalog
-     spans the full workspace. The first selected item slides it in
-     (right drawer ≥768px, bottom sheet <768px); clearing the cart,
-     removing the last line, or completing a charge slides it away. */
+     spans the full workspace. The first selected item slides it in from
+     the right edge on every viewport (inline drawer ≥768px, overlay
+     drawer <768px); clearing the cart, removing the last line, or
+     completing a charge slides it away. */
   const getCartTotalCount = () => cart.reduce((s, l) => s + l.qty, 0);
   function syncCartVisibility() {
     const layoutContainer = document.querySelector(".pos-dashboard-layout");
@@ -357,9 +358,9 @@
         const line = cart.find(x => x.product_id === pid);
         if (line) line.qty++; else cart.push({ product_id: pid, qty: 1 });
         renderCart();
-        // On phones the selected-items panel is a collapsed bottom sheet. Open
-        // it after a successful tap so the cashier can immediately see and
-        // continue with the item they selected.
+        // On phones the selected-items panel is an overlay drawer docked to
+        // the right edge. Slide it in after a successful tap so the cashier
+        // can immediately see and continue with the item they selected.
         if (isCartDocked()) setCartOpen(true);
         return true;
       } catch (error) {
