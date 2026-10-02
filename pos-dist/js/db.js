@@ -56,7 +56,10 @@
     if (d === "Ready for Pickup" || d === "Dispatched" || d === "With rider" || d === "Handed over") return "ready";
     return "completed";
   };
-  const DEFAULT_MASTER_KEY = "ADONAI-MASTER-2026";  // sandbox default per onboarding sheet — rotate in System Parameters
+  // SECURITY: there is no default/sandbox master key. Admin access requires a
+  // key explicitly configured by the owner (environment variable on the server
+  // or System Parameters). The old published default has been retired.
+  const DEFAULT_MASTER_KEY = "";
   // Live Render deployment — the public storefront and the API are served by the
   // same service. Fallback base used when the POS/admin runs inside the Android
   // APK shell (appassets origin) or another non-web container.
@@ -172,7 +175,7 @@
         base_delivery_fee: 7000,
         currency: "UGX",
         access_locked: false,               // OPEN ACCESS MODE until admin sets a key crew & flips the lock
-        admin_key: DEFAULT_MASTER_KEY       // rotate in System Parameters after onboarding
+        admin_key: ""                       // set a strong master key in System Parameters after onboarding
       },
       products,
       sales,
@@ -693,7 +696,9 @@
       const candidate = String(k || "").trim();
       if (!candidate) return false;
       const configured = String(state.settings.admin_key || "").trim();
-      return candidate === configured || candidate === DEFAULT_MASTER_KEY || candidate.toLowerCase() === DEFAULT_MASTER_KEY.toLowerCase();
+      // Only a key explicitly configured by the admin can unlock — no
+      // hardcoded fallback keys exist anymore.
+      return !!configured && candidate === configured;
     },
     setMasterKey(k) {
       const key = String(k || "").trim();

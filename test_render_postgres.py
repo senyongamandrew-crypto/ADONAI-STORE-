@@ -23,6 +23,13 @@ import unittest
 # Ensure current directory in python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Test harness security context: rate limiting is disabled for rapid-fire
+# unit requests, and a dedicated master key is provided via the environment
+# (the old hardcoded default key has been permanently retired).
+os.environ.setdefault("ADONAI_RATE_LIMIT_DISABLED", "1")
+TEST_MASTER_KEY = "TEST-MASTER-KEY-9271-SECURE"
+os.environ.setdefault("ADMIN_ACCESS_PIN", TEST_MASTER_KEY)
+
 from database import get_formatted_database_url, mask_database_url, get_db, engine
 from models import (
     AccountingJournalEntry,
@@ -125,7 +132,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "REQUEST_METHOD": "POST",
                 "PATH_INFO": "/api/orders",
                 "QUERY_STRING": "",
-                "HTTP_X_TERMINAL_KEY": "ADONAI-MASTER-2026",
+                "HTTP_X_TERMINAL_KEY": TEST_MASTER_KEY,
                 "CONTENT_LENGTH": str(len(json.dumps(payload))),
                 "wsgi.input": io.BytesIO(json.dumps(payload).encode("utf-8"))
             }
@@ -174,9 +181,11 @@ class TestRenderPostgresHardening(unittest.TestCase):
         data = json.loads(b"".join(resp).decode("utf-8"))
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["database"], "connected")
-        self.assertIn("products", data["tables"])
-        self.assertIn("orders", data["tables"])
-        print(f"✅ PASS: /api/health returned 200 OK with table verification: {data['tables']}")
+        # SECURITY: table names and pool internals must no longer be exposed.
+        self.assertNotIn("tables", data)
+        self.assertNotIn("pool", data)
+        self.assertGreaterEqual(data.get("tables_count", 0), 2)
+        print(f"✅ PASS: /api/health returned 200 OK without leaking schema details ({data['tables_count']} tables).")
 
     def test_05_api_sync_pull(self):
         """Test /api/sync/pull endpoint delivers complete sync payload for authenticated staff."""
@@ -192,11 +201,25 @@ class TestRenderPostgresHardening(unittest.TestCase):
         resp_unauthed = wsgi_app(environ_unauthed, lambda s, h: status_captured.append(s))
         self.assertTrue(status_captured[0].startswith("401"))
 
-        # 2. Authenticated request with Master Key must return 200 OK with full state
+        # 2. SECURITY: credentials in the URL query string must be REJECTED
+        # (they leak into access logs, browser history, and Referer headers).
+        environ_query_key = {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": "/api/sync/pull",
+            "QUERY_STRING": f"key={TEST_MASTER_KEY}",
+            "wsgi.input": io.BytesIO(b"")
+        }
+        status_query = []
+        wsgi_app(environ_query_key, lambda s, h: status_query.append(s))
+        self.assertTrue(status_query[0].startswith("401"),
+                        "Query-string credentials must no longer authenticate")
+
+        # 3. Authenticated request with Master Key header must return 200 OK with full state
         environ_authed = {
             "REQUEST_METHOD": "GET",
             "PATH_INFO": "/api/sync/pull",
-            "QUERY_STRING": "key=ADONAI-MASTER-2026",
+            "QUERY_STRING": "",
+            "HTTP_X_TERMINAL_KEY": TEST_MASTER_KEY,
             "wsgi.input": io.BytesIO(b"")
         }
         status_captured_auth = []
@@ -214,9 +237,12 @@ class TestRenderPostgresHardening(unittest.TestCase):
         """Test Staff Terminal Key and Admin Access PIN verification via environment variables and database."""
         import io
 
-        # 1. Test ADMIN_ACCESS_PIN environment variable
-        os.environ["ADMIN_ACCESS_PIN"] = "987654"
-        payload_admin = {"pin": "987654"}
+        # 1. Test ADMIN_ACCESS_PIN environment variable (restored afterwards
+        # so the suite-wide TEST_MASTER_KEY keeps working in later tests)
+        original_admin_pin = os.environ.get("ADMIN_ACCESS_PIN")
+        os.environ["ADMIN_ACCESS_PIN"] = "987654-TEST-ADMIN"
+        self.addCleanup(lambda: os.environ.update({"ADMIN_ACCESS_PIN": original_admin_pin} if original_admin_pin else {}))
+        payload_admin = {"pin": "987654-TEST-ADMIN"}
         environ_admin = {
             "REQUEST_METHOD": "POST",
             "PATH_INFO": "/api/auth/verify",
@@ -282,6 +308,23 @@ class TestRenderPostgresHardening(unittest.TestCase):
         self.assertFalse(data.get("ok"))
         self.assertTrue(status_cap[0].startswith("401"))
 
+        # 5. SECURITY: the retired hardcoded default master key must NEVER
+        # authenticate again, even if an old database row still contains it.
+        payload_retired = {"pin": "ADONAI-MASTER-2026"}
+        environ_retired = {
+            "REQUEST_METHOD": "POST",
+            "PATH_INFO": "/api/auth/verify",
+            "QUERY_STRING": "",
+            "CONTENT_LENGTH": str(len(json.dumps(payload_retired))),
+            "wsgi.input": io.BytesIO(json.dumps(payload_retired).encode("utf-8"))
+        }
+        status_cap = []
+        resp = wsgi_app(environ_retired, lambda s, h: status_cap.append(s))
+        data = json.loads(b"".join(resp).decode("utf-8"))
+        self.assertFalse(data.get("ok"))
+        self.assertTrue(status_cap[0].startswith("401"),
+                        "Retired default master key must be rejected")
+
         print("✅ PASS: Staff Terminal Key & Admin PIN environment variable verification passed.")
 
     def test_07_dual_target_endpoint_security(self):
@@ -346,7 +389,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
         lock_status, _ = self.api_request(
             "POST", "/api/inventory-locks/acquire",
             {"product_id": "PRD-1003", "lock_owner": lock_owner, "quantity": 1},
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(lock_status.startswith("200"))
         order_pos_authed = {
@@ -359,7 +402,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
             "REQUEST_METHOD": "POST",
             "PATH_INFO": "/api/orders",
             "QUERY_STRING": "",
-            "HTTP_X_TERMINAL_KEY": "ADONAI-MASTER-2026",
+            "HTTP_X_TERMINAL_KEY": TEST_MASTER_KEY,
             "CONTENT_LENGTH": str(len(json.dumps(order_pos_authed))),
             "wsgi.input": io.BytesIO(json.dumps(order_pos_authed).encode("utf-8"))
         }
@@ -412,7 +455,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "POST",
                 "/api/settings",
                 {"settings": {"store_name": live_name, "base_delivery_fee": 8500}},
-                "ADONAI-MASTER-2026"
+                TEST_MASTER_KEY
             )
             self.assertTrue(status.startswith("200"))
             self.assertTrue(updated.get("ok"))
@@ -445,7 +488,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "receipt_reference": f"RCT-{stamp}",
                 "occurred_at": datetime.now().strftime("%Y-%m-%dT%H:%M"),
             },
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("201"), posted)
         expense_id = posted["expense"]["id"]
@@ -460,7 +503,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
         status, corrected = self.api_request(
             "PUT", f"/api/finance/expenses/{expense_id}",
             {"category": "Packaging", "amount": 28000, "payment_method": "mobile_money", "vendor": "Corrected Vendor"},
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("200"), corrected)
         self.assertEqual(corrected["expense"]["amount"], 28000)
@@ -470,7 +513,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
         )
         self.assertTrue(denied_status.startswith("403"), "Cashiers must not access the executive dashboard")
         status, dashboard = self.api_request(
-            "GET", "/api/finance/dashboard", terminal_key="ADONAI-MASTER-2026",
+            "GET", "/api/finance/dashboard", terminal_key=TEST_MASTER_KEY,
             query=f"date={datetime.now().strftime('%Y-%m-%d')}",
         )
         self.assertTrue(status.startswith("200"), dashboard)
@@ -479,13 +522,13 @@ class TestRenderPostgresHardening(unittest.TestCase):
 
         status, voided = self.api_request(
             "POST", f"/api/finance/expenses/{expense_id}/void",
-            {"reason": "Automated audit test"}, "ADONAI-MASTER-2026",
+            {"reason": "Automated audit test"}, TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("200"), voided)
         self.assertEqual(voided["expense"]["status"], "VOID")
 
         journal_status, audit = self.api_request(
-            "GET", "/api/finance/journal", terminal_key="ADONAI-MASTER-2026",
+            "GET", "/api/finance/journal", terminal_key=TEST_MASTER_KEY,
             query=f"search={expense_id}",
         )
         self.assertTrue(journal_status.startswith("200"), audit)
@@ -515,7 +558,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "item_count": 4,
                 "payment_method": "bank",
             },
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("201"), lot_data)
         lot = lot_data["stock_lot"]
@@ -541,7 +584,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "in_stock_count": 2,
                 "stock_lot_id": lot["id"],
             },
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("201"), product_data)
         self.assertEqual(product_data["product"]["cost_price"], 30000)
@@ -551,21 +594,21 @@ class TestRenderPostgresHardening(unittest.TestCase):
             product.created_at = datetime.utcnow() - timedelta(days=100)
 
         status, aging = self.api_request(
-            "GET", "/api/finance/aging", terminal_key="ADONAI-MASTER-2026", query="days=90"
+            "GET", "/api/finance/aging", terminal_key=TEST_MASTER_KEY, query="days=90"
         )
         self.assertTrue(status.startswith("200"), aging)
         self.assertIn(product_id, [row["id"] for row in aging["products"]])
 
         status, markdown = self.api_request(
             "POST", f"/api/finance/aging/{product_id}/markdown",
-            {"new_price": 60000, "reason": "90-day sell-through"}, "ADONAI-MASTER-2026",
+            {"new_price": 60000, "reason": "90-day sell-through"}, TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("200"), markdown)
         self.assertEqual(markdown["product"]["selling_price"], 60000)
 
         status, writeoff = self.api_request(
             "POST", f"/api/finance/aging/{product_id}/write-off",
-            {"reason": "Damaged during automated test"}, "ADONAI-MASTER-2026",
+            {"reason": "Damaged during automated test"}, TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("200"), writeoff)
         self.assertEqual(writeoff["adjustment"]["loss_amount"], 60000)
@@ -593,7 +636,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
         status, held = self.api_request(
             "POST", "/api/inventory-locks/acquire",
             {"product_id": product_id, "lock_owner": owner, "quantity": 1},
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("200"), held)
 
@@ -615,7 +658,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 "items": [{"product_id": product_id, "qty": 1}],
                 "tender": {"type": "cash", "tendered": 95000},
             },
-            "ADONAI-MASTER-2026",
+            TEST_MASTER_KEY,
         )
         self.assertTrue(status.startswith("201"), sold)
         with get_db() as session:

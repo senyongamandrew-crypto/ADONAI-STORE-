@@ -82,7 +82,7 @@
           <input id="mkInput" type="password" class="sel-full" placeholder="Enter master key password…" autocomplete="off" />
           <button class="btn sm ghost" id="mkShow" type="button">Show</button>
         </div>
-        <p class="muted small" style="margin-top:6px">Default sandbox key is <code>${esc(DB.DEFAULT_MASTER_KEY)}</code></p>
+        <p class="muted small" style="margin-top:6px">The master key is configured by the store owner in System Parameters.</p>
       </div>
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>

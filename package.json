@@ -29,5 +29,8 @@
     "@capacitor/core": "^6.0.0",
     "@capacitor/keyboard": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0"
+  },
+  "overrides": {
+    "tar": "^7.5.22"
   }
 }

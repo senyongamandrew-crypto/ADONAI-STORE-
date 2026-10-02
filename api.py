@@ -18,6 +18,20 @@ import uuid
 
 from database import DATABASE_URL, IS_POSTGRES, engine, get_db
 from pricing import transport_allocation, whole_money
+from security import (
+    RateLimiter,
+    clean_multiline_text,
+    clean_text,
+    constant_time_equals,
+    get_client_ip,
+    hash_pin as pbkdf2_hash_pin,
+    load_or_create_jwt_secret,
+    needs_rehash,
+    rate_limiting_disabled,
+    safe_identifier,
+    safe_image_url,
+    verify_pin,
+)
 from models import (
     AccountingJournalEntry,
     AccountingJournalLine,
@@ -38,8 +52,26 @@ from models import (
 
 logger = logging.getLogger("adonai.api")
 
-# Configuration for JWT & Terminal Key Signatures
-JWT_SECRET = os.environ.get("JWT_SECRET") or os.environ.get("ADMIN_ACCESS_PIN") or os.environ.get("STAFF_TERMINAL_KEY") or "adonai-pos-terminal-signing-secret-key-2026"
+# Configuration for JWT & Terminal Key Signatures.
+# SECURITY: never derive the signing secret from low-entropy admin PINs and
+# never fall back to a hardcoded string. Set JWT_SECRET in the environment for
+# production; otherwise a random secret is generated and persisted locally.
+JWT_SECRET = load_or_create_jwt_secret(os.path.dirname(os.path.abspath(__file__)))
+
+# Session token lifetime (default 7 days, configurable).
+JWT_TTL_SECONDS = int(os.environ.get("JWT_TTL_SECONDS", str(86400 * 7)))
+
+# Known pre-hardening default key. It must NEVER authenticate again: old
+# databases may still carry it in settings, so it is explicitly blocklisted.
+RETIRED_DEFAULT_KEYS = {"adonai-master-2026"}
+
+# Rate limiting — shields credential verification from brute force and the
+# API surface from request floods. Tunable via environment.
+_rate_limiter = RateLimiter()
+AUTH_RATE_LIMIT = int(os.environ.get("AUTH_RATE_LIMIT", "10"))          # attempts
+AUTH_RATE_WINDOW = int(os.environ.get("AUTH_RATE_WINDOW", "300"))       # seconds
+API_RATE_LIMIT = int(os.environ.get("API_RATE_LIMIT", "300"))           # requests
+API_RATE_WINDOW = int(os.environ.get("API_RATE_WINDOW", "60"))          # seconds
 
 ADMIN_ENV_VARS = [
     "ADMIN_ACCESS_PIN", "ADMIN_PIN", "ADMIN_KEY", "ADMIN_ACCESS_KEY",
@@ -89,13 +121,13 @@ def b64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s)
 
 
-def create_jwt_token(payload: dict, expires_in_sec: int = 86400 * 30) -> str:
+def create_jwt_token(payload: dict, expires_in_sec: int = None) -> str:
     """Generates standard HMAC-SHA256 JWT token for staff terminal sessions."""
     header = {"alg": "HS256", "typ": "JWT"}
     body = dict(payload)
     now = int(time.time())
     body["iat"] = now
-    body["exp"] = now + expires_in_sec
+    body["exp"] = now + (expires_in_sec if expires_in_sec else JWT_TTL_SECONDS)
     h_enc = b64url_encode(json.dumps(header).encode("utf-8"))
     p_enc = b64url_encode(json.dumps(body).encode("utf-8"))
     msg = f"{h_enc}.{p_enc}".encode("utf-8")
@@ -124,30 +156,70 @@ def verify_jwt_token(token: str) -> dict | None:
         return None
 
 
+def find_user_by_pin(session, candidate: str):
+    """Locate an active staff member whose stored PIN hash matches candidate.
+
+    Uses salted PBKDF2 verification (with transparent support for legacy
+    unsalted SHA-256 digests from pre-hardening deployments). Never matches
+    the stored hash value itself — pass-the-hash is explicitly impossible.
+    """
+    users = (
+        session.query(User)
+        .filter(User.active.is_(True))
+        .filter(User.pin_hash.isnot(None))
+        .all()
+    )
+    for user in users:
+        if verify_pin(candidate, user.pin_hash):
+            return user
+    return None
+
+
+def upgrade_legacy_pin_hash(session, user, candidate: str) -> None:
+    """Transparently re-hash a legacy SHA-256 PIN to salted PBKDF2 on login."""
+    try:
+        if needs_rehash(user.pin_hash):
+            user.pin_hash = pbkdf2_hash_pin(candidate)
+            session.flush()
+            logger.info("[AUTH] Upgraded legacy PIN hash to PBKDF2 for %s", user.id)
+    except Exception:
+        logger.warning("[AUTH] Could not upgrade legacy PIN hash for %s", user.id)
+
+
+def match_env_credential(candidate: str, var_names: list[str]) -> str | None:
+    """Constant-time, exact-match comparison of a candidate against the
+    configured environment credentials. Returns the matching variable name."""
+    if candidate.lower() in RETIRED_DEFAULT_KEYS:
+        return None
+    for var in var_names:
+        val = str(os.environ.get(var) or "").strip()
+        if val and constant_time_equals(candidate, val):
+            return var
+    return None
+
+
 def is_authenticated_staff(headers: dict = None, body: dict = None, query_params: dict = None) -> tuple[bool, dict | None]:
     """
     Validates if incoming request comes from an authenticated POS terminal or Admin.
-    Checks Bearer JWT header, X-Terminal-Key header, query token, or body key.
+    Credentials are accepted ONLY from the Authorization/X-Terminal-Key headers
+    or a JSON body — never from URL query strings, which leak into proxy and
+    access logs, browser history, and Referer headers.
     """
     headers = headers or {}
     body = body or {}
-    query_params = query_params or {}
 
     auth_header = str(headers.get("authorization", "") or "").strip()
     terminal_header = str(headers.get("x-terminal-key", "") or headers.get("x-staff-token", "") or "").strip()
-    query_token = (query_params.get("token") or query_params.get("key") or [""])[0].strip()
 
     candidate = ""
     if auth_header.lower().startswith("bearer "):
         candidate = auth_header[7:].strip()
     elif terminal_header:
         candidate = terminal_header
-    elif query_token:
-        candidate = query_token
     elif body.get("token") or body.get("terminal_key") or body.get("key") or body.get("pin"):
         candidate = str(body.get("token") or body.get("terminal_key") or body.get("key") or body.get("pin")).strip()
 
-    if not candidate:
+    if not candidate or len(candidate) > 1024:
         return False, None
 
     # 1. Check JWT token
@@ -159,33 +231,20 @@ def is_authenticated_staff(headers: dict = None, body: dict = None, query_params
             "role": jwt_payload.get("role", "cashier")
         }
 
-    # 2. Check Admin Environment Variables
-    for var in ADMIN_ENV_VARS:
-        val = str(os.environ.get(var) or "").strip()
-        if val and (candidate == val or candidate.lower() == val.lower()):
-            return True, {"id": "ENV-ADMIN", "name": "Store Owner / Admin", "role": "admin"}
-
-    # 3. Check Staff Environment Variables
-    for var in STAFF_ENV_VARS:
-        val = str(os.environ.get(var) or "").strip()
-        if val and (candidate == val or candidate.lower() == val.lower()):
-            return True, {"id": "ENV-STAFF", "name": "POS Staff Terminal", "role": "cashier"}
-
-    # 4. Check Default Sandbox Master Key
-    if candidate == "ADONAI-MASTER-2026" or candidate.lower() == "adonai-master-2026":
+    # 2. Check Admin Environment Variables (constant-time, exact match)
+    if match_env_credential(candidate, ADMIN_ENV_VARS):
         return True, {"id": "ENV-ADMIN", "name": "Store Owner / Admin", "role": "admin"}
 
-    # 5. Check Database Seed Users
-    pin_hash = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+    # 3. Check Staff Environment Variables (constant-time, exact match)
+    if match_env_credential(candidate, STAFF_ENV_VARS):
+        return True, {"id": "ENV-STAFF", "name": "POS Staff Terminal", "role": "cashier"}
+
+    # 4. Check Database Users via salted PBKDF2 verification
     try:
         with get_db() as session:
-            user = (
-                session.query(User)
-                .filter(User.active.is_(True))
-                .filter(or_(User.pin_hash == pin_hash, User.pin_hash == candidate))
-                .first()
-            )
+            user = find_user_by_pin(session, candidate)
             if user:
+                upgrade_legacy_pin_hash(session, user, candidate)
                 return True, {"id": user.id, "name": user.name, "role": user.role}
     except Exception:
         pass
@@ -360,7 +419,7 @@ def sale_journal_lines(total: int, cogs: int, tender_type: str):
     return lines
 
 
-def handle_api_request(method: str, path: str, query_params: dict, body_bytes: bytes, headers: dict = None) -> tuple[int, str, bytes]:
+def handle_api_request(method: str, path: str, query_params: dict, body_bytes: bytes, headers: dict = None, client_addr: str = None) -> tuple[int, str, bytes]:
     """
     Unified router for backend /api/* endpoints.
     Distinguishes public e-commerce storefront traffic from protected POS terminal traffic.
@@ -368,12 +427,42 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
     """
     try:
         headers = headers or {}
+        client_ip = get_client_ip(headers, client_addr or "")
+
+        # ------------------------------------------------------------------
+        # Rate limiting: a strict window on credential verification (brute
+        # force guard) plus a general per-client API request ceiling.
+        # ------------------------------------------------------------------
+        if not rate_limiting_disabled():
+            allowed, retry_after = _rate_limiter.check(
+                "api", client_ip, API_RATE_LIMIT, API_RATE_WINDOW
+            )
+            if not allowed:
+                return json_response({
+                    "ok": False,
+                    "error": "Too many requests. Please slow down.",
+                    "retry_after_seconds": retry_after,
+                }, status=429)
+            if path.rstrip("/") == "/api/auth/verify" and method == "POST":
+                allowed, retry_after = _rate_limiter.check(
+                    "auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW
+                )
+                if not allowed:
+                    logger.warning("[AUTH] Rate limit hit for %s", client_ip)
+                    return json_response({
+                        "ok": False,
+                        "error": "Too many sign-in attempts. Try again later.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+
         body = {}
         if body_bytes and method in ("POST", "PUT", "PATCH"):
             try:
                 body = json.loads(body_bytes.decode("utf-8"))
             except Exception:
                 body = {}
+        if not isinstance(body, dict):
+            body = {}
 
         # Strip trailing slashes from path
         clean_path = path.rstrip("/")
@@ -382,25 +471,16 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
         # 1. Health & Status (Public)
         # ----------------------------------------------------
         if clean_path == "/api/health" and method == "GET":
+            # SECURITY: keep this endpoint minimal. Schema/table names and
+            # connection-pool internals are infrastructure details that must
+            # not be broadcast publicly.
             inspector = inspect(engine)
             tables = inspector.get_table_names()
-            pool_info = {}
-            if hasattr(engine.pool, "size"):
-                pool_info = {
-                    "size": engine.pool.size(),
-                    "checkedin": engine.pool.checkedin(),
-                    "checkedout": engine.pool.checkedout(),
-                    "overflow": engine.pool.overflow()
-                }
-
             return json_response({
                 "status": "healthy",
                 "database": "connected",
-                "dialect": engine.dialect.name,
                 "is_postgres": IS_POSTGRES,
                 "tables_count": len(tables),
-                "tables": tables,
-                "pool": pool_info,
                 "timestamp": datetime.utcnow().isoformat()
             })
 
@@ -508,9 +588,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 return json_response({"ok": False, "error": str(exc)}, status=400)
 
             with get_db() as session:
-                pid = body.get("id") or generate_uid("PRD")
-                sku = body.get("sku") or generate_uid("ADN-GEN")
-                barcode_id = body.get("barcode_id") or generate_uid("ADT")
+                pid = safe_identifier(body.get("id")) or generate_uid("PRD")
+                sku = clean_text(body.get("sku"), 50) or generate_uid("ADN-GEN")
+                barcode_id = clean_text(body.get("barcode_id"), 50) or generate_uid("ADT")
                 lot_id = str(body.get("stock_lot_id") or "").strip() or None
                 lot = None
                 if lot_id:
@@ -535,23 +615,23 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     id=pid,
                     sku=sku,
                     barcode_id=barcode_id,
-                    name=str(body.get("name", "Untitled Piece")).strip() or "Untitled Piece",
-                    brand=body.get("brand", "Vintage"),
-                    color=body.get("color", ""),
-                    demographic=body.get("demographic", "Men"),
-                    category=body.get("category", "Outerwear & Jackets"),
-                    size=body.get("size", "-"),
-                    condition=body.get("condition", "Grade A — Excellent"),
+                    name=clean_text(body.get("name", "Untitled Piece"), 255) or "Untitled Piece",
+                    brand=clean_text(body.get("brand", "Vintage"), 100),
+                    color=clean_text(body.get("color", ""), 50),
+                    demographic=clean_text(body.get("demographic", "Men"), 50),
+                    category=clean_text(body.get("category", "Outerwear & Jackets"), 100),
+                    size=clean_text(body.get("size", "-"), 20),
+                    condition=clean_text(body.get("condition", "Grade A — Excellent"), 100),
                     cost_price=supplied_cost,
                     base_price=allocation["base_price"],
                     total_transport_cost=allocation["total_transport_cost"],
                     selling_price=selling_price,
                     compare_price=compare_price,
                     in_stock_count=stock_count,
-                    desc=body.get("desc", ""),
-                    image_url=body.get("image_url", ""),
-                    images=body.get("images", []),
-                    rack_location=body.get("rack_location", "Rail A-1"),
+                    desc=clean_multiline_text(body.get("desc", ""), 4000),
+                    image_url=safe_image_url(body.get("image_url", "")),
+                    images=[safe_image_url(u) for u in (body.get("images") or []) if safe_image_url(u)][:12] if isinstance(body.get("images"), list) else [],
+                    rack_location=clean_text(body.get("rack_location", "Rail A-1"), 50),
                     stock_lot_id=lot_id,
                     inventory_status="AVAILABLE",
                 )
@@ -586,13 +666,18 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     return json_response({"ok": True, "status": "archived", "product": prod.to_dict()})
 
                 text_fields = {
-                    "name", "brand", "color", "demographic", "category", "size",
-                    "condition", "desc", "image_url", "rack_location", "inventory_status",
+                    "name": 255, "brand": 100, "color": 50, "demographic": 50,
+                    "category": 100, "size": 20, "condition": 100,
+                    "rack_location": 50, "inventory_status": 30,
                 }
                 integer_fields = {"cost_price", "selling_price", "compare_price", "in_stock_count"}
-                for key in text_fields:
+                for key, max_len in text_fields.items():
                     if key in body:
-                        setattr(prod, key, str(body[key] or "").strip())
+                        setattr(prod, key, clean_text(body[key], max_len))
+                if "desc" in body:
+                    prod.desc = clean_multiline_text(body["desc"], 4000)
+                if "image_url" in body:
+                    prod.image_url = safe_image_url(body["image_url"])
                 for key in integer_fields:
                     if key in body:
                         try:
@@ -603,7 +688,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             return json_response({"ok": False, "error": f"Invalid {key}"}, status=400)
                         setattr(prod, key, value)
                 if "images" in body:
-                    prod.images = body.get("images") or []
+                    supplied_images = body.get("images") or []
+                    prod.images = [safe_image_url(u) for u in supplied_images if safe_image_url(u)][:12] if isinstance(supplied_images, list) else []
                 if "base_price" in body or "total_transport_cost" in body or "selling_price" in body:
                     try:
                         base = body.get("base_price", prod.base_price or prod.selling_price)
@@ -866,7 +952,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     whole_money((products[pid].checkout_transport_portion if products[pid].checkout_transport_portion is not None else (products[pid].total_transport_cost or 0) * 0.5) * requested[pid])
                     for pid in requested
                 )
-                order_id = body.get("id") or f"AT-{int(time.time() * 1000) % 1000000:06d}-{uuid.uuid4().hex[:4].upper()}"
+                # SECURITY: only accept well-formed client order IDs
+                # (alphanumeric/dash/underscore); anything else is replaced
+                # with a server-generated identifier.
+                order_id = safe_identifier(body.get("id")) or f"AT-{int(time.time() * 1000) % 1000000:06d}-{uuid.uuid4().hex[:4].upper()}"
+                if session.query(Order).filter_by(id=order_id).first():
+                    return json_response({"ok": False, "error": "Duplicate order ID"}, status=409)
                 subtotal = 0
                 cogs = 0
                 order_items_objs = []
@@ -912,13 +1003,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     # are not WhatsApp orders and always start unfulfilled.
                     status=("completed" if channel == "pos" else "unfulfilled"),
                     dispatch_status=("Completed" if channel == "pos" else "Unfulfilled"),
-                    customer_name=body.get("customer_name", "Walk-in Customer" if channel == "pos" else "Online Shopper"),
-                    customer_phone=body.get("customer_phone", ""),
-                    customer_address=body.get("customer_address") or body.get("delivery_address", ""),
-                    delivery_type=body.get("delivery_type", "boda"),
-                    delivery_area=body.get("delivery_area", ""),
+                    customer_name=clean_text(body.get("customer_name") or ("Walk-in Customer" if channel == "pos" else "Online Shopper"), 120),
+                    customer_phone=clean_text(body.get("customer_phone", ""), 40),
+                    customer_address=clean_multiline_text(body.get("customer_address") or body.get("delivery_address", ""), 500),
+                    delivery_type=clean_text(body.get("delivery_type", "boda"), 30),
+                    delivery_area=clean_text(body.get("delivery_area", ""), 120),
                     delivery_fee=delivery_fee,
-                    delivery_notes=body.get("delivery_notes", ""),
+                    delivery_notes=clean_multiline_text(body.get("delivery_notes", ""), 1000),
                     subtotal=subtotal,
                     total=grand_total,
                     tender_type=tender_type,
@@ -1514,12 +1605,18 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         "ok": False,
                         "error": f"Store setting '{key}' must be a scalar value"
                     }, status=400)
-                text_value = str(value).strip()
-                if key in ("master_key", "admin_key") and len(text_value) < 6:
-                    return json_response({
-                        "ok": False,
-                        "error": "Master key must be at least 6 characters"
-                    }, status=400)
+                text_value = clean_text(value, 2000)
+                if key in ("master_key", "admin_key"):
+                    if len(text_value) < 6:
+                        return json_response({
+                            "ok": False,
+                            "error": "Master key must be at least 6 characters"
+                        }, status=400)
+                    if text_value.lower() in RETIRED_DEFAULT_KEYS:
+                        return json_response({
+                            "ok": False,
+                            "error": "This key value has been retired for security reasons. Choose a unique key."
+                        }, status=400)
                 if len(text_value) > 2000:
                     return json_response({
                         "ok": False,
@@ -1573,46 +1670,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
             if not candidate:
                 return json_response({"ok": False, "error": "Staff Terminal Key or PIN required"}, status=400)
+            if len(candidate) > 1024:
+                return json_response({"ok": False, "error": "Invalid Staff Terminal Key or PIN"}, status=401)
 
-            # 1. Check Admin Environment Variables
-            for var_name in ADMIN_ENV_VARS:
-                env_val = str(os.environ.get(var_name) or "").strip()
-                if env_val and (candidate == env_val or candidate.lower() == env_val.lower()):
-                    logger.info("[AUTH] Admin signed in via environment variable %s", var_name)
-                    staff_data = {
-                        "id": "ENV-ADMIN",
-                        "name": "Store Owner / Admin",
-                        "role": "admin"
-                    }
-                    token = create_jwt_token(staff_data)
-                    return json_response({
-                        "ok": True,
-                        "via": f"env_admin:{var_name}",
-                        "token": token,
-                        "staff": staff_data
-                    })
-
-            # 2. Check Staff / Terminal Environment Variables
-            for var_name in STAFF_ENV_VARS:
-                env_val = str(os.environ.get(var_name) or "").strip()
-                if env_val and (candidate == env_val or candidate.lower() == env_val.lower()):
-                    logger.info("[AUTH] Staff signed in via environment variable %s", var_name)
-                    staff_data = {
-                        "id": "ENV-STAFF",
-                        "name": "POS Staff Terminal",
-                        "role": "cashier"
-                    }
-                    token = create_jwt_token(staff_data)
-                    return json_response({
-                        "ok": True,
-                        "via": f"env_staff:{var_name}",
-                        "token": token,
-                        "staff": staff_data
-                    })
-
-            # 3. Check Default Sandbox Master Key
-            if candidate == "ADONAI-MASTER-2026" or candidate.lower() == "adonai-master-2026":
-                logger.info("[AUTH] Signed in via default master key")
+            # 1. Check Admin Environment Variables (constant-time, exact match)
+            matched_admin_var = match_env_credential(candidate, ADMIN_ENV_VARS)
+            if matched_admin_var:
+                logger.info("[AUTH] Admin signed in via environment variable %s", matched_admin_var)
                 staff_data = {
                     "id": "ENV-ADMIN",
                     "name": "Store Owner / Admin",
@@ -1621,21 +1685,36 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 token = create_jwt_token(staff_data)
                 return json_response({
                     "ok": True,
-                    "via": "master_key",
+                    "via": f"env_admin:{matched_admin_var}",
                     "token": token,
                     "staff": staff_data
                 })
 
-            # 4. Check Database Users & Settings
-            pin_hash = hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+            # 2. Check Staff / Terminal Environment Variables (constant-time)
+            matched_staff_var = match_env_credential(candidate, STAFF_ENV_VARS)
+            if matched_staff_var:
+                logger.info("[AUTH] Staff signed in via environment variable %s", matched_staff_var)
+                staff_data = {
+                    "id": "ENV-STAFF",
+                    "name": "POS Staff Terminal",
+                    "role": "cashier"
+                }
+                token = create_jwt_token(staff_data)
+                return json_response({
+                    "ok": True,
+                    "via": f"env_staff:{matched_staff_var}",
+                    "token": token,
+                    "staff": staff_data
+                })
+
+            # 3. Check Database Users & Settings.
+            # PINs verify against salted PBKDF2 hashes (legacy SHA-256 hashes
+            # are accepted once, then transparently upgraded). The retired
+            # hardcoded default master key can never authenticate.
             with get_db() as session:
-                user = (
-                    session.query(User)
-                    .filter(User.active.is_(True))
-                    .filter(or_(User.pin_hash == pin_hash, User.pin_hash == candidate))
-                    .first()
-                )
+                user = find_user_by_pin(session, candidate)
                 if user:
+                    upgrade_legacy_pin_hash(session, user, candidate)
                     logger.info("[AUTH] %s (%s) signed in via database PIN", user.name, user.role)
                     staff_data = {"id": user.id, "name": user.name, "role": user.role}
                     token = create_jwt_token(staff_data)
@@ -1646,27 +1725,34 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         "staff": staff_data
                     })
 
-                # Check store settings keys
-                settings_keys = ["master_key", "admin_key", "terminal_key", "staff_key"]
-                setting_rows = session.query(StoreSetting).filter(StoreSetting.key.in_(settings_keys)).all()
-                for s in setting_rows:
-                    if s.value and (candidate == s.value.strip() or candidate.lower() == s.value.strip().lower()):
-                        role = "admin" if ("admin" in s.key or "master" in s.key) else "cashier"
-                        name = "Store Admin (Master Key)" if role == "admin" else "POS Staff Terminal"
-                        logger.info("[AUTH] Authenticated via database setting '%s' as %s", s.key, role)
-                        staff_data = {"id": f"SET-{role.upper()}", "name": name, "role": role}
-                        token = create_jwt_token(staff_data)
-                        return json_response({
-                            "ok": True,
-                            "via": "settings",
-                            "token": token,
-                            "staff": staff_data
-                        })
+                # Check store settings keys (constant-time, exact match only)
+                if candidate.lower() not in RETIRED_DEFAULT_KEYS:
+                    settings_keys = ["master_key", "admin_key", "terminal_key", "staff_key"]
+                    setting_rows = session.query(StoreSetting).filter(StoreSetting.key.in_(settings_keys)).all()
+                    for s in setting_rows:
+                        stored = str(s.value or "").strip()
+                        if not stored or stored.lower() in RETIRED_DEFAULT_KEYS:
+                            continue
+                        if constant_time_equals(candidate, stored):
+                            role = "admin" if ("admin" in s.key or "master" in s.key) else "cashier"
+                            name = "Store Admin (Master Key)" if role == "admin" else "POS Staff Terminal"
+                            logger.info("[AUTH] Authenticated via database setting '%s' as %s", s.key, role)
+                            staff_data = {"id": f"SET-{role.upper()}", "name": name, "role": role}
+                            token = create_jwt_token(staff_data)
+                            return json_response({
+                                "ok": True,
+                                "via": "settings",
+                                "token": token,
+                                "staff": staff_data
+                            })
 
+            logger.warning("[AUTH] Failed sign-in attempt from %s", client_ip)
             return json_response({"ok": False, "error": "Invalid Staff Terminal Key or PIN"}, status=401)
 
         return json_response({"error": "API route not found"}, status=404)
 
     except Exception as err:
+        # SECURITY: log full details server-side, but never leak exception
+        # messages (stack internals, SQL text, file paths) to API clients.
         logger.error("[API Error] %s on %s %s", err, method, path, exc_info=True)
-        return json_response({"error": "Internal Server Error", "details": str(err)}, status=500)
+        return json_response({"error": "Internal Server Error"}, status=500)
