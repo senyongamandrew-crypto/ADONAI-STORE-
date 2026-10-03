@@ -76,15 +76,17 @@ input, select, textarea { max-width: 100%; }
 body {
   background: var(--bg); color: var(--text);
   font: 15px/1.45 var(--font-text);
-  height: 100vh; overflow: hidden; -webkit-font-smoothing: antialiased;
+  min-height: 100vh; min-height: 100dvh;
+  overflow-x: hidden; overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; }
 h3 { font: 700 19px var(--font-display); color: var(--ink); }
 
 .pos-app {
   display: flex; flex-direction: column;
-  height: 100vh;               /* legacy fallback */
-  height: var(--app-vh, 100dvh); /* live viewport — tracks Android browser bars */
+  min-height: 100vh;
+  min-height: var(--app-vh, 100dvh);
 }
 
 /* ================= HEADER (warm dark bar) ================= */
@@ -107,17 +109,6 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 }
 .net-pill .dot { width: 9px; height: 9px; border-radius: 50%; background: #22C55E; box-shadow: 0 0 8px #22C55E; }
 .net-pill.offline .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
-
-.me-pill {
-  display: flex; align-items: center; gap: 9px; background: var(--dark-card);
-  border: 1px solid var(--dark-line); border-radius: 999px; padding: 5px 14px 5px 5px;
-  font-size: 13px; color: var(--dark-text);
-}
-.me-pill .avatar {
-  width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--accent); color: #fff; font-weight: 800; font-size: 13px;
-}
-.me-pill .role { color: var(--dark-muted); font-size: 11px; border-left: 1px solid var(--dark-line); padding-left: 9px; }
 
 /* ---- buttons ---- */
 .btn {
@@ -145,7 +136,7 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .scan-flash.err { background: #FEF2F2; color: var(--red); }
 
 /* ================= WORKSPACE ================= */
-.pos-main { flex: 1; display: flex; min-height: 0; }
+.pos-main { display: flex; flex: 0 0 auto; min-height: auto; }
 
 /* ---- left: lookup + catalog ---- */
 .left { flex: 1.7; display: flex; flex-direction: column; padding: 16px 18px; gap: 13px; min-width: 0; }
@@ -173,10 +164,10 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 
 /* product tiles — white cards with real photos (fluid, aspect-ratio driven) */
 .tiles {
-  flex: 1; overflow-y: auto; display: grid; gap: clamp(8px, 1.4vw, 12px);
+  display: grid; gap: clamp(8px, 1.4vw, 12px);
   grid-template-columns: repeat(auto-fill, minmax(clamp(124px, 34vw, 176px), 1fr));
   align-content: start; padding: 2px 4px 8px 2px;
-  -webkit-overflow-scrolling: touch;
+  -webkit-overflow-scrolling: auto;
 }
 .tile {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
@@ -336,45 +327,9 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
   }
 }
 
-/* ================= INVENTORY INTAKE ================= */
-.intake-modal { max-width: 540px; }
-.intake-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.intake-head h3 { font: 700 19px var(--font-display); color: var(--ink); }
-.intake-list { max-height: 46vh; overflow-y: auto; margin: 12px 0; }
-.in-row {
-  display: flex; align-items: center; gap: 12px;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px;
-  padding: 9px 12px; margin-bottom: 8px;
-}
-.in-row .in-thumb {
-  width: 46px; height: 46px; border-radius: 8px; overflow: hidden; background: #E5E7EB;
-  display: grid; place-items: center; font-size: 20px; flex-shrink: 0; position: relative;
-}
-.in-row .in-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.in-row .grow { flex: 1; min-width: 0; }
-.in-row .in-name { font-weight: 700; font-size: 13.5px; color: var(--ink); }
-.in-row .in-meta { font-size: 11.5px; color: var(--muted); }
-
-.form2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
-.intake-ed-note { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
-.intake-ed-note code { background: #F3F4F6; padding: 1px 7px; border-radius: 6px; color: var(--accent-dark); }
-
-/* shared image editor (js/intake.js) */
-.imgfield { margin: 12px 0; }
-.imgfield .fld-label { display: block; font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
-.imgfield .fld-hint { opacity: .75; font-weight: 400; }
-.imgfield-row { display: flex; gap: 12px; align-items: center; }
-.imgfield-preview {
-  width: 88px; height: 88px; border-radius: 12px; overflow: hidden; flex-shrink: 0;
-  background: var(--panel-2); border: 1px solid var(--line);
-  display: grid; place-items: center; font-size: 11px; color: var(--muted); position: relative;
-}
-.imgfield-preview img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.imgfield-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-
 /* ================= responsive fallback → bottom-dock cart ================= */
 @media (max-width: 960px) {
-  .pos-main { flex-direction: column; overflow-y: auto; }
+  .pos-main { flex-direction: column; }
   body { overflow: auto; }
   .grid2 { grid-template-columns: 1fr; }
 
@@ -410,8 +365,7 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
   }
   .cart.open .cart-body { max-height: calc(var(--app-vh, 100dvh) - 150px); overflow-y: auto; }
   .cart-lines { max-height: none; flex: 1 1 auto; }
-  /* keep scrollable content clear of the dock */
-  .pos-main { padding-bottom: 76px; }
+  .pos-main { padding-bottom: 0; }
 }
 
 /* ================== v2.2 — reference “Cashier Register” layout ================== */
@@ -434,10 +388,6 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .pos-head .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #16A34A; box-shadow: 0 0 0 3px rgba(34, 197, 94,.15); }
 .pos-head .pill.live.offline .dot, .net-pill.offline .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
 .pos-head .net-pill { display: none; } /* replaced by pill.live markup parity */
-.pos-head .me-pill {
-  background: var(--panel); border: 1px solid var(--line); color: var(--ink);
-}
-.pos-head .me-pill .role { color: var(--muted); border-left-color: var(--line); }
 .pos-head .btn { background: var(--panel); border-color: var(--line); color: var(--ink); }
 .pos-head .btn:hover { border-color: var(--ink); }
 .pos-head .btn.exit { background: #FEF2F2; color: var(--red); border-color: #FECACA; }
@@ -470,12 +420,6 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
   padding: 0 14px; flex-shrink: 0;
 }
 .lookup-btn:hover { background: #1F2937; }
-.cam-btn {
-  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
-  border-radius: 999px; padding: 12px 18px; font: 700 13px var(--font-text); cursor: pointer; flex-shrink: 0;
-}
-.cam-btn:hover { border-color: var(--ink); }
-
 /* demographic pills — black active */
 .drow { display: flex; gap: 10px; flex-wrap: wrap; }
 .dtab {
@@ -629,8 +573,6 @@ body.sb-open .sb-scrim { display: block; }
   .pos-head { padding: 8px 10px; gap: 7px; }
   .pos-head .pill { padding: 7px 11px; font-size: 12px; }
   .pos-head .btn { padding: 7px 11px; font-size: 12.5px; }
-  .me-pill { padding: 4px 10px 4px 4px; font-size: 12px; }
-  .me-pill .role { display: none; }              /* role stays in the drawer */
   .pos-head .pill.store { display: none; }       /* storefront link lives in the menu drawer */
 
   .pos-title { padding: 12px 12px 0; }
@@ -647,7 +589,6 @@ body.sb-open .sb-scrim { display: block; }
   .lookup-row { flex-wrap: wrap; gap: 8px; }
   .barcode-in { flex: 1 1 100%; min-width: 0; font-size: 16px; padding: 12px 14px; }
   .lookup-btn { flex: 1 1 auto; min-width: 0; height: 48px; padding: 0 12px; border-radius: 999px; }
-  .cam-btn { flex: 1 1 auto; padding: 12px 14px; white-space: nowrap; }
   /* 16px inputs stop mobile browsers from auto-zooming when a field is focused */
   .grid-search { font-size: 16px; padding: 12px 14px; }
 
@@ -675,9 +616,7 @@ body.sb-open .sb-scrim { display: block; }
   .tender-actions { flex-wrap: wrap; }
   .tender-actions .btn { flex: 1 1 auto; }
   .grid2 { grid-template-columns: 1fr; }
-  .form2 { grid-template-columns: 1fr; }
   .big-in { font-size: 24px; }
-  .intake-list { max-height: 50vh; }
 }
 
 /* =====================================================================
@@ -712,7 +651,7 @@ html[data-pointer="touch"] .tile .tile-img { font-size: clamp(28px, 8vw, 34px); 
 
 /* ---- tablet & up (≥768px): catalog + cart panels sit side by side ---- */
 @media screen and (min-width: 768px) and (max-width: 960px) {
-  .pos-main { flex-direction: row; overflow-y: hidden; padding-bottom: 0; }
+  .pos-main { flex-direction: row; overflow: visible; padding-bottom: 0; }
   .cart {
     position: static; width: clamp(300px, 34vw, 390px);
     border-radius: 0; box-shadow: none; padding-bottom: 0; max-height: none;
@@ -743,9 +682,6 @@ html[data-pointer="touch"] .tile .tile-img { font-size: clamp(28px, 8vw, 34px); 
 @media (max-width: 480px) {
   .pos-head { flex-wrap: nowrap; }
   .pos-head .pillrow, .pos-head .head-right { flex-wrap: nowrap; min-width: 0; }
-  .me-pill { padding: 4px; }
-  .me-pill #meName { display: none; }        /* identity lives in the menu drawer */
-  .pos-head .pill { white-space: nowrap; }
 }
 
 /* ---- hidpi phones: crisper, tighter tile text ---- */
@@ -890,19 +826,12 @@ html, body { max-width: 100vw; overflow-x: hidden; }
 .cline .c-name { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .cline .c-amt { white-space: nowrap; }
 
-/* Header identity pill truncates instead of widening the top bar */
-.me-pill { min-width: 0; }
-.me-pill #meName {
-  max-width: 16ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.pos-head .pillrow, .pos-head .head-right { min-width: 0; }
 
 /* Navigation drawer follows the mandated sidebar sizing */
 .pos-sidebar { width: 85vw; max-width: 320px; }
 
 /* Receipt + tender modals can never exceed the viewport */
-.tender-modal, .receipt-modal, .intake-modal { max-width: min(470px, calc(100vw - 24px)); }
-.intake-modal { max-width: min(540px, calc(100vw - 24px)); }
+.tender-modal, .receipt-modal { max-width: min(470px, calc(100vw - 24px)); }
 
 /* 16px form fields on touch widths stop mobile browsers from
    auto-zooming on focus (intentionally overrides the fluid clamp) */
@@ -932,7 +861,7 @@ html, body { max-width: 100vw; overflow-x: hidden; }
 /* POS main layout container */
 .pos-dashboard-layout {
   width: 100%;
-  overflow: hidden;
+  overflow: visible;
   transition: all .3s ease-in-out;
 }
 
@@ -1144,13 +1073,13 @@ html, body { max-width: 100vw; overflow-x: hidden; }
 }
 
 /* ---- instantaneous tactile feedback on every control ---- */
-button, .btn, .pill, .ctab, .dtab, .tile, .nav-item, .lookup-btn, .cam-btn {
+button, .btn, .pill, .ctab, .dtab, .tile, .nav-item, .lookup-btn {
   transition: background-color .2s ease-in-out, border-color .2s ease-in-out,
               color .2s ease-in-out, box-shadow .2s ease-in-out,
               transform .2s var(--ease-smooth);
 }
 button:active, .btn:active, .pill:active, .ctab:active, .dtab:active,
-.lookup-btn:active, .cam-btn:active { transform: scale(.97); }
+.lookup-btn:active { transform: scale(.97); }
 
 /* ---- product cards: quiet at rest, lifted on hover, pressed on tap ---- */
 .tile { border: 1px solid var(--line); box-shadow: none; }
@@ -1169,7 +1098,6 @@ html[data-pointer="touch"] .dtab,
 html[data-pointer="touch"] .pill,
 html[data-pointer="touch"] .btn,
 html[data-pointer="touch"] .lookup-btn,
-html[data-pointer="touch"] .cam-btn,
 html[data-pointer="touch"] .cart-toggle,
 html[data-pointer="touch"] .rm { min-height: 44px; }
 html[data-pointer="touch"] .qty button { width: 44px; height: 44px; }
@@ -1177,3 +1105,97 @@ html[data-pointer="touch"] .qty button { width: 44px; height: 44px; }
 /* ---- hairline structure instead of shadow stacks ---- */
 .cart-head, .cart-summary { border-color: var(--line); }
 .pos-head { border-bottom: 1px solid var(--line); }
+
+/* Cart remains an intentional modal-style drawer; the catalog itself does not scroll independently. */
+.pos-dashboard-layout { min-height: auto; }
+.pos-catalog-section { min-height: auto; overflow: visible; -webkit-overflow-scrolling: auto; overscroll-behavior-y: auto; }
+.pos-cart-sidebar { background: #0F172A; color: #F8FAFC; }
+.pos-cart-sidebar .cart-body { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.pos-cart-sidebar .cart-lines { min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; background: #0F172A; }
+.pos-cart-sidebar .cart-head, .pos-cart-sidebar .cart-summary { background: #0F172A; color: #F8FAFC; border-color: #334155; }
+.pos-cart-sidebar .cart-head h3, .pos-cart-sidebar .cart-lines, .pos-cart-sidebar .sum-row { color: #F8FAFC; }
+.pos-cart-sidebar .cart-empty { color: #94A3B8; }
+.pos-cart-sidebar .cart-line { background: #1E293B; color: #FFF; border-color: #334155; }
+.pos-cart-sidebar .cart-line strong, .pos-cart-sidebar .cart-line small { color: #FFF; }
+.pos-cart-sidebar .charge-btn { background: #10B981; color: #FFF; }
+
+
+/* ======================================================================
+   POS REGISTER — SINGLE DOCUMENT SCROLL MODEL
+   The register follows the operations-console pattern: the browser document
+   owns vertical movement. Catalog controls and tiles stay in normal flow;
+   only chip rails can pan horizontally. This avoids nested mobile scroll
+   frames and lets a single swipe travel from lookup to the last product.
+   ====================================================================== */
+html, body {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.pos-app {
+  height: auto;
+  min-height: 100vh;
+  min-height: var(--app-vh, 100dvh);
+}
+
+.pos-main,
+.pos-dashboard-layout {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+}
+
+.pos-catalog-section {
+  min-height: auto;
+  overflow: visible;
+  overscroll-behavior-y: auto;
+}
+
+.tiles {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+  -webkit-overflow-scrolling: auto;
+}
+
+/* Search, actions, filter rails, and catalog cards intentionally remain in
+   regular document flow. Horizontal filter panning does not create a second
+   vertical scroll surface. */
+.lookup-row,
+.drow,
+.cat-tabs,
+.grid-search,
+.tiles {
+  position: static;
+}
+
+@media (max-width: 960px) {
+  .pos-main {
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .left {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .pos-title,
+  .pos-main {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .left {
+    padding-top: 12px;
+    padding-bottom: 16px;
+    gap: 12px;
+  }
+
+  .lookup-row { gap: 10px; }
+  .drow, .cat-tabs { padding-bottom: 4px; }
+  .tiles { padding-bottom: 16px; }
+}
