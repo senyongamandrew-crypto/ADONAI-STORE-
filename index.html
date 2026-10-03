@@ -58,7 +58,7 @@
     </a>
     <div class="head-actions">
       <button class="head-pill" id="installBtn">Install App</button>
-      <button class="cart-btn" id="cartBtn">
+      <button class="cart-btn" id="cartBtn" data-action="open-cart">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6"/></svg>
         Cart <span class="cart-count" id="cartCount">0</span>
       </button>
@@ -74,7 +74,7 @@
 </section>
 
 <!-- ============ LIVE RAIL INVENTORY ============ -->
-<main class="rail wrap" id="shop">
+<main class="rail wrap catalog-dashboard-region" id="catalogDashboardRegion">
   <div class="rail-head">
     <div>
       <p class="eyebrow">Live Rail Inventory</p>
@@ -208,14 +208,14 @@
 </div>
 
 <!-- ============ CART DRAWER ============ -->
-<div class="drawer-backdrop" id="drawerBackdrop"></div>
-<aside class="drawer" id="cartDrawer" aria-label="Shopping cart">
+<div class="cart-backdrop drawer-backdrop" id="cartBackdrop"></div>
+<aside class="cart-drawer drawer" id="cartDrawer" aria-label="Shopping cart">
   <div class="drawer-head">
     <div>
       <h3>Your Claimed Pieces</h3>
       <p class="drawer-sub">1-of-1 reservation</p>
     </div>
-    <button class="drawer-close-btn" id="closeCart" aria-label="Close cart">✕ Close</button>
+    <button class="drawer-close-btn" id="closeCart" data-action="close-cart" aria-label="Close cart">✕ Close</button>
   </div>
   <div class="drawer-body" id="cartBody"></div>
   <div class="drawer-foot" id="cartFoot"></div>
@@ -227,5 +227,6 @@
 <script>window.__ADONAI_STOREFRONT__ = true;</script>
 <script src="js/db.js?v=3.1"></script>
 <script src="js/storefront.js?v=2.6"></script>
+<script src="js/cartController.js?v=1.0"></script>
 </body>
 </html>

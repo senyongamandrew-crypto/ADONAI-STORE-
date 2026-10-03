@@ -752,3 +752,37 @@ button:active, .btn:active { transform: scale(.97); }
 html[data-pointer="touch"] .btn, html[data-pointer="touch"] button { min-height: 44px; }
 .pcard { transition: border-color .2s ease-in-out, box-shadow .2s ease-in-out, transform .2s var(--ease-smooth); }
 .pcard:hover { transform: translateY(-3px); border-color: #D1D5DB; box-shadow: 0 10px 24px rgba(17, 24, 39, .09); }
+
+/* ==========================================================================\n   CART DRAWER SCROLL + HIGH-CONTRAST OVERRIDES\n   ========================================================================== */
+html, body { margin: 0; padding: 0; min-height: 100%; }
+.catalog-dashboard-region {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  box-sizing: border-box;
+}
+body.cart-drawer-open { overflow: hidden !important; touch-action: none; }
+body.cart-drawer-closed { overflow: auto !important; touch-action: auto !important; }
+.cart-drawer {
+  position: fixed; top: 0; right: 0; width: 100%; max-width: 420px;
+  height: 100%; height: 100dvh; z-index: 1001;
+  background-color: #0F172A; color: #F8FAFC;
+  box-shadow: -4px 0 24px rgba(0,0,0,.35);
+  display: flex; flex-direction: column;
+  transform: translateX(100%); transition: transform .3s cubic-bezier(.16,1,.3,1);
+}
+.cart-drawer.is-active, body.cart-open .cart-drawer { transform: translateX(0); }
+.cart-backdrop {
+  position: fixed; inset: 0; width: 100vw; height: 100vh;
+  background: rgba(15,23,42,.6); backdrop-filter: blur(4px); z-index: 1000;
+  opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility .25s ease;
+}
+.cart-backdrop.is-active, body.cart-open .cart-backdrop { opacity: 1; visibility: visible; }
+.cart-item-card { background:#1E293B; border:1px solid #334155; color:#FFF !important; }
+.cart-item-card .item-title { color:#FFF !important; }
+.cart-item-card .item-sku-meta { color:#94A3B8 !important; }
+.cart-item-card .item-price-total { color:#10B981 !important; }
+.quantity-stepper { background:#0F172A; border:1px solid #475569; }
+.quantity-stepper button { color:#F8FAFC !important; }
+.quantity-stepper .stepper-count { color:#FFF !important; }
+.remove-btn { color:#EF4444 !important; }
