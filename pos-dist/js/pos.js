@@ -27,11 +27,8 @@
   } catch (e) {
     lockOwner = `POS-${(cashier.id || "TERMINAL")}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   }
-  $("#meName").textContent = cashier.name;
-  $("#meRole").textContent = cashier.role;
-  $("#meRole").className = "role";
-  $(".avatar", $("#mePill")).textContent = (cashier.name || "S").charAt(0).toUpperCase();
-
+  /* Cashier identity lives in the navigation drawer (me-card) — the header
+     keeps only the menu trigger and the notification bell. */
   const posMeName = $("#posMeName");
   if (posMeName) posMeName.textContent = cashier.name;
   const posMeRole = $("#posMeRole");
@@ -209,11 +206,6 @@
     const code = $("#barcodeInput").value.trim();
     if (code) { handleScan(code); $("#barcodeInput").value = ""; }
     else $("#barcodeInput").focus();
-  });
-  $("#btnCamera").addEventListener("click", () => {
-    openIntake();
-    flash("Choose an item to update its photo or add a new piece from gallery/files.", true);
-    setTimeout(() => openIntakeEditor(null), 350);
   });
   let installPromptEvt = null;
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPromptEvt = e; });
@@ -753,118 +745,11 @@
   });
 
   /* ============================================================
-     INVENTORY INTAKE — add/edit items & real photos from the counter.
-     Everything saved here is broadcast live to the storefront,
-     this terminal and the OPS dashboard.
+     INVENTORY INTAKE — REMOVED FROM THE CASHIER REGISTER
+     Product intake and photo processing live exclusively in the
+     Operations Console (Catalog Intake menu, admin.html?view=intake).
+     The register stays focused on lookup & checkout only.
      ============================================================ */
-  const intakeBackdrop = $("#intakeBackdrop");
-  const intakeBox = $("#intakeBox");
-  let intakeTerm = "";
-  let intakeImageState = { image_url: "" };
-  let availableStockLots = [];
-
-  const openIntake = () => { intakeTerm = ""; openIntakeList(); };
-  const closeIntake = () => intakeBackdrop.classList.remove("open");
-  $("#btnIntake").addEventListener("click", openIntake);
-  intakeBackdrop.addEventListener("click", e => { if (e.target === intakeBackdrop) closeIntake(); });
-
-  function openIntakeList() {
-    const list = DB.listProducts()
-      .filter(p => !intakeTerm || (p.name + " " + p.category + " " + p.barcode_id).toLowerCase().includes(intakeTerm))
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    intakeBox.innerHTML = `
-      <div class="intake-head"><h3>Inventory intake</h3><button class="btn sm ghost" data-intake-close>${Icons.svg("x", "ico-14")}</button></div>
-      <p class="intake-ed-note">Edit an item to replace its web photo with the real piece — changes go live on the storefront instantly.</p>
-      <input class="in" id="inSearch" type="search" placeholder="Search stock…" value="${esc(intakeTerm)}" />
-      <div class="intake-list">${list.map(p => `
-        <div class="in-row">
-          <span class="in-thumb">${EMOJI[p.category] || Icons.svg("tag", "ico-16")}${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : ""}</span>
-          <div class="grow">
-            <div class="in-name">${esc(p.name)}</div>
-            <div class="in-meta">${esc(p.barcode_id)} · ${DB.ugx(p.selling_price)} · ${p.in_stock_count} in stock</div>
-          </div>
-          <button class="btn sm" data-intake-edit="${esc(p.id)}">Edit · photo</button>
-        </div>`).join("") || `<p class="cart-empty">Nothing matches.</p>`}</div>
-      <div class="tender-actions"><span></span><button class="btn primary" data-intake-new>＋ New item</button></div>`;
-    intakeBackdrop.classList.add("open");
-    const s = $("#inSearch");
-    s.addEventListener("input", e => {
-      intakeTerm = e.target.value.trim().toLowerCase();
-      const pos = e.target.selectionStart;
-      openIntakeList();
-      const el = $("#inSearch"); el.focus(); el.setSelectionRange(pos, pos);
-    });
-  }
-
-  async function openIntakeEditor(id) {
-    const p = id ? DB.getProduct(id) : null;
-    if (!p) {
-      try {
-        const data = await DB.financeRequest("stock-lots", { method: "GET" });
-        availableStockLots = (data.stock_lots || []).filter(lot => lot.remaining_count > 0);
-      } catch (e) {
-        availableStockLots = [];
-      }
-    }
-    intakeImageState = { image_url: p ? (p.image_url || "") : "" };
-    intakeBox.innerHTML = `
-      <div class="intake-head"><h3>${p ? "Edit item" : "New item"}</h3><button class="btn sm ghost" data-intake-close>${Icons.svg("x", "ico-14")}</button></div>
-      ${p ? `<p class="intake-ed-note">Barcode <code>${esc(p.barcode_id)}</code> — print &amp; stick it on the tag if it's missing.</p>`
-          : `<p class="intake-ed-note">A barcode is generated automatically on save — print &amp; stick it, and the scanner finds this item.</p>`}
-      ${Intake.imageFieldHTML(intakeImageState.image_url)}
-      <div class="form2">
-        <div><label class="fld-label">Name</label><input class="in" data-f-name value="${p ? esc(p.name) : ""}" placeholder="e.g. Indigo Type III Trucker Jacket" /></div>
-        <div><label class="fld-label">Brand / label</label><input class="in" data-f-brand value="${p ? esc(p.brand || "") : ""}" placeholder="Levi's, Hand-made…" /></div>
-        <div><label class="fld-label">Colour</label><input class="in" data-f-color value="${p ? esc(p.color || "") : ""}" placeholder="Indigo, Olive…" /></div>
-        <div><label class="fld-label">Category</label><select class="in" data-f-cat>${DB.CATEGORIES.map(c => `<option ${p && p.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
-        <div><label class="fld-label">Demographic</label><select class="in" data-f-demo>${DB.DEMOGRAPHICS.map(d => `<option ${p && p.demographic === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
-        <div><label class="fld-label">Size</label><input class="in" data-f-size value="${p ? esc(p.size) : ""}" placeholder="M / 42 / -" /></div>
-        <div><label class="fld-label">Condition / grade</label><select class="in" data-f-cond>${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
-        ${p ? "" : `<div><label class="fld-label">Stock lot / bale allocation</label><select class="in" data-f-lot><option value="">No registered lot</option>${availableStockLots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left · ${DB.ugx(lot.unit_cost)}/item</option>`).join("")}</select></div>`}
-        <div><label class="fld-label">Cost (UGX)</label><input class="in" type="number" min="0" data-f-cost value="${p ? p.cost_price : ""}" /></div>
-        <div><label class="fld-label">Selling (UGX)</label><input class="in" type="number" min="0" data-f-sell value="${p ? p.selling_price : ""}" /></div>
-        <div><label class="fld-label">Compare-at (UGX)</label><input class="in" type="number" min="0" data-f-compare value="${p ? p.compare_price : ""}" /></div>
-        <div><label class="fld-label">Stock count</label><input class="in" type="number" min="0" data-f-stock value="${p ? p.in_stock_count : 1}" /></div>
-        <div style="grid-column:1/-1"><label class="fld-label">Description (storefront card)</label><textarea class="in" data-f-desc rows="2" style="resize:vertical">${p ? esc(p.desc || "") : ""}</textarea></div>
-      </div>
-      <div class="tender-actions">
-        <button class="btn ghost" data-intake-back>${p ? "← Back to list" : "Cancel"}</button>
-        <button class="btn primary" data-intake-save="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item to stock"}</button>
-      </div>`;
-    Intake.bindImageEditor(intakeBox, intakeImageState);
-    const lotSelect = intakeBox.querySelector("[data-f-lot]");
-    if (lotSelect) lotSelect.addEventListener("change", () => {
-      const option = lotSelect.options[lotSelect.selectedIndex];
-      const cost = intakeBox.querySelector("[data-f-cost]");
-      if (option && option.dataset.unitCost && cost) cost.value = option.dataset.unitCost;
-    });
-  }
-
-  intakeBox.addEventListener("click", async e => {
-    const t = e.target;
-    if (t.closest("[data-intake-close]")) return closeIntake();
-    if (t.closest("[data-intake-new]")) return openIntakeEditor(null);
-    if (t.closest("[data-intake-back]")) return openIntakeList();
-    const ed = t.closest("[data-intake-edit]"); if (ed) return openIntakeEditor(ed.dataset.intakeEdit);
-    const sv = t.closest("[data-intake-save]");
-    if (sv) {
-      const v = Intake.readProductForm(intakeBox);
-      if (!v.name) return flash("✗ Item name is required", false);
-      v.image_url = intakeImageState.image_url;
-      try {
-        if (sv.dataset.intakeSave) {
-          await DB.updateProduct(sv.dataset.intakeSave, v);
-          flash("✓ Item and photo updated — live across POS and storefront now", true);
-        } else {
-          const np = await DB.addProduct(v);
-          flash(`✓ ${np.name} added with photo · barcode ${np.barcode_id}`, true);
-        }
-        beep(true);
-        closeIntake();
-        refreshProducts();
-      } catch (err) { flash("✗ " + err.message, false); beep(false); }
-    }
-  });
 
   /* ---------- real-time: other tabs (storefront/web orders, other POS) ---------- */
   DB.on("products", () => refreshProducts());

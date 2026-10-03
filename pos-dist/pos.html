@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=6.0" />
+<link rel="stylesheet" href="css/pos.css?v=7.0" />
 <link rel="stylesheet" href="css/notifications.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
@@ -70,12 +70,10 @@
       <button class="pill" id="btnPosMenu" type="button" title="Open Navigation Menu"><i data-icon="menu" data-size="15"></i> Menu</button>
     </div>
     <div class="head-right">
-      <button class="notif-bell" id="notifBellBtn" type="button" title="Notifications" aria-label="Notifications">
+      <button class="notif-bell on-light" id="notifBellBtn" type="button" title="Notifications" aria-label="Notifications">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span class="notif-badge" id="notifBadge">0</span>
       </button>
-      <button class="btn ghost dark" id="btnIntake" title="Add items & photos to inventory"><i data-icon="inbox" data-size="15"></i> Intake</button>
-      <span class="me-pill" id="mePill"><span class="avatar">S</span><span id="meName">Staff</span><span class="role" id="meRole">open access</span></span>
     </div>
   </header>
 
@@ -91,7 +89,7 @@
   <!-- scan feedback banner -->
   <div class="scan-flash" id="scanFlash"></div>
 
-  <main class="pos-main pos-dashboard-layout">
+  <main id="catalogDashboardRegion" class="pos-main pos-dashboard-layout">
 
     <!-- ============ LEFT: lookup + manual grid ============ -->
     <section class="left pos-catalog-section">
@@ -99,7 +97,6 @@
         <input id="barcodeInput" class="barcode-in" type="text" inputmode="text"
                placeholder="Scan barcode or type SKU (e.g. ADN-DEN-1001, ADN-MEN-1002)…" autocomplete="off" />
         <button class="lookup-btn" id="btnLookup" title="Look up scanned code">Lookup</button>
-        <button class="cam-btn" id="btnCamera" title="Upload item photo from gallery or local files"><i data-icon="upload" data-size="14"></i> Upload Photo</button>
       </div>
 
       <div class="drow category-pill-row" id="posDemos"></div>
@@ -109,7 +106,7 @@
     </section>
 
     <!-- ============ RIGHT: live cart register (docks to bottom sheet on phones) ============ -->
-    <aside class="cart pos-cart-sidebar" id="posCart">
+    <aside class="cart pos-cart-sidebar" id="posCart" aria-label="Current Sale Drawer">
       <button class="cart-toggle" id="cartToggle" type="button" aria-expanded="false">
         <span class="ct-count" id="ctCount">0</span>
         <span class="ct-label">Current Sale</span>
@@ -234,11 +231,6 @@
     </div>
   </div>
 
-  <!-- ============ INVENTORY INTAKE MODAL ============ -->
-  <div class="modal-backdrop" id="intakeBackdrop">
-    <div class="tender-modal intake-modal" id="intakeBox"></div>
-  </div>
-
   <audio id="beepOk" preload="auto"></audio>
   <audio id="beepErr" preload="auto"></audio>
 </div>
@@ -252,7 +244,6 @@
 <script src="js/icons.js?v=1.0"></script>
 <script src="js/db.js?v=3.1"></script>
 <script src="js/auth.js?v=2.6"></script>
-<script src="js/intake.js?v=5.0"></script>
-<script src="js/pos.js?v=5.0"></script>
+<script src="js/pos.js?v=6.0"></script>
 </body>
 </html>
