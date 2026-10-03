@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=7.0" />
+<link rel="stylesheet" href="css/pos.css?v=7.1" />
 <link rel="stylesheet" href="css/notifications.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
@@ -105,13 +105,14 @@
       <div class="tiles" id="tileGrid"></div>
     </section>
 
-    <!-- ============ RIGHT: live cart register (docks to bottom sheet on phones) ============ -->
+    <!-- ============ RIGHT: live cart register (docks to a bottom sheet on phones) ============ -->
     <aside class="cart pos-cart-sidebar" id="posCart" aria-label="Current Sale Drawer">
       <button class="cart-toggle" id="cartToggle" type="button" aria-expanded="false">
+        <span class="ct-icon" aria-hidden="true"><i data-icon="shopping-bag" data-size="15"></i></span>
         <span class="ct-count" id="ctCount">0</span>
         <span class="ct-label">Current Sale</span>
         <span class="ct-total" id="ctTotal">UGX 0</span>
-        <span class="ct-chevron" id="ctChevron" aria-hidden="true">▾</span>
+        <span class="ct-close" aria-hidden="true">✕</span>
       </button>
       <div class="cart-body">
         <div class="cart-head">
@@ -138,6 +139,9 @@
       </div>
     </aside>
   </main>
+
+  <!-- phone: scrim behind the Current Sale drawer (web-storefront cart pattern) -->
+  <div class="pos-cart-scrim" id="posCartScrim"></div>
 
   <!-- ============ TENDER MODAL ============ -->
   <div class="modal-backdrop" id="tenderBackdrop">
@@ -244,6 +248,6 @@
 <script src="js/icons.js?v=1.0"></script>
 <script src="js/db.js?v=3.1"></script>
 <script src="js/auth.js?v=2.6"></script>
-<script src="js/pos.js?v=6.0"></script>
+<script src="js/pos.js?v=6.1"></script>
 </body>
 </html>
