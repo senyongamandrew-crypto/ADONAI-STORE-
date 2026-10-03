@@ -653,7 +653,7 @@
   function closeCart() { document.body.classList.remove("cart-open"); }
   $("#cartBtn").addEventListener("click", openCart);
   $("#closeCart").addEventListener("click", closeCart);
-  $("#drawerBackdrop").addEventListener("click", closeCart);
+  $("#cartBackdrop").addEventListener("click", closeCart);
 
   function cartLines() {
     return cart.map(l => {

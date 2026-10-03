@@ -91,7 +91,7 @@
   <!-- scan feedback banner -->
   <div class="scan-flash" id="scanFlash"></div>
 
-  <main class="pos-main pos-dashboard-layout">
+  <main id="catalogDashboardRegion" class="pos-main pos-dashboard-layout">
 
     <!-- ============ LEFT: lookup + manual grid ============ -->
     <section class="left pos-catalog-section">
@@ -109,7 +109,7 @@
     </section>
 
     <!-- ============ RIGHT: live cart register (docks to bottom sheet on phones) ============ -->
-    <aside class="cart pos-cart-sidebar" id="posCart">
+    <aside class="cart pos-cart-sidebar" id="posCart" aria-label="Current Sale Drawer">
       <button class="cart-toggle" id="cartToggle" type="button" aria-expanded="false">
         <span class="ct-count" id="ctCount">0</span>
         <span class="ct-label">Current Sale</span>
