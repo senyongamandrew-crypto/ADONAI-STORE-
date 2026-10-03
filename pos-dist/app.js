@@ -985,7 +985,7 @@
       if (g) $("#inGroup").value = g;
       paintTag();
     });
-    ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inSku"].forEach(id => $("#" + id).addEventListener("input", paintTag));
+    ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inTransport", "inRrp", "inSku"].forEach(id => $("#" + id).addEventListener("input", paintTag));
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
     buildPhotoRow();
@@ -1038,7 +1038,10 @@
     $("#tagKicker").textContent = `${demo.toUpperCase()} · ${cat.toUpperCase()}`;
     $("#tagTitle").textContent = $("#inTitle").value.trim() || "Item Title";
     $("#tagMeta").textContent = `Brand: ${$("#inBrand").value.trim() || "Unbranded"} | Size: ${$("#inSize").value.trim() || "Standard"} | Color: ${$("#inColor").value.trim() || "Standard"}`;
-    const sell = Number($("#inSell").value) || 0, rrp = Number($("#inRrp").value) || 0;
+    const basePrice = Number($("#inSell").value) || 0;
+    const transport = Number($("#inTransport").value) || 0;
+    const sell = basePrice + (transport * 0.5);
+    const rrp = Number($("#inRrp").value) || 0;
     $("#tagPrice").textContent = ugx(sell);
     $("#tagStrike").textContent = rrp > sell ? ugx(rrp) : "";
     const code = $("#inSku").value.trim() || "ADN-XXX-0000";
@@ -1103,7 +1106,37 @@
      CUSTOMER BOOK (guest book)
      ============================================================ */
   let guestTerm = "";
-  $("#guestSearch").addEventListener("input", e => { guestTerm = e.target.value.trim().toLowerCase(); renderGuests(); });
+  const guestSearchEl = $("#guestSearch");
+  if (guestSearchEl) guestSearchEl.addEventListener("input", e => { guestTerm = e.target.value.trim().toLowerCase(); renderGuests(); });
+
+  /* ---------- posted data audit log ---------- */
+  let auditTerm = "";
+  const auditSearchEl = $("#auditSearch");
+  if (auditSearchEl) auditSearchEl.addEventListener("input", e => { auditTerm = e.target.value.trim().toLowerCase(); renderAuditLogs(); });
+  function auditSales() {
+    return DB.listSales().slice().sort((a, b) => new Date(a.created_at || a.createdAt || 0) - new Date(b.created_at || b.createdAt || 0));
+  }
+  function renderAuditLogs() {
+    const target = $("#auditList"); if (!target) return;
+    let list = auditSales();
+    if (auditTerm) list = list.filter(s => [s.id, s.order_number, s.customer_name, s.cashier_name, s.payment_method, s.channel].join(" ").toLowerCase().includes(auditTerm));
+    const total = list.reduce((n, s) => n + Number(s.total || 0), 0);
+    const summary = $("#auditSummary");
+    if (summary) summary.innerHTML = `<strong>${list.length}</strong> posted sale${list.length === 1 ? "" : "s"} · <strong>${ugx(total)}</strong> total value`;
+    target.innerHTML = list.length ? list.map(s => `<div class="guest-card audit-card">
+      <div class="guest-top"><span class="avatar" style="background:${avColor(s.customer_name || "Sale")}">${initials(s.customer_name || "Sale")}</span>
+        <div class="grow"><div class="guest-name">${esc(s.order_number || s.id || "Posted sale")}</div><div class="muted">${esc(new Date(s.created_at || s.createdAt || Date.now()).toLocaleString())} · ${esc(s.customer_name || "Walk-in customer")}</div></div>
+        <strong class="serif">${ugx(s.total || 0)}</strong>
+      </div><div class="guest-tags"><span class="itag">${esc(s.payment_method || s.tender_type || "Payment recorded")}</span><span class="itag">${esc(s.channel || "POS")}</span><button class="lnk" data-print-sale="${esc(s.id)}">Print receipt</button></div>
+    </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No posted sales match this search.</p></div>`;
+  }
+  function exportAuditCSV() {
+    const rows = [["Receipt","Date","Customer","Payment","Channel","Total"]].concat(auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0]));
+    const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = `adonai-posted-sales-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+  }
+  $("#btnExportAudit")?.addEventListener("click", exportAuditCSV);
+  $("#btnPrintAudit")?.addEventListener("click", () => window.print());
   function renderGuests() {
     let list = DB.listGuests();
     if (guestTerm) list = list.filter(g => [g.name, g.phone, g.neighborhood].some(x => String(x || "").toLowerCase().includes(guestTerm)));
@@ -1979,7 +2012,14 @@
     const pg = t.closest("[data-phgal]"); if (pg) return pickPhoto(Number(pg.dataset.phgal));
     const pr = t.closest("[data-phrem]"); if (pr) { intakePhotos[Number(pr.dataset.phrem)] = ""; buildPhotoRow(); return; }
 
-    /* guests */
+    /* posted audit log */
+    const printSale = t.closest("[data-print-sale]");
+    if (printSale) {
+      const sale = DB.listSales().find(s => String(s.id) === String(printSale.dataset.printSale));
+      if (sale) { window.print(); }
+      return;
+    }
+    /* guests (legacy handlers retained for existing records) */
     const ag = t.closest("#btnAddGuest"); if (ag) return guestModal(null);
     const eg = t.closest("[data-edit-guest]"); if (eg) return guestModal(eg.dataset.editGuest);
     const dg = t.closest("[data-del-guest]");
@@ -2110,7 +2150,7 @@
     if (currentView === "sales") renderSales();
     if (currentView === "inventory") renderInventory();
     if (currentView === "intake") renderIntake();
-    if (currentView === "customers") renderGuests();
+    if (currentView === "customers") renderAuditLogs();
     if (currentView === "dispatch") renderRiders();
     if (currentView === "payments") renderLedger();
     if (currentView === "staff") renderStaff();

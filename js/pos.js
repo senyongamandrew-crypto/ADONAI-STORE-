@@ -253,8 +253,6 @@
     const t = e.target.closest(".ctab"); if (!t) return;
     activeCat = t.dataset.cat; renderCats(); renderTiles();
   });
-  $("#gridSearch").addEventListener("input", e => { term = e.target.value.trim().toLowerCase(); renderTiles(); });
-
   function renderTiles() {
     const list = products
       .filter(p => activeDemo === "All" || p.demographic === activeDemo)
@@ -421,7 +419,8 @@
         </div>`).join("");
     }
     $("#sumItems").textContent = det.reduce((s, x) => s + x.l.qty, 0);
-    $("#sumTotal").textContent = DB.ugx(cartTotal());
+    const sumTotal = $("#sumTotal");
+    if (sumTotal) sumTotal.textContent = DB.ugx(cartTotal());
     /* docked mini-bar (phones) mirrors the live totals */
     const itemCount = det.reduce((s, x) => s + x.l.qty, 0);
     const ctCount = $("#ctCount"), ctTotal = $("#ctTotal");

@@ -27,9 +27,11 @@
 
   /* ---------- domain constants ---------- */
   const CATEGORIES    = ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear"];
-  const DEMO_CODES    = { "Men": "MEN", "Women": "WOM", "Children": "KID" };
+  const DEMO_CODES    = { "Men": "MEN", "Women": "WOM", "Children": "KID", "Unisex": "UNI" };
   const CONDITIONS    = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector"];
-  const DEMOGRAPHICS  = ["Men", "Women", "Children"];
+  // Unisex is a first-class demographic so it is available in inventory,
+  // cashier filters, and the public storefront filters.
+  const DEMOGRAPHICS  = ["Men", "Women", "Children", "Unisex"];
   const CAT_CODES     = { "Outerwear & Jackets": "JKT", "Tops & Shirts": "TOP", "Dresses & Skirts": "DRS", "Pants & Jeans": "PNT", "Shoes": "SHO", "Accessories": "ACC", "Children Wear": "CHD" };
   const TENDER_TYPES  = ["cash", "mtn", "airtel"];
   const DISPATCH_STATUSES = ["Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed"];
