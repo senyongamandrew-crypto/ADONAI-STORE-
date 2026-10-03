@@ -27,6 +27,8 @@
   } catch (e) {
     lockOwner = `POS-${(cashier.id || "TERMINAL")}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   }
+  /* Cashier identity lives in the navigation drawer (me-card) — the header
+     keeps only the menu trigger and the notification bell. */
   const posMeName = $("#posMeName");
   if (posMeName) posMeName.textContent = cashier.name;
   const posMeRole = $("#posMeRole");
@@ -741,6 +743,13 @@
     if (lastSale) { showReceipt(lastSale); }
     else flash("No receipt yet this session", false);
   });
+
+  /* ============================================================
+     INVENTORY INTAKE — REMOVED FROM THE CASHIER REGISTER
+     Product intake and photo processing live exclusively in the
+     Operations Console (Catalog Intake menu, admin.html?view=intake).
+     The register stays focused on lookup & checkout only.
+     ============================================================ */
 
   /* ---------- real-time: other tabs (storefront/web orders, other POS) ---------- */
   DB.on("products", () => refreshProducts());
