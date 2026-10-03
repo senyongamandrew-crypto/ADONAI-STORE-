@@ -10,10 +10,18 @@
   box-sizing: border-box;
 }
 
-/* Prevent global horizontal body overflow */
-html, body {
+/* Prevent global horizontal overflow — WITHOUT making <body> a scroll
+   container. overflow-x:hidden on body forces its overflow-y:visible to
+   compute to auto, turning body into a scroll box that breaks the sticky
+   site header. <html> owns the x-axis clamp; body uses clip, which never
+   creates a scrollport. The viewport stays the ONE page scroller. */
+html {
   max-width: 100vw;
   overflow-x: hidden;
+}
+body {
+  max-width: 100vw;
+  overflow-x: clip;
   margin: 0;
   padding: 0;
 }
@@ -699,7 +707,10 @@ body.cart-open .drawer-backdrop { opacity: 1; pointer-events: auto; }
 
 /* Hard re-lock of the horizontal axis: some component states flip
    body overflow back to auto - the x axis must stay clamped. */
-html, body { max-width: 100vw; overflow-x: hidden; }
+/* Hard re-lock of the horizontal axis. <html> owns the clamp so <body> can
+   never become a scroll container (which would break the sticky header). */
+html { max-width: 100vw; overflow-x: hidden; }
+body { max-width: 100vw; overflow-x: clip; }
 
 /* ======================================================================
    STOREFRONT-SPECIFIC FIT FIXES (v2.6)
@@ -761,8 +772,13 @@ html, body { margin: 0; padding: 0; min-height: 100%; }
   overscroll-behavior-y: contain;
   box-sizing: border-box;
 }
+/* Scroll lock while the cart drawer is open. The lock lives on <body> via
+   !important and is released by removing the class — the "closed" state must
+   NEVER set overflow:auto on body: a body scroll container breaks the sticky
+   site header and (with the lock class mismatched) strands the page unable
+   to scroll. The viewport (<html>) stays the one page scroller. */
 body.cart-drawer-open { overflow: hidden !important; touch-action: none; }
-body.cart-drawer-closed { overflow: auto !important; touch-action: auto !important; }
+body.cart-drawer-closed { touch-action: auto !important; }
 .cart-drawer {
   position: fixed; top: 0; right: 0; width: 100%; max-width: 420px;
   height: 100%; height: 100dvh; z-index: 1001;

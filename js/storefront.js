@@ -642,15 +642,35 @@
     });
   }
 
+  /* ---- cart drawer state ----
+     ONE source of truth, shared with js/cartController.js (which binds the
+     same buttons for the scroll-lock contract). Every open/close path —
+     addToCart, the header Cart button, ✕ Close, backdrop tap, Escape and
+     the post-order "Continue Browsing" button — must toggle the SAME class
+     set, otherwise the body scroll lock (cart-drawer-open) gets stuck and
+     the page can no longer scroll or be navigated. */
   function openCart() {
     document.body.classList.add("cart-open");
+    document.body.classList.remove("cart-drawer-closed");
+    document.body.classList.add("cart-drawer-open");        // lock page scroll behind the drawer
+    const drawer = document.getElementById("cartDrawer");
+    if (drawer) drawer.classList.add("is-active");
+    const backdrop = document.getElementById("cartBackdrop");
+    if (backdrop) backdrop.classList.add("is-active");
     if (window.AdonaiAnalytics && cart.length > 0) {
       const lines = cartLines();
       const total = lines.reduce((s, x) => s + x.sub, 0);
       window.AdonaiAnalytics.trackBeginCheckout(lines.map(x => x.p), total);
     }
   }
-  function closeCart() { document.body.classList.remove("cart-open"); }
+  function closeCart() {
+    document.body.classList.remove("cart-open", "cart-drawer-open");
+    document.body.classList.add("cart-drawer-closed");      // explicit unlock (touch-action)
+    const drawer = document.getElementById("cartDrawer");
+    if (drawer) drawer.classList.remove("is-active");
+    const backdrop = document.getElementById("cartBackdrop");
+    if (backdrop) backdrop.classList.remove("is-active");
+  }
   $("#cartBtn").addEventListener("click", openCart);
   $("#closeCart").addEventListener("click", closeCart);
   $("#cartBackdrop").addEventListener("click", closeCart);
