@@ -296,7 +296,19 @@
     if (!posCart || !cartToggle) return;
     posCart.classList.toggle("open", open);
     cartToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    // Storefront cart pattern: while the drawer is open on phones the page
+    // behind the scrim is locked (html owns the single page scrollbar).
+    document.documentElement.classList.toggle("pos-cart-open", open && isCartDocked());
   };
+  /* Storefront cart pattern: adding an item NEVER blocks the catalog — the
+     floating Sale pill pops (badge + running total) and the flash confirms.
+     The cashier opens the Current Sale drawer only when ready to review it. */
+  function pulseCartPill() {
+    if (!cartToggle) return;
+    cartToggle.classList.remove("ct-pulse");
+    void cartToggle.offsetWidth;            // restart the pop animation
+    cartToggle.classList.add("ct-pulse");
+  }
 
   /* ---- dynamic "Current Sale" drawer visibility ----
      The checkout panel is hidden while the cart is empty so the catalog
@@ -325,6 +337,8 @@
       if (!isCartDocked()) setCartOpen(false);   // desktop always shows the full panel
     }, { passive: true });
   }
+  const posCartScrim = $("#posCartScrim");
+  if (posCartScrim) posCartScrim.addEventListener("click", () => setCartOpen(false));
 
   const lockQueues = new Map();
   const hasRemotePosAuth = () => {
@@ -350,10 +364,11 @@
         const line = cart.find(x => x.product_id === pid);
         if (line) line.qty++; else cart.push({ product_id: pid, qty: 1 });
         renderCart();
-        // On phones the selected-items panel is an overlay drawer docked to
-        // the right edge. Slide it in after a successful tap so the cashier
-        // can immediately see and continue with the item they selected.
-        if (isCartDocked()) setCartOpen(true);
+        // Storefront cart pattern: the catalog is never blocked while adding.
+        // The floating Sale pill pops with the new count/total and the flash
+        // banner confirms the hold — the drawer opens only on explicit tap.
+        pulseCartPill();
+        flash(`✓ Added: ${p.name} — ${DB.ugx(p.selling_price)}`, true);
         return true;
       } catch (error) {
         flash("✗ " + (error.message || "Could not reserve this item"), false);
