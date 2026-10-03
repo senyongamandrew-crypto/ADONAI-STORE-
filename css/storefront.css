@@ -767,11 +767,12 @@ html[data-pointer="touch"] .btn, html[data-pointer="touch"] button { min-height:
 /* ==========================================================================\n   CART DRAWER SCROLL + HIGH-CONTRAST OVERRIDES\n   ========================================================================== */
 html, body { margin: 0; padding: 0; min-height: 100%; }
 .catalog-dashboard-region {
-  overflow-y: auto !important;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  /* Keep the document as the single vertical scroll surface. A nested
+     auto-scroller makes long product lists difficult to browse on mobile. */
+  overflow: visible;
   box-sizing: border-box;
 }
+
 /* Scroll lock while the cart drawer is open. The lock lives on <body> via
    !important and is released by removing the class — the "closed" state must
    NEVER set overflow:auto on body: a body scroll container breaks the sticky

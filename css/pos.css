@@ -1174,3 +1174,96 @@ html[data-pointer="touch"] .qty button { width: 44px; height: 44px; }
 .pos-cart-sidebar .cart-line { background: #1E293B; color: #FFF; border-color: #334155; }
 .pos-cart-sidebar .cart-line strong, .pos-cart-sidebar .cart-line small { color: #FFF; }
 .pos-cart-sidebar .charge-btn { background: #10B981; color: #FFF; }
+
+/* Compact professional checkout rail: the catalog remains the primary
+   workspace while the current sale stays visible as a focused summary. */
+@media screen and (min-width: 961px) {
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar {
+    width: min(290px, 24vw);
+    border: 1px solid #334155;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, .16);
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-head {
+    padding: 14px 15px;
+    background: linear-gradient(135deg, #172554, #0f172a);
+    border-bottom: 1px solid #334155;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-head h3 {
+    font-size: 16px;
+    letter-spacing: .01em;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-lines {
+    padding: 10px;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-line {
+    border-radius: 10px;
+    margin-bottom: 8px;
+    padding: 10px;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-summary {
+    padding: 14px 15px 16px;
+    background: #111c32;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .charge-btn {
+    border-radius: 10px;
+    min-height: 44px;
+    font-weight: 800;
+    letter-spacing: .01em;
+  }
+}
+
+/* Light Current Sale surface: keeps the checkout actions and sale details
+   readable instead of blending into the previous dark drawer background. */
+.pos-cart-sidebar,
+.pos-cart-sidebar .cart-body,
+.pos-cart-sidebar .cart-lines {
+  background: #F8FAFC;
+  color: #0F172A;
+}
+.pos-cart-sidebar {
+  border-color: #CBD5E1;
+}
+.pos-cart-sidebar .cart-head {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: #E2E8F0;
+}
+.pos-cart-sidebar .cart-head h3,
+.pos-cart-sidebar .cart-lines,
+.pos-cart-sidebar .sum-row {
+  color: #0F172A;
+}
+.pos-cart-sidebar .cart-head-actions .btn {
+  background: #E2E8F0;
+  border: 1px solid #CBD5E1;
+  color: #0F172A;
+  border-radius: 8px;
+  font-weight: 700;
+}
+.pos-cart-sidebar .cart-head-actions .btn:hover {
+  background: #CBD5E1;
+}
+.pos-cart-sidebar .cart-line {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: #E2E8F0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .06);
+}
+.pos-cart-sidebar .cart-line strong,
+.pos-cart-sidebar .cart-line small {
+  color: #0F172A;
+}
+.pos-cart-sidebar .cart-empty {
+  color: #64748B;
+}
+.pos-cart-sidebar .cart-summary {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: #E2E8F0;
+}
+.pos-cart-sidebar .charge-btn {
+  background: #16A34A;
+  color: #FFFFFF;
+}
