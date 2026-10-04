@@ -1165,16 +1165,29 @@
       filename = `adonai-posted-sales-${date}.csv`;
     }
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
+    a.href = url;
     a.download = filename;
+    a.rel = "noopener";
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+
+    // Keep a visible fallback link for Android WebView builds where an
+    // automatic anchor download may be blocked by the host container.
+    const fallback = $("#auditDownloadFallback");
+    if (fallback) {
+      fallback.href = url;
+      fallback.download = filename;
+      fallback.textContent = `Download ${filename}`;
+      fallback.hidden = false;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
     closeAuditExportMenu();
-    toast(`${filename} exported`);
+    toast(`${filename} ready — download started`);
   }
   function closeAuditExportMenu() {
     const details = $("#auditExportDetails");

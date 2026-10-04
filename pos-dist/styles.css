@@ -1462,3 +1462,8 @@ body.cart-drawer-closed { overflow:auto !important; touch-action:auto !important
 .export-menu-wrap > summary { list-style: none; }
 .export-menu-wrap > summary::-webkit-details-marker { display: none; }
 .export-menu-wrap > summary::after { content: ""; }
+.audit-download-fallback {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px;
+  color: var(--green); font-size: 11px; font-weight: 700; text-decoration: underline;
+}
+.audit-download-fallback[hidden] { display: none; }
