@@ -1134,7 +1134,16 @@
     const date = new Date().toISOString().slice(0, 10);
     let rows;
     let filename;
-    if (kind === "stock") {
+    if (kind === "demo") {
+      rows = [
+        ["Demo type", "Reference", "Description", "Amount / quantity", "Note"],
+        ["Sales", "DEMO-SALE-001", "Sample posted sale", "UGX 85,000", "DEMO — safe to delete"],
+        ["Stock", "DEMO-STK-001", "Sample checked shirt", "4", "DEMO — safe to delete"],
+        ["Ledger", "DEMO-LED-001", "Sample cash receipt", "UGX 85,000", "DEMO — safe to delete"],
+        ["Staff", "DEMO-STF-001", "Sample cashier account", "Active", "DEMO — safe to delete"]
+      ];
+      filename = `adonai-demo-examples-${date}.csv`;
+    } else if (kind === "stock") {
       rows = [["SKU", "Product", "Category", "Size", "Condition", "In stock", "Selling price"]].concat(
         DB.listProducts().map(p => [p.sku || "", p.name || "", p.category || "", p.size || "", p.condition || "", p.in_stock_count || 0, p.selling_price || 0])
       );
