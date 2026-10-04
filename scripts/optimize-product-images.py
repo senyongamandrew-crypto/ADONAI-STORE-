@@ -20,6 +20,7 @@ manifest are committed so production never needs an image build step.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -33,18 +34,24 @@ MANIFEST_PATH = os.path.join(ROOT, "js", "image-manifest.js")
 TARGET_WIDTHS = (320, 640, 960)
 MAX_JPEG_EDGE = 1280
 JPEG_QUALITY = 80
+JPEG_BYTE_BUDGET = 400 * 1024   # above this the fallback is re-encoded once
 WEBP_QUALITY = 72
 
 
 def optimize_jpeg(path: str, image) -> None:
-    """Cap the committed JPEG fallback so it is never a multi-megabyte file."""
+    """Cap the committed JPEG fallback so it is never a multi-megabyte file.
+
+    The rewrite must be idempotent: a photo that is already as small as this
+    encoder can make it is left untouched, otherwise every run would re-encode
+    (losing a little quality each time) and leave a dirty working tree.
+    """
     from PIL import Image
 
     width, height = image.size
     longest = max(width, height)
     needs_resize = longest > MAX_JPEG_EDGE
-    oversized_bytes = os.path.getsize(path) > 400 * 1024
-    if not needs_resize and not oversized_bytes:
+    current_bytes = os.path.getsize(path)
+    if not needs_resize and current_bytes <= JPEG_BYTE_BUDGET:
         return
 
     working = image
@@ -54,9 +61,19 @@ def optimize_jpeg(path: str, image) -> None:
             (max(1, round(width * scale)), max(1, round(height * scale))),
             Image.LANCZOS,
         )
+
+    buffer = io.BytesIO()
     working.convert("RGB").save(
-        path, "JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True
+        buffer, "JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True
     )
+
+    # Only commit the re-encode when it is a worthwhile win. Without this a
+    # photo that sits just above the budget would be rewritten on every run.
+    if not needs_resize and len(buffer.getvalue()) > current_bytes * 0.98:
+        return
+
+    with open(path, "wb") as handle:
+        handle.write(buffer.getvalue())
 
 
 def build() -> dict:
