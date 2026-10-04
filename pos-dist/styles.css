@@ -1459,3 +1459,6 @@ body.cart-drawer-closed { overflow:auto !important; touch-action:auto !important
 @media (max-width: 720px) {
   .export-menu { right: 0; left: auto; min-width: 230px; }
 }
+.export-menu-wrap > summary { list-style: none; }
+.export-menu-wrap > summary::-webkit-details-marker { display: none; }
+.export-menu-wrap > summary::after { content: ""; }

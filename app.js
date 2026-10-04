@@ -1177,15 +1177,8 @@
     toast(`${filename} exported`);
   }
   function closeAuditExportMenu() {
-    const menu = $("#auditExportMenu"), trigger = $("#btnExportAudit");
-    if (menu) menu.hidden = true;
-    if (trigger) trigger.setAttribute("aria-expanded", "false");
-  }
-  function toggleAuditExportMenu() {
-    const menu = $("#auditExportMenu"), trigger = $("#btnExportAudit");
-    if (!menu) return;
-    menu.hidden = !menu.hidden;
-    if (trigger) trigger.setAttribute("aria-expanded", String(!menu.hidden));
+    const details = $("#auditExportDetails");
+    if (details) details.open = false;
   }
   function printAuditSummary() {
     const sales = auditSales();
@@ -1208,7 +1201,6 @@
     }
     window.print();
   }
-  $("#btnExportAudit")?.addEventListener("click", toggleAuditExportMenu);
   $$("[data-export-audit]").forEach(button => button.addEventListener("click", () => exportAuditCSV(button.dataset.exportAudit)));
   $("#btnPrintAudit")?.addEventListener("click", printAuditSummary);
   function renderGuests() {

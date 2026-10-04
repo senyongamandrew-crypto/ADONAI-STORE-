@@ -272,16 +272,16 @@
           <p class="muted">Review completed sales, print receipts, and export posted records for documentation.</p>
         </div>
         <div class="row audit-actions">
-          <div class="export-menu-wrap">
-            <button class="btn ghost" id="btnExportAudit" type="button" aria-haspopup="true" aria-expanded="false">Export CSV <span aria-hidden="true">⌄</span></button>
-            <div class="export-menu" id="auditExportMenu" hidden>
+          <details class="export-menu-wrap" id="auditExportDetails">
+            <summary class="btn ghost" id="btnExportAudit">Export CSV <span aria-hidden="true">⌄</span></summary>
+            <div class="export-menu" id="auditExportMenu">
               <button type="button" data-export-audit="sales"><span>▣</span><span><strong>Sales records</strong><small>Posted transactions</small></span></button>
               <button type="button" data-export-audit="stock"><span>▤</span><span><strong>Stock inventory</strong><small>Catalog and quantities</small></span></button>
               <button type="button" data-export-audit="ledger"><span>▥</span><span><strong>Financial ledger</strong><small>Payment and value summary</small></span></button>
               <button type="button" data-export-audit="staff"><span>♙</span><span><strong>Staff directory</strong><small>Cashier and role records</small></span></button>
               <button type="button" data-export-audit="demo"><span>✦</span><span><strong>Demo examples</strong><small>Safe sample rows — delete anytime</small></span></button>
             </div>
-          </div>
+          </details>
           <button class="btn primary" id="btnPrintAudit" type="button">Print summary</button>
         </div>
       </div>
