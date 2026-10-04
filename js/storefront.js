@@ -391,7 +391,8 @@
     activeModalPhotoIdx = Math.max(0, initialPhotoIdx);
     renderProductModal(p);
     $("#prodBackdrop").classList.add("open");
-    document.body.classList.add("modal-open");
+    document.body.classList.add("modal-open");              // state hook (inert styling)
+    if (window.AdonaiScrollLock) window.AdonaiScrollLock.lock("product-modal");
     if (window.AdonaiAnalytics) {
       window.AdonaiAnalytics.trackViewItem(p);
     }
@@ -401,6 +402,10 @@
   function closeProductModal() {
     $("#prodBackdrop").classList.remove("open");
     document.body.classList.remove("modal-open");
+    if (window.AdonaiScrollLock) {
+      window.AdonaiScrollLock.unlock("product-modal");
+      window.AdonaiScrollLock.selfHeal();
+    }
     activeModalProductId = null;
     updateDynamicSEO();
   }
@@ -644,19 +649,24 @@
 
   /* ---- cart drawer state ----
      ONE source of truth, shared with js/cartController.js (which binds the
-     same buttons for the scroll-lock contract). Every open/close path —
-     addToCart, the header Cart button, ✕ Close, backdrop tap, Escape and
-     the post-order "Continue Browsing" button — must toggle the SAME class
-     set, otherwise the body scroll lock (cart-drawer-open) gets stuck and
-     the page can no longer scroll or be navigated. */
+     same buttons). Every open/close path — addToCart, the header Cart
+     button, ✕ Close, backdrop tap, Escape and the post-order "Continue
+     Browsing" button — funnels through these two functions, and the page
+     scroll lock itself is owned by window.AdonaiScrollLock so it cannot be
+     left half-applied. Both controllers are idempotent, so the duplicate
+     binding is harmless. */
+  const scrollLock = () => window.AdonaiScrollLock || null;
+
   function openCart() {
     document.body.classList.add("cart-open");
     document.body.classList.remove("cart-drawer-closed");
-    document.body.classList.add("cart-drawer-open");        // lock page scroll behind the drawer
+    document.body.classList.add("cart-drawer-open");        // state hook (inert styling)
     const drawer = document.getElementById("cartDrawer");
     if (drawer) drawer.classList.add("is-active");
     const backdrop = document.getElementById("cartBackdrop");
     if (backdrop) backdrop.classList.add("is-active");
+    const lock = scrollLock();
+    if (lock) lock.lock("cart-drawer");                     // lock page scroll behind the drawer
     if (window.AdonaiAnalytics && cart.length > 0) {
       const lines = cartLines();
       const total = lines.reduce((s, x) => s + x.sub, 0);
@@ -665,11 +675,13 @@
   }
   function closeCart() {
     document.body.classList.remove("cart-open", "cart-drawer-open");
-    document.body.classList.add("cart-drawer-closed");      // explicit unlock (touch-action)
+    document.body.classList.add("cart-drawer-closed");      // state hook (inert styling)
     const drawer = document.getElementById("cartDrawer");
     if (drawer) drawer.classList.remove("is-active");
     const backdrop = document.getElementById("cartBackdrop");
     if (backdrop) backdrop.classList.remove("is-active");
+    const lock = scrollLock();
+    if (lock) { lock.unlock("cart-drawer"); lock.selfHeal(); }
   }
   $("#cartBtn").addEventListener("click", openCart);
   $("#closeCart").addEventListener("click", closeCart);
