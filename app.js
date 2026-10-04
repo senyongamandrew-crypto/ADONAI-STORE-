@@ -1133,10 +1133,38 @@
   function exportAuditCSV() {
     const rows = [["Receipt","Date","Customer","Payment","Channel","Total"]].concat(auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0]));
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = `adonai-posted-sales-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
+    a.download = `adonai-posted-sales-${new Date().toISOString().slice(0,10)}.csv`;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function printAuditSummary() {
+    const sales = auditSales();
+    const total = sales.reduce((n, s) => n + Number(s.total || 0), 0);
+    const sheet = $("#receiptSheet");
+    if (sheet) {
+      sheet.innerHTML = `<div style="font-family:Arial,sans-serif;color:#111;padding:8px">
+        <h2 style="margin:0 0 6px">Adonai Store — Posted Sales</h2>
+        <p style="margin:0 0 12px">${sales.length} posted sale${sales.length === 1 ? "" : "s"} · ${ugx(total)} total value</p>
+        <table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>
+          <th style="text-align:left;border-bottom:1px solid #999;padding:4px 0">Receipt</th>
+          <th style="text-align:left;border-bottom:1px solid #999;padding:4px 0">Date</th>
+          <th style="text-align:right;border-bottom:1px solid #999;padding:4px 0">Total</th>
+        </tr></thead><tbody>${sales.map(s => `<tr>
+          <td style="padding:5px 0;border-bottom:1px solid #ddd">${esc(s.order_number || s.id || "Posted sale")}</td>
+          <td style="padding:5px 0;border-bottom:1px solid #ddd">${esc(new Date(s.created_at || s.createdAt || Date.now()).toLocaleString())}</td>
+          <td style="padding:5px 0;border-bottom:1px solid #ddd;text-align:right">${ugx(s.total || 0)}</td>
+        </tr>`).join("")}</tbody></table>
+      </div>`;
+    }
+    window.print();
   }
   $("#btnExportAudit")?.addEventListener("click", exportAuditCSV);
-  $("#btnPrintAudit")?.addEventListener("click", () => window.print());
+  $("#btnPrintAudit")?.addEventListener("click", printAuditSummary);
   function renderGuests() {
     let list = DB.listGuests();
     if (guestTerm) list = list.filter(g => [g.name, g.phone, g.neighborhood].some(x => String(x || "").toLowerCase().includes(guestTerm)));
@@ -2016,7 +2044,8 @@
     const printSale = t.closest("[data-print-sale]");
     if (printSale) {
       const sale = DB.listSales().find(s => String(s.id) === String(printSale.dataset.printSale));
-      if (sale) { window.print(); }
+      if (sale) printReceiptModal(sale.id);
+      else toast("Sale record not found", false);
       return;
     }
     /* guests (legacy handlers retained for existing records) */
