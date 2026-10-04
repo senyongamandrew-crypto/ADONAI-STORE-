@@ -23,6 +23,8 @@ from models import (
     Rider,
     StoreSetting,
     User,
+    build_product_slug,
+    slugify,
 )
 
 logger = logging.getLogger("adonai.db_init")
@@ -44,6 +46,14 @@ def apply_additive_schema_migrations():
             ("embedded_transport_portion", "NUMERIC(14,2) GENERATED ALWAYS AS (total_transport_cost * 0.50) STORED"),
             ("checkout_transport_portion", "NUMERIC(14,2) GENERATED ALWAYS AS (total_transport_cost * 0.50) STORED"),
             ("final_selling_price", "NUMERIC(14,2) GENERATED ALWAYS AS (base_price + (total_transport_cost * 0.50)) STORED"),
+            # Product Detail Page (PDP) catalog fields
+            ("slug", "VARCHAR(200)"),
+            ("fabric", "VARCHAR(255)"),
+            ("measurements_json", "TEXT DEFAULT '{}'"),
+            ("flaw_notes", "TEXT"),
+            ("flaw_photo_index", "INTEGER DEFAULT -1"),
+            ("care_notes", "TEXT"),
+            ("staff_notes", "TEXT"),
         ],
         "order_items": [
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
@@ -66,9 +76,34 @@ def apply_additive_schema_migrations():
         for statement in (
             "CREATE INDEX IF NOT EXISTS ix_products_stock_lot_id ON products(stock_lot_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
+            "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
         ):
             connection.execute(text(statement))
+
+    backfill_product_slugs()
+
+
+def backfill_product_slugs():
+    """Give every legacy catalog row a shareable /product/<slug> permalink."""
+    with get_db() as session:
+        rows = session.query(Product).filter(
+            (Product.slug.is_(None)) | (Product.slug == "")
+        ).all()
+        if not rows:
+            return
+        taken = {
+            slug for (slug,) in session.query(Product.slug).filter(
+                Product.slug.isnot(None), Product.slug != ""
+            ).all()
+        }
+        for product in rows:
+            candidate = build_product_slug(product.name, product.sku, product.id)
+            if candidate in taken:
+                candidate = f"{candidate}-{slugify(product.id, 'item')}"
+            taken.add(candidate)
+            product.slug = candidate
+        logger.info("Backfilled %d product permalink slugs.", len(rows))
 
 
 def _journal_line(entry, code, name, debit=0, credit=0, memo=""):
@@ -208,15 +243,96 @@ def seed_products(session):
         ("Floral Summer Blouse", "Unbranded", "Floral", "Women", "Tops & Shirts", "S", "Grade A — Excellent", 14000, 28000, 50000, 1, "Airy rayon blouse with covered buttons. Zero pilling.", "Rail C-2")
     ]
 
+    # Flat-lay measurements (INCHES), fabric composition, care and the
+    # mandatory flaw disclosure rendered by the Product Detail Page.
+    pdp_details = [
+        # The hero piece is photographed from four angles (front, back, fabric
+        # detail, flaw close-up) to demonstrate the full product page gallery.
+        {"measurements": {"shoulder": 18.5, "chest": 22.0, "sleeve": 25.0, "length": 26.0},
+         "fabric": "100% Cotton denim · 12.5oz",
+         "care": "Machine wash cold inside out. Hang dry. Do not bleach.",
+         "flaw": "Light fraying along the left cuff hem and a small pale wear mark just above it. "
+                 "The denim is intact — no holes, and every button and rivet is original.",
+         "flaw_photo": 3,
+         "images": [
+             "assets/products/p1001.jpg",
+             "assets/products/p1001-back.jpg",
+             "assets/products/p1001-fabric.jpg",
+             "assets/products/p1001-flaw.jpg",
+         ]},
+        {"measurements": {"shoulder": 19.5, "chest": 24.0, "sleeve": 26.0, "length": 31.0},
+         "fabric": "Waxed cotton shell · corduroy collar · polyester lining",
+         "care": "Do not machine wash. Sponge clean with cold water and re-wax once a year.",
+         "flaw": "Wax finish has faded slightly at both cuffs and there is a neat 1-inch seam repair inside the left pocket. Fully weatherproof and structurally sound."},
+        {"measurements": {"chest": 17.0, "waist": 16.0, "length": 51.0},
+         "fabric": "100% Silk",
+         "care": "Dry clean, or cold hand wash with silk detergent and dry flat.",
+         "flaw": "Two faint pin marks beside the left strap from the original hemming — only visible up close."},
+        {"measurements": {"insole": 11.0, "heel": 1.2},
+         "fabric": "Full-grain leather upper · leather sole · elastic gusset",
+         "care": "Wipe with a damp cloth and polish monthly. Use shoe trees between wears.",
+         "flaw": "Resoled once by a cobbler and light creasing across the toe box. Uppers are crack-free."},
+        {"measurements": {"shoulder": 18.0, "chest": 22.5, "sleeve": 25.0, "length": 30.0},
+         "fabric": "100% Cotton oxford",
+         "care": "Machine wash warm, tumble dry low, iron on medium.",
+         "flaw": ""},
+        {"measurements": {"shoulder": 15.5, "chest": 19.0, "sleeve": 23.0, "length": 26.0},
+         "fabric": "Cotton velvet · satin lapels · viscose lining",
+         "care": "Dry clean only. Steam lightly to lift the pile.",
+         "flaw": ""},
+        {"measurements": {"waist": 13.0, "hip": 19.0, "length": 31.0},
+         "fabric": "Polyester satin · elastic waistband",
+         "care": "Hand wash cold, hang dry, cool iron on the reverse.",
+         "flaw": ""},
+        {"measurements": {"shoulder": 14.5, "chest": 18.0, "sleeve": 9.0, "length": 44.0},
+         "fabric": "100% Cotton wax print (Kitenge)",
+         "care": "Wash separately on the first wash — wax-print colours may run.",
+         "flaw": ""},
+        {"measurements": {"waist": 15.0, "hip": 20.0, "inseam": 29.0, "rise": 11.5, "thigh": 11.0, "leg_opening": 7.5},
+         "fabric": "100% Cotton rigid denim",
+         "care": "Machine wash cold inside out. Line dry to keep the fade.",
+         "flaw": "Honest fade across both knees and a small frayed edge on the right back pocket. No holes or repairs."},
+        {"measurements": {"waist": 16.5, "hip": 21.0, "inseam": 30.0, "rise": 11.0, "thigh": 12.0, "leg_opening": 8.0},
+         "fabric": "Cotton twill",
+         "care": "Machine wash warm, tumble dry low, iron the pleats.",
+         "flaw": "Faint shadow at the original hem line where the leg was let down. Hem professionally re-stitched."},
+        {"measurements": {"length": 15.0, "notes": "Body 14in wide x 15in tall x 5in deep · 11in handle drop"},
+         "fabric": "Heavy cotton canvas · leather handles",
+         "care": "Spot clean with mild soap. Air dry out of direct sun.",
+         "flaw": ""},
+        {"measurements": {"length": 42.0, "notes": "Fits a 32in–36in waist · 1.5in strap width"},
+         "fabric": "Full-grain leather · solid brass buckle",
+         "care": "Condition with leather balm twice a year.",
+         "flaw": "Buckle carries a light patina and the third hole shows normal wear."},
+        {"measurements": {"shoulder": 12.5, "chest": 15.0, "sleeve": 17.0, "length": 17.0},
+         "fabric": "Cotton denim",
+         "care": "Machine wash cold, tumble dry low.",
+         "flaw": "One snap shows minor tarnish. Every snap opens and closes properly."},
+        {"measurements": {"length": 26.0, "notes": "26in x 26in square with a hand-rolled hem"},
+         "fabric": "100% Silk",
+         "care": "Dry clean only.",
+         "flaw": ""},
+        {"measurements": {"insole": 11.2},
+         "fabric": "Suede and mesh upper · gum rubber outsole",
+         "care": "Brush suede dry. Spot clean the midsole with mild soap.",
+         "flaw": "Even tread wear across the outsole. Interior washed, disinfected and odour-free."},
+        {"measurements": {"shoulder": 14.0, "chest": 18.0, "sleeve": 7.0, "length": 24.0},
+         "fabric": "100% Rayon",
+         "care": "Hand wash cold, line dry, cool iron.",
+         "flaw": ""},
+    ]
+
     for i, r in enumerate(raw_products):
         pid = f"PRD-{1001 + i}"
         sku = f"ADN-{DEMO_CODES.get(r[3], 'GEN')}-{1001 + i}"
         barcode_id = f"ADT-{10001 + i}"
         created = datetime.utcnow() - timedelta(days=30 - i)
-        
+        details = pdp_details[i] if i < len(pdp_details) else {}
+
         prod = Product(
             id=pid,
             sku=sku,
+            slug=build_product_slug(r[0], sku, pid),
             barcode_id=barcode_id,
             name=r[0],
             brand=r[1],
@@ -226,12 +342,22 @@ def seed_products(session):
             size=r[5],
             condition=r[6],
             cost_price=r[7],
+            # base_price must be seeded too: final_selling_price is a generated
+            # column (base_price + 50% transport). Leaving it at 0 made a fresh
+            # database advertise every piece as "UGX 0" on the storefront.
+            base_price=r[8],
+            total_transport_cost=0,
             selling_price=r[8],
             compare_price=r[9],
             in_stock_count=r[10],
             desc=r[11],
             image_url=f"assets/products/p{1001 + i}.jpg",
-            images_json="[]",
+            images_json=json.dumps(details.get("images", [])),
+            fabric=details.get("fabric", ""),
+            measurements_json=json.dumps(details.get("measurements", {})),
+            flaw_notes=details.get("flaw", ""),
+            flaw_photo_index=details.get("flaw_photo", -1),
+            care_notes=details.get("care", ""),
             rack_location=r[12],
             created_at=created
         )

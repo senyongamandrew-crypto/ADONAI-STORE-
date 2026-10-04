@@ -10,6 +10,7 @@ Adonai Thrift Store — Production Server & WSGI Gateway for Render
 import gzip
 import http.server
 import io
+import json
 import logging
 import mimetypes
 import os
@@ -37,6 +38,7 @@ ROUTES = {
     # production storefront route on Render.
     "/": "pos.html" if os.environ.get("ADONAI_PREVIEW_POS_ROOT") == "1" else "index.html",
     "/store": "index.html",
+    "/product": "product.html",
     "/pos": "pos.html",
     "/admin": "admin.html",
     "/login": "login.html",
@@ -168,6 +170,241 @@ def resolve_static_file(clean_path: str) -> str | None:
     if not os.path.isfile(candidate):
         return None
     return candidate
+
+# ============================================================================
+# Product Detail Page (PDP) — /product/<slug> server rendering
+# ============================================================================
+# The PDP shell is a static file, but every permalink must ship accurate
+# <title>, canonical, Open Graph and JSON-LD tags: WhatsApp, Facebook and
+# Google only read the raw HTML response, never the hydrated DOM. The block
+# between these markers in product.html is swapped for per-product tags.
+PDP_HEAD_START = "<!--ADONAI_PDP_HEAD_START-->"
+PDP_HEAD_END = "<!--ADONAI_PDP_HEAD_END-->"
+PDP_BOOTSTRAP_MARKER = "<!--ADONAI_PDP_BOOTSTRAP-->"
+PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://adonai-store.onrender.com").rstrip("/")
+
+
+def html_escape(value: str) -> str:
+    return (
+        str(value if value is not None else "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def request_origin(environ_or_headers) -> str:
+    """Best-effort public origin for canonical/OG URLs (Render, preview, local)."""
+    try:
+        host = (
+            environ_or_headers.get("HTTP_X_FORWARDED_HOST")
+            or environ_or_headers.get("HTTP_HOST")
+            or ""
+        ).split(",")[0].strip()
+        scheme = (
+            environ_or_headers.get("HTTP_X_FORWARDED_PROTO")
+            or environ_or_headers.get("wsgi.url_scheme")
+            or "https"
+        ).split(",")[0].strip()
+    except AttributeError:
+        host, scheme = "", "https"
+    if not host:
+        return PUBLIC_SITE_URL
+    return f"{scheme}://{host}"
+
+
+def absolute_media_url(url: str, origin: str) -> str:
+    url = str(url or "").strip()
+    if not url or url.startswith("data:"):
+        return f"{origin}/assets/og-preview-banner.png"
+    if url.startswith(("http://", "https://")):
+        return url
+    return f"{origin}/{url.lstrip('/')}"
+
+
+def product_page_html(slug: str, origin: str) -> bytes | None:
+    """Render product.html with per-product metadata and bootstrap state.
+
+    Returns None when the PDP shell is missing. A catalog miss still returns
+    the shell so the client can show the "piece not found" state (and so a
+    cold database never produces a hard 500 on a shared link).
+    """
+    shell_path = os.path.join(ROOT, "product.html")
+    if not os.path.isfile(shell_path):
+        return None
+    with open(shell_path, "r", encoding="utf-8") as handle:
+        html = handle.read()
+
+    product = None
+    try:
+        from database import get_db
+        from api import lookup_product
+
+        with get_db() as session:
+            row = lookup_product(session, slug)
+            if row:
+                product = row.to_dict()
+    except Exception as exc:  # pragma: no cover - database optional at render time
+        logger.warning("PDP server render fell back to the client shell: %s", exc)
+
+    if not product:
+        return html.encode("utf-8")
+
+    price = int(product.get("final_selling_price") or product.get("selling_price") or 0)
+    compare = int(product.get("compare_price") or 0)
+    in_stock = int(product.get("in_stock_count") or 0) > 0
+    canonical = f"{origin}/product/{product.get('slug') or slug}"
+    image = absolute_media_url(
+        product.get("image_url") or (product.get("images") or [None])[0], origin
+    )
+    condition = product.get("condition") or "Pre-loved"
+    size = product.get("size") or "-"
+    title = (
+        f"{product.get('name')} — UGX {price:,} | {condition} | Adonai Thrift Store Kampala"
+    )
+    description = (
+        product.get("desc")
+        or f"{condition} {product.get('category', 'thrift piece')} from Adonai Thrift Store Kampala."
+    )
+    description = " ".join(str(description).split())[:180]
+    summary = (
+        f"{description} Size {size}. UGX {price:,}. "
+        "Same-day Kampala delivery, nationwide bus/courier transit, MTN MoMo, Airtel Money or cash."
+    )[:300]
+
+    json_ld = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": product.get("name"),
+        "image": [image],
+        "description": summary,
+        "sku": product.get("sku"),
+        "mpn": product.get("barcode_id"),
+        "brand": {"@type": "Brand", "name": product.get("brand") or "Vintage / Unbranded"},
+        "category": product.get("category"),
+        "color": product.get("color") or "",
+        "size": size,
+        "itemCondition": (
+            "https://schema.org/NewCondition"
+            if "BNWT" in str(condition).upper()
+            else "https://schema.org/UsedCondition"
+        ),
+        "offers": {
+            "@type": "Offer",
+            "url": canonical,
+            "priceCurrency": "UGX",
+            "price": price,
+            "availability": (
+                "https://schema.org/InStock" if in_stock else "https://schema.org/SoldOut"
+            ),
+            "itemCondition": (
+                "https://schema.org/NewCondition"
+                if "BNWT" in str(condition).upper()
+                else "https://schema.org/UsedCondition"
+            ),
+            "seller": {"@type": "Organization", "name": "Adonai Thrift Store"},
+            "areaServed": "UG",
+        },
+    }
+    if compare > price > 0:
+        json_ld["offers"]["priceSpecification"] = {
+            "@type": "PriceSpecification",
+            "priceCurrency": "UGX",
+            "price": compare,
+            "valueAddedTaxIncluded": True,
+        }
+
+    # `</` inside an inline <script> must be escaped or the parser ends the tag.
+    json_ld_text = json.dumps(json_ld, ensure_ascii=False).replace("</", "<\\/")
+
+    head_block = f"""<title>{html_escape(title)}</title>
+<meta name="description" content="{html_escape(summary)}" />
+<link rel="canonical" href="{html_escape(canonical)}" />
+<meta property="og:type" content="product" />
+<meta property="og:site_name" content="Adonai Thrift Store" />
+<meta property="og:title" content="{html_escape(product.get('name'))} — UGX {price:,}" />
+<meta property="og:description" content="{html_escape(summary)}" />
+<meta property="og:url" content="{html_escape(canonical)}" />
+<meta property="og:image" content="{html_escape(image)}" />
+<meta property="og:image:alt" content="{html_escape(product.get('name'))}" />
+<meta property="og:locale" content="en_UG" />
+<meta property="product:price:amount" content="{price}" />
+<meta property="product:price:currency" content="UGX" />
+<meta property="product:availability" content="{'in stock' if in_stock else 'out of stock'}" />
+<meta property="product:condition" content="{'new' if 'BNWT' in str(condition).upper() else 'used'}" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="{html_escape(product.get('name'))} — UGX {price:,}" />
+<meta name="twitter:description" content="{html_escape(summary)}" />
+<meta name="twitter:image" content="{html_escape(image)}" />
+<script type="application/ld+json">{json_ld_text}</script>"""
+
+    start = html.find(PDP_HEAD_START)
+    end = html.find(PDP_HEAD_END)
+    if start != -1 and end != -1:
+        html = html[:start] + head_block + html[end + len(PDP_HEAD_END):]
+
+    bootstrap = (
+        "<script>window.__ADONAI_PDP_PRODUCT__ = "
+        + json.dumps(product, ensure_ascii=False).replace("</", "<\\/")
+        + ";</script>"
+    )
+    html = html.replace(PDP_BOOTSTRAP_MARKER, bootstrap)
+    return html.encode("utf-8")
+
+
+def product_slug_from_path(clean_path: str) -> str | None:
+    """Return the slug for /product/<slug> requests (None for anything else)."""
+    if not clean_path.startswith("/product/"):
+        return None
+    remainder = clean_path[len("/product/"):]
+    if not remainder or "/" in remainder:
+        return None
+    slug = urllib.parse.unquote(remainder).strip()
+    if not slug or len(slug) > 200 or "\x00" in slug:
+        return None
+    return slug
+
+
+def build_sitemap(origin: str) -> bytes:
+    """Sitemap including every in-stock /product/<slug> permalink."""
+    static_paths = ["/", "/store", "/privacy-policy", "/terms-and-conditions"]
+    entries = [
+        f"  <url><loc>{html_escape(origin + path)}</loc><changefreq>daily</changefreq>"
+        f"<priority>{'1.0' if path == '/' else '0.5'}</priority></url>"
+        for path in static_paths
+    ]
+    try:
+        from database import get_db
+        from models import Product
+
+        with get_db() as session:
+            rows = (
+                session.query(Product)
+                .filter(Product.in_stock_count > 0)
+                .filter(Product.inventory_status.notin_(["ARCHIVED", "WRITTEN_OFF"]))
+                .order_by(Product.created_at.desc())
+                .limit(5000)
+                .all()
+            )
+            for row in rows:
+                updated = (row.updated_at or row.created_at)
+                lastmod = f"<lastmod>{updated.date().isoformat()}</lastmod>" if updated else ""
+                entries.append(
+                    f"  <url><loc>{html_escape(origin)}/product/{html_escape(row.public_slug)}</loc>"
+                    f"{lastmod}<changefreq>daily</changefreq><priority>0.8</priority></url>"
+                )
+    except Exception as exc:  # pragma: no cover - static fallback below
+        logger.warning("Dynamic sitemap fell back to static entries: %s", exc)
+
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(entries)
+        + "\n</urlset>\n"
+    )
+    return body.encode("utf-8")
+
 
 # The APK serves its bundled UI from WebViewAssetLoader. Its HTTPS-like
 # appassets origin is therefore cross-origin to the live API. Keep this list
@@ -315,6 +552,40 @@ def wsgi_app(environ, start_response):
 
     # 2. Static Clean Route Resolution (traversal-safe, allowlisted)
     clean_path = raw_path.rstrip("/") or "/"
+
+    # 2a. Product Detail Page permalinks: /product/<slug>
+    slug = product_slug_from_path(clean_path)
+    if slug is not None and method in ("GET", "HEAD"):
+        rendered = product_page_html(slug, request_origin(environ))
+        if rendered is not None:
+            headers = [
+                ("Content-Type", "text/html; charset=utf-8"),
+                ("Cache-Control", "no-cache, no-store, must-revalidate"),
+            ]
+            headers.extend(SECURITY_HEADERS)
+            if "gzip" in environ.get("HTTP_ACCEPT_ENCODING", "") and len(rendered) > 256:
+                buf = io.BytesIO()
+                with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+                    gz.write(rendered)
+                rendered = buf.getvalue()
+                headers.append(("Content-Encoding", "gzip"))
+                headers.append(("Vary", "Accept-Encoding"))
+            headers.append(("Content-Length", str(len(rendered))))
+            start_response("200 OK", headers)
+            return [b""] if method == "HEAD" else [rendered]
+
+    # 2b. Catalog-aware sitemap (falls back to the static file on DB errors)
+    if clean_path == "/sitemap.xml" and method in ("GET", "HEAD"):
+        sitemap = build_sitemap(request_origin(environ))
+        headers = [
+            ("Content-Type", "application/xml; charset=utf-8"),
+            ("Cache-Control", "public, max-age=3600"),
+            ("Content-Length", str(len(sitemap))),
+        ]
+        headers.extend(SECURITY_HEADERS)
+        start_response("200 OK", headers)
+        return [b""] if method == "HEAD" else [sitemap]
+
     target_file = resolve_static_file(clean_path)
 
     # 3. File Serving & Compression
@@ -467,6 +738,42 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
 
         # 2. Clean URL Routing (traversal-safe, allowlisted)
         clean_path = path.rstrip("/") or "/"
+
+        # 2a. Product Detail Page permalinks: /product/<slug>
+        slug = product_slug_from_path(clean_path)
+        if slug is not None and self.command in ("GET", "HEAD"):
+            host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
+            scheme = self.headers.get("X-Forwarded-Proto") or "http"
+            origin = f"{scheme}://{host}" if host else PUBLIC_SITE_URL
+            rendered = product_page_html(slug, origin)
+            if rendered is not None:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(rendered)))
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                for k, v in SECURITY_HEADERS:
+                    self.send_header(k, v)
+                self.end_headers()
+                if not head_only:
+                    self.wfile.write(rendered)
+                return
+
+        # 2b. Catalog-aware sitemap
+        if clean_path == "/sitemap.xml" and self.command in ("GET", "HEAD"):
+            host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
+            scheme = self.headers.get("X-Forwarded-Proto") or "http"
+            sitemap = build_sitemap(f"{scheme}://{host}" if host else PUBLIC_SITE_URL)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml; charset=utf-8")
+            self.send_header("Content-Length", str(len(sitemap)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            for k, v in SECURITY_HEADERS:
+                self.send_header(k, v)
+            self.end_headers()
+            if not head_only:
+                self.wfile.write(sitemap)
+            return
+
         target_file = resolve_static_file(clean_path)
 
         # 3. Serve File or 404

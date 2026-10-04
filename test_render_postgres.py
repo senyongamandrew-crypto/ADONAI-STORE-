@@ -11,6 +11,8 @@ Verifies:
 8. Balanced expenses, audited edit/void reversals, and manager dashboard security
 9. Stock-lot landed costs, aging markdowns, and write-off loss accounting
 10. POS scan holds blocking public checkout and being consumed atomically
+11. Product Detail Page contract: slugs, flat-lay measurements, flaw
+    disclosure and server-rendered SEO markup on /product/<slug>
 """
 import concurrent.futures
 from datetime import datetime, timedelta
@@ -671,6 +673,149 @@ class TestRenderPostgresHardening(unittest.TestCase):
             self.assertIsNotNone(journal)
             self.assertEqual(sum(line.debit for line in journal.lines), sum(line.credit for line in journal.lines))
         print("✅ PASS: POS scan hold blocked web checkout and was atomically consumed by the sale.")
+
+    def html_request(self, path, query=""):
+        """Fetch a server-rendered HTML route through the WSGI app."""
+        environ = {
+            "REQUEST_METHOD": "GET",
+            "PATH_INFO": path,
+            "QUERY_STRING": query,
+            "CONTENT_LENGTH": "0",
+            "wsgi.input": io.BytesIO(b""),
+            "HTTP_HOST": "ai-store.onrender.com",
+        }
+        status = []
+        headers = []
+
+        def start_response(value, header_list):
+            status.append(value)
+            headers.extend(header_list)
+
+        body = b"".join(wsgi_app(environ, start_response))
+        return status[0], dict(headers), body.decode("utf-8", "replace")
+
+    def test_12_pdp_fields_persist_and_resolve_by_slug(self):
+        """Measurements, fabric, care and flaw disclosure survive a round trip."""
+        payload = {
+            "name": "Stone Washed Denim Shirt",
+            "brand": "Wrangler",
+            "color": "Stone",
+            "demographic": "Men",
+            "category": "Tops & Shirts",
+            "size": "L",
+            "condition": "Grade B — Good",
+            "sku": "ADN-MEN-7781",
+            "cost_price": 14000,
+            "selling_price": 42000,
+            "compare_price": 85000,
+            "in_stock_count": 1,
+            "fabric": "100% Cotton denim · 8oz",
+            "care_notes": "Machine wash cold. Hang dry.",
+            "measurements": {"shoulder": 18.5, "chest": 22, "sleeve": 25, "length": 30,
+                             "notes": "Measured flat and buttoned."},
+            "flaw_notes": "Fray on the left cuff and a faint mark under the collar.",
+            "flaw_photo_index": 2,
+            "image_url": "assets/products/p1005.jpg",
+        }
+        status, created = self.api_request("POST", "/api/products", payload, TEST_MASTER_KEY)
+        self.assertTrue(status.startswith("201"), created)
+        product = created["product"]
+        slug = product["slug"]
+        self.assertEqual(slug, "stone-washed-denim-shirt-adn-men-7781")
+
+        # The PDP fetches by slug; id, sku and barcode must keep working too.
+        for identifier in (slug, product["id"], product["sku"], product["barcode_id"]):
+            status, data = self.api_request("GET", f"/api/products/{identifier}")
+            self.assertTrue(status.startswith("200"), f"{identifier} -> {data}")
+            fetched = data["product"]
+            self.assertEqual(fetched["id"], product["id"])
+            self.assertEqual(fetched["fabric"], payload["fabric"])
+            self.assertEqual(fetched["care_notes"], payload["care_notes"])
+            self.assertEqual(fetched["flaw_notes"], payload["flaw_notes"])
+            self.assertEqual(fetched["flaw_photo_index"], 2)
+            self.assertAlmostEqual(fetched["measurements"]["chest"], 22.0)
+            self.assertEqual(fetched["measurements"]["notes"], "Measured flat and buttoned.")
+            # One-of-one stock must expose the counts the buy box relies on.
+            self.assertIn("available_count", fetched)
+            self.assertIn("authoritative_stock_count", fetched)
+
+        # A price must never be advertised as zero.
+        self.assertGreater(fetched["final_selling_price"], 0)
+
+        status, missing = self.api_request("GET", "/api/products/no-such-piece-adn-men-0000")
+        self.assertTrue(status.startswith("404"), missing)
+        print("✅ PASS: PDP fields persist and resolve by slug, id, SKU and barcode.")
+
+    def test_13_product_page_is_server_rendered_for_crawlers(self):
+        """/product/<slug> must ship real metadata, not an empty shell."""
+        with get_db() as session:
+            product = (
+                session.query(Product)
+                .filter(Product.slug.isnot(None), Product.in_stock_count > 0)
+                .first()
+            )
+            self.assertIsNotNone(product, "A slugged product is required for this test")
+            slug, name = product.slug, product.name
+
+        status, headers, html = self.html_request(f"/product/{slug}")
+        self.assertTrue(status.startswith("200"), status)
+        self.assertIn("text/html", headers.get("Content-Type", ""))
+
+        self.assertIn(name, html)
+        self.assertIn('<meta property="og:type" content="product"', html)
+        self.assertIn(f"https://ai-store.onrender.com/product/{slug}", html)
+        self.assertIn('"@type": "Product"', html)
+        self.assertIn('"priceCurrency": "UGX"', html)
+        self.assertIn('rel="canonical"', html)
+        # The bootstrap payload lets the page paint without a second round trip.
+        self.assertIn("window.__ADONAI_PDP_PRODUCT__", html)
+        # Inline JSON must not be able to break out of the script element.
+        self.assertNotIn("</script>", html.split('<script type="application/ld+json">')[1].split("</script>")[0])
+
+        # Unknown slugs still return a usable page (the client shows "sold or moved").
+        status, _, _ = self.html_request("/product/this-piece-does-not-exist")
+        self.assertTrue(status.startswith("200") or status.startswith("404"), status)
+        print("✅ PASS: /product/<slug> is server-rendered with product SEO metadata.")
+
+    def test_14_sitemap_lists_product_permalinks(self):
+        """Every in-stock product needs a crawlable permalink in the sitemap."""
+        status, headers, xml = self.html_request("/sitemap.xml")
+        self.assertTrue(status.startswith("200"), status)
+        self.assertIn("xml", headers.get("Content-Type", ""))
+        self.assertIn("<urlset", xml)
+
+        with get_db() as session:
+            slugs = [
+                row.slug
+                for row in session.query(Product)
+                .filter(Product.slug.isnot(None), Product.in_stock_count > 0)
+                .limit(5)
+                .all()
+            ]
+        self.assertTrue(slugs, "Expected at least one in-stock slugged product")
+        for slug in slugs:
+            self.assertIn(f"/product/{slug}", xml)
+        print(f"✅ PASS: Sitemap exposes product permalinks ({len(slugs)} verified).")
+
+    def test_15_seeded_catalog_is_pdp_ready(self):
+        """The seed must demonstrate the PDP: prices, slugs and measurements."""
+        with get_db() as session:
+            seeded = session.query(Product).filter(Product.id.like("PRD-10%")).all()
+            self.assertGreaterEqual(len(seeded), 16)
+            for product in seeded:
+                self.assertTrue(product.slug, f"{product.id} is missing a slug")
+                data = product.to_dict()
+                self.assertGreater(
+                    data["final_selling_price"], 0,
+                    f"{product.id} would be advertised at UGX 0",
+                )
+            with_measurements = [p for p in seeded if (p.to_dict().get("measurements") or {})]
+            with_flaws = [p for p in seeded if (p.flaw_notes or "").strip()]
+            with_fabric = [p for p in seeded if (p.fabric or "").strip()]
+            self.assertGreaterEqual(len(with_measurements), 16, "Every seeded piece needs measurements")
+            self.assertGreaterEqual(len(with_fabric), 16, "Every seeded piece needs a fabric line")
+            self.assertGreaterEqual(len(with_flaws), 5, "Flaw disclosure must be demonstrated in the seed")
+        print(f"✅ PASS: Seed catalog is PDP-ready ({len(with_measurements)} measured, {len(with_flaws)} with disclosed flaws).")
 
 
 if __name__ == "__main__":

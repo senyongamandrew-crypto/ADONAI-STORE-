@@ -235,9 +235,34 @@ h1, h2, h3, .brand-word, .section-title {
   transform: translateY(-3px);
   border-color: #D1D5DB;
 }
-.pcard:focus-visible { outline: 2px solid var(--rust); outline-offset: 2px; }
-.pcard.sold { opacity: .7; }
+.pcard:focus-within { outline: 2px solid var(--rust); outline-offset: 2px; }
+/* Single-unit inventory: a sold piece is dimmed to 50% and stamped */
+.pcard.sold { opacity: .5; }
 .pcard.sold img { filter: grayscale(.85); }
+.pcard.sold .pmedia::after {
+  content: "SOLD OUT"; position: absolute; inset: 0; z-index: 6;
+  display: grid; place-items: center; pointer-events: none;
+  font: 800 14px/1 var(--font-text); letter-spacing: .14em; color: #fff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, .5);
+  background: rgba(17, 24, 39, .32);
+}
+
+/* The whole card body is one link to /product/<slug> */
+.pcard-link {
+  display: flex; flex-direction: column; flex: 1;
+  text-decoration: none; color: inherit; min-width: 0;
+}
+.pcard-link:focus-visible { outline: none; }
+
+/* Condition grade chip — BNWT / A / B / Vintage colour system */
+.grade-badge {
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  background: var(--grade, #475569); color: #fff;
+  font: 700 10.5px/1 var(--font-text); letter-spacing: .03em;
+  padding: 5px 9px; border-radius: 999px; pointer-events: none;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, .25);
+}
+.pmeasure { font-size: 11.5px; color: var(--green); font-weight: 600; }
 
 .pmedia {
   position: relative; aspect-ratio: 4 / 3.4; background: var(--tint);
@@ -297,7 +322,15 @@ h1, h2, h3, .brand-word, .section-title {
 .pcompare { font-size: 12.5px; color: var(--muted); text-decoration: line-through; font-weight: 500; }
 
 /* Full-width Add to Cart button */
-.pcard-actions { margin-top: 10px; padding-top: 4px; }
+.pcard-actions {
+  margin-top: auto; padding: 0 16px 16px; display: grid; gap: 7px;
+}
+.view-detail-btn {
+  display: block; text-align: center; text-decoration: none;
+  border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px;
+  font: 600 12.5px var(--font-text); color: var(--ink); background: #fff;
+}
+.view-detail-btn:hover { border-color: var(--ink); background: var(--tint); }
 .add-cart-btn {
   width: 100%; border: 0; border-radius: 10px; padding: 11px 14px;
   background: var(--ink); color: #FFFFFF; font: 700 13px var(--font-text);
@@ -351,135 +384,9 @@ h1, h2, h3, .brand-word, .section-title {
 }
 .c-btn-close:hover { color: var(--ink); border-color: var(--ink); background: #E5E7EB; }
 
-/* ============ PRODUCT DETAIL MODAL ============ */
-.prod-backdrop {
-  position: fixed; inset: 0; background: rgba(17, 24, 39, .65); backdrop-filter: blur(5px);
-  z-index: 65; display: grid; place-items: center; padding: 20px;
-  opacity: 0; pointer-events: none; transition: opacity .22s ease;
-}
-.prod-backdrop.open { opacity: 1; pointer-events: auto; }
-body.modal-open { overflow: hidden; }
-
-.prod-modal {
-  position: relative; width: min(920px, 100%); max-height: 88vh;
-  background: var(--card); border: 1px solid var(--line); border-radius: 20px;
-  box-shadow: 0 24px 64px rgba(17, 24, 39, .35); overflow-y: auto;
-  display: grid; grid-template-columns: 1.1fr 1fr;
-  animation: pmodalIn .25s cubic-bezier(.32, .72, 0, 1);
-}
-@keyframes pmodalIn {
-  from { transform: scale(.95) translateY(10px); opacity: 0; }
-  to { transform: scale(1) translateY(0); opacity: 1; }
-}
-
-.pmodal-close {
-  position: absolute; top: 14px; right: 14px; z-index: 10;
-  width: 36px; height: 36px; border-radius: 50%;
-  background: var(--page); border: 1px solid var(--line); color: var(--ink);
-  font-size: 16px; font-weight: 700; display: grid; place-items: center;
-  cursor: pointer; transition: all .15s; box-shadow: 0 2px 8px rgba(0,0,0,.08);
-}
-.pmodal-close:hover { background: var(--tint); border-color: var(--ink); }
-
-/* Left column: gallery & photo switcher */
-.pmodal-gallery {
-  padding: 24px; background: var(--page); border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; gap: 14px;
-}
-.pmodal-stage {
-  position: relative; width: 100%; aspect-ratio: 4 / 3.4;
-  border-radius: 14px; background: var(--tint); overflow: hidden;
-  display: grid; place-items: center; border: 1px solid var(--line);
-}
-.pmodal-stage img { width: 100%; height: 100%; object-fit: cover; transition: opacity .2s ease; }
-.pmodal-stage .media-icon svg { width: 64px; height: 64px; color: #D1D5DB; }
-.pmodal-nav {
-  position: absolute; top: 50%; transform: translateY(-50%);
-  width: 36px; height: 36px; border-radius: 50%;
-  background: rgba(255, 255, 255, .92); border: 1px solid var(--line); color: var(--ink);
-  font-size: 22px; font-weight: 700; line-height: 1; display: grid; place-items: center;
-  cursor: pointer; z-index: 5; box-shadow: 0 4px 12px rgba(0,0,0,.15); transition: all .15s;
-}
-.pmodal-nav.prev { left: 10px; }
-.pmodal-nav.next { right: 10px; }
-.pmodal-nav:hover { background: #fff; transform: translateY(-50%) scale(1.08); border-color: var(--ink); }
-.pmodal-badge {
-  position: absolute; bottom: 10px; left: 10px; z-index: 4;
-  background: rgba(17, 24, 39, .82); color: #fff;
-  font: 700 11px var(--font-text); padding: 4px 10px; border-radius: 999px;
-  letter-spacing: .02em;
-}
-.pmodal-thumbs {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-}
-.pmodal-thumb {
-  aspect-ratio: 1; border-radius: 10px; border: 2px solid var(--line);
-  background: var(--card); overflow: hidden; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  position: relative; transition: all .15s; padding: 2px;
-}
-.pmodal-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; }
-.pmodal-thumb.active { border-color: var(--rust); box-shadow: 0 0 0 2px rgba(22, 163, 74, .3); }
-.pmodal-thumb .media-icon svg { width: 22px; height: 22px; color: #D1D5DB; }
-.pmodal-thumb-hint {
-  font-size: 9.5px; font-weight: 700; color: var(--muted); text-align: center;
-  text-transform: uppercase; letter-spacing: .03em; margin-top: 2px;
-}
-
-/* Right column: deep specs & purchase options */
-.pmodal-info {
-  padding: 28px 24px; display: flex; flex-direction: column; gap: 12px; text-align: left;
-}
-.pmodal-kicker {
-  font-size: 11.5px; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--rust); font-weight: 700; display: flex; gap: 8px; align-items: center;
-}
-.pmodal-kicker code { font-size: 11px; background: var(--tint); padding: 2px 6px; border-radius: 4px; color: var(--ink); }
-.pmodal-title {
-  font-family: var(--font-display); font-size: 23px; font-weight: 700;
-  color: var(--ink); line-height: 1.25; margin-top: -4px;
-}
-.pmodal-price-box {
-  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 2px 0;
-}
-.pmodal-price { font-size: 24px; font-weight: 800; color: var(--ink); }
-.pmodal-compare { font-size: 15px; color: var(--muted); text-decoration: line-through; }
-.pmodal-disc { font-size: 12px; font-weight: 700; color: var(--green); background: #ECFDF5; padding: 3px 8px; border-radius: 6px; }
-.pmodal-stock { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; margin-left: auto; }
-.pmodal-stock.in { background: #ECFDF5; color: var(--green); }
-.pmodal-stock.out { background: #FEF2F2; color: var(--red); }
-
-.pmodal-specs {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
-  background: var(--page); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
-}
-.pmodal-spec-row { display: flex; flex-direction: column; gap: 1px; }
-.pmodal-spec-k { font-size: 10.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.pmodal-spec-v { font-size: 13.5px; font-weight: 700; color: var(--ink); }
-
-.pmodal-story { font-size: 13.5px; color: var(--body); line-height: 1.5; }
-.pmodal-assurance {
-  background: #F9FAFB; border: 1px solid #BBF7D0; border-radius: 10px;
-  padding: 10px 12px; font-size: 12px; color: #B91C1C; line-height: 1.45;
-}
-.pmodal-actions {
-  display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 6px;
-}
-.pmodal-claim-btn {
-  width: 100%; border: 0; border-radius: 11px; padding: 13px;
-  background: var(--rust); color: #fff; font: 700 14.5px var(--font-text);
-  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
-  transition: background .15s;
-}
-.pmodal-claim-btn:hover { background: var(--rust-dark); }
-.pmodal-claim-btn:disabled { background: #D1D5DB; color: #6B7280; cursor: not-allowed; }
-.pmodal-wa-btn {
-  width: 100%; border: 1px solid var(--line); border-radius: 11px; padding: 11px;
-  background: var(--card); color: var(--ink); font: 700 13px var(--font-text);
-  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px;
-  text-decoration: none; transition: all .15s;
-}
-.pmodal-wa-btn:hover { border-color: var(--ink); background: var(--tint); }
+/* Product detail now lives on the dedicated PDP (/product/<slug>) —
+   see css/product.css. The old in-page quick-view modal was removed so
+   there is a single source of truth for product presentation. */
 
 /* ============ CART DRAWER ============ */
 .drawer-backdrop { position: fixed; inset: 0; background: rgba(17, 24, 39, .45); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 48; }
@@ -615,9 +522,6 @@ body.cart-open .drawer-backdrop { opacity: 1; pointer-events: auto; }
 /* ============ RESPONSIVE ============ */
 @media (max-width: 920px) {
   .foot-grid { grid-template-columns: 1fr 1fr; }
-  .prod-modal { grid-template-columns: 1fr; max-height: 86vh; }
-  .pmodal-gallery { border-right: 0; border-bottom: 1px solid var(--line); padding: 18px 18px 14px; }
-  .pmodal-info { padding: 20px 18px; }
 }
 @media (max-width: 640px) {
   .head-pill { padding: 9px 13px; font-size: 12.5px; }
@@ -633,10 +537,7 @@ body.cart-open .drawer-backdrop { opacity: 1; pointer-events: auto; }
   .consent { flex-direction: column; align-items: stretch; bottom: 10px; padding: 14px 16px; }
   .consent-actions { justify-content: stretch; width: 100%; flex-wrap: wrap; }
   .c-btn { flex: 1; min-width: 90px; padding: 10px 8px; text-align: center; }
-  .pmodal-thumbs { gap: 6px; }
-  .pmodal-specs { grid-template-columns: 1fr; }
 }
-
 
 /* ======================================================================
    GLOBAL RESPONSIVE FIT LAYER - UTILITIES & ENFORCEMENT (v2.6)

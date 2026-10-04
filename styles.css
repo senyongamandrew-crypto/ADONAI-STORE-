@@ -439,6 +439,12 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .sel-mini { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--muted); padding: 0 8px; font-size: 12px; }
 .sku-row { display: flex; gap: 8px; align-items: center; }
 textarea.sel-full { resize: vertical; min-height: 78px; line-height: 1.5; }
+/* Flat-lay measurement capture (intake → product detail page) */
+.measure-fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 12px; }
+.measure-fields .field label { text-transform: none; letter-spacing: 0; font-size: 11.5px; }
+.measure-fields .unit { font-weight: 500; opacity: .7; }
+@media (max-width: 720px) { .measure-fields { grid-template-columns: 1fr 1fr; } }
+
 .photos-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; gap: 10px; }
 .photo-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
 .ph-slot { border: 1px dashed var(--line); border-radius: 12px; padding: 10px; background: var(--page); }

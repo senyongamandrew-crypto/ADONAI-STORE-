@@ -239,6 +239,48 @@
         <div class="field"><label>Item story / description (visible on catalog)</label><textarea class="sel-full" id="inStory" placeholder="Describe fit, fabric feel, vintage era, and standout features…"></textarea></div>
         <div class="field"><label>Notes for shoppers / floor staff (intake notes)</label><textarea class="sel-full" id="inNotes" placeholder="Any minor wear details, dry clean status, or special handling notes…"></textarea></div>
 
+        <h4 class="sec">5. Product Page Details (flat-lay measurements &amp; disclosure)</h4>
+        <p class="muted small" style="margin:-6px 0 10px">
+          Thrift stock is one-of-one, so shoppers buy on measurements — not on S/M/L.
+          Fill the fields that apply; the product page renders them in inches and centimetres.
+        </p>
+
+        <div class="fgrid third">
+          <div class="field"><label>Fabric &amp; composition<span class="fhint">Shown on the product page</span></label>
+            <input class="sel-full" id="inFabric" placeholder="100% Cotton denim · 12.5oz" /></div>
+          <div class="field"><label>Care instructions</label>
+            <input class="sel-full" id="inCare" placeholder="Machine wash cold inside out. Hang dry." /></div>
+        </div>
+
+        <div class="field">
+          <label>Measurement set
+            <span class="fhint">Switches the fields below</span>
+          </label>
+          <select class="sel-full" id="inMeasureSet">
+            <option value="top">Tops · Jackets · Dresses</option>
+            <option value="bottom">Pants · Jeans · Skirts</option>
+            <option value="other">Shoes · Accessories · Other</option>
+          </select>
+        </div>
+
+        <div class="measure-fields" id="measureFields"></div>
+
+        <div class="field"><label>Measurement note<span class="fhint">Optional — how the piece was laid out</span></label>
+          <input class="sel-full" id="inMeasureNote" placeholder="Measured flat, buttoned, without stretching." /></div>
+
+        <div class="field"><label>Flaw &amp; condition notes<span class="fhint">Mandatory for anything below Grade A — shown in a warning callout</span></label>
+          <textarea class="sel-full" id="inFlaws" placeholder="Small moth nibble (3mm) on the lower left front panel. Replaced third button."></textarea></div>
+
+        <div class="field"><label>Which photo shows the flaw?<span class="fhint">Flags that thumbnail with a warning icon</span></label>
+          <select class="sel-full" id="inFlawPhoto">
+            <option value="-1">No flaw close-up</option>
+            <option value="0">Photo 1</option>
+            <option value="1">Photo 2</option>
+            <option value="2">Photo 3</option>
+            <option value="3">Photo 4</option>
+          </select>
+        </div>
+
         <div class="intake-actions">
           <button class="btn primary big" id="btnIntakeSave">Tag &amp; Save (UGX 0)</button>
           <button class="btn big" id="btnIntakeMore">Save &amp; Tag Another Piece</button>
