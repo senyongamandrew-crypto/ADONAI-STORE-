@@ -1130,17 +1130,53 @@
       </div><div class="guest-tags"><span class="itag">${esc(s.payment_method || s.tender_type || "Payment recorded")}</span><span class="itag">${esc(s.channel || "POS")}</span><button class="lnk" data-print-sale="${esc(s.id)}">Print receipt</button></div>
     </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No posted sales match this search.</p></div>`;
   }
-  function exportAuditCSV() {
-    const rows = [["Receipt","Date","Customer","Payment","Channel","Total"]].concat(auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0]));
+  function exportAuditCSV(kind = "sales") {
+    const date = new Date().toISOString().slice(0, 10);
+    let rows;
+    let filename;
+    if (kind === "stock") {
+      rows = [["SKU", "Product", "Category", "Size", "Condition", "In stock", "Selling price"]].concat(
+        DB.listProducts().map(p => [p.sku || "", p.name || "", p.category || "", p.size || "", p.condition || "", p.in_stock_count || 0, p.selling_price || 0])
+      );
+      filename = `adonai-stock-inventory-${date}.csv`;
+    } else if (kind === "staff") {
+      rows = [["Staff ID", "Name", "Role", "Phone", "Active"]].concat(
+        DB.listStaff().map(s => [s.id || "", s.name || "", s.role || "", s.phone || "", s.active === false ? "No" : "Yes"])
+      );
+      filename = `adonai-staff-directory-${date}.csv`;
+    } else if (kind === "ledger") {
+      rows = [["Reference", "Date", "Customer", "Payment method", "Channel", "Debit / value"]].concat(
+        auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0])
+      );
+      filename = `adonai-financial-ledger-${date}.csv`;
+    } else {
+      rows = [["Receipt", "Date", "Customer", "Payment", "Channel", "Total"]].concat(
+        auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0])
+      );
+      filename = `adonai-posted-sales-${date}.csv`;
+    }
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv;charset=utf-8"}));
-    a.download = `adonai-posted-sales-${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = filename;
     a.style.display = "none";
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    closeAuditExportMenu();
+    toast(`${filename} exported`);
+  }
+  function closeAuditExportMenu() {
+    const menu = $("#auditExportMenu"), trigger = $("#btnExportAudit");
+    if (menu) menu.hidden = true;
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+  }
+  function toggleAuditExportMenu() {
+    const menu = $("#auditExportMenu"), trigger = $("#btnExportAudit");
+    if (!menu) return;
+    menu.hidden = !menu.hidden;
+    if (trigger) trigger.setAttribute("aria-expanded", String(!menu.hidden));
   }
   function printAuditSummary() {
     const sales = auditSales();
@@ -1163,7 +1199,8 @@
     }
     window.print();
   }
-  $("#btnExportAudit")?.addEventListener("click", exportAuditCSV);
+  $("#btnExportAudit")?.addEventListener("click", toggleAuditExportMenu);
+  $$("[data-export-audit]").forEach(button => button.addEventListener("click", () => exportAuditCSV(button.dataset.exportAudit)));
   $("#btnPrintAudit")?.addEventListener("click", printAuditSummary);
   function renderGuests() {
     let list = DB.listGuests();

@@ -1434,3 +1434,28 @@ html, body { margin: 0; padding: 0; height: 100%; height: 100dvh; }
 .catalog-dashboard-region { flex:1; width:100%; overflow-y:auto !important; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; padding:16px; box-sizing:border-box; }
 body.cart-drawer-open { overflow:hidden !important; touch-action:none; }
 body.cart-drawer-closed { overflow:auto !important; touch-action:auto !important; }
+
+/* Audit export category picker */
+.export-menu-wrap { position: relative; }
+.export-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; min-width: 245px;
+  padding: 6px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); box-shadow: 0 14px 34px rgba(17,24,39,.16);
+}
+.export-menu[hidden] { display: none; }
+.export-menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px;
+  border: 0; border-radius: 9px; background: transparent; color: var(--ink);
+  text-align: left; cursor: pointer;
+}
+.export-menu button:hover, .export-menu button:focus-visible { background: var(--tint); }
+.export-menu button > span:first-child {
+  display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px;
+  border-radius: 8px; background: #ECFDF5; color: var(--green); font-size: 16px;
+}
+.export-menu button strong, .export-menu button small { display: block; }
+.export-menu button strong { font-size: 12px; }
+.export-menu button small { margin-top: 1px; color: var(--muted); font-size: 10px; }
+@media (max-width: 720px) {
+  .export-menu { right: 0; left: auto; min-width: 230px; }
+}
