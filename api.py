@@ -14,6 +14,7 @@ import logging
 import os
 from sqlalchemy import and_, func, inspect, or_, text
 import time
+import urllib.parse
 import uuid
 
 from database import DATABASE_URL, IS_POSTGRES, engine, get_db
@@ -54,8 +55,9 @@ from models import (
     StockLot,
     StoreSetting,
     User,
-    ItemCondition,
-    QuantityType,
+    build_product_slug,
+    normalize_measurements,
+    slugify,
 )
 
 logger = logging.getLogger("adonai.api")
@@ -342,6 +344,65 @@ def parse_positive_int(value, field: str, allow_zero: bool = False) -> int:
     if result < 0 or (result == 0 and not allow_zero):
         raise ValueError(f"{field} must be {'zero or greater' if allow_zero else 'greater than zero'}")
     return result
+
+
+def lookup_product(session, identifier: str):
+    """Resolve a catalog piece by permalink slug, id, SKU or barcode."""
+    needle = str(identifier or "").strip()
+    if not needle:
+        return None
+    return (
+        session.query(Product)
+        .filter(
+            or_(
+                Product.slug == needle,
+                Product.id == needle,
+                func.upper(Product.sku) == needle.upper(),
+                func.upper(Product.barcode_id) == needle.upper(),
+            )
+        )
+        .first()
+    )
+
+
+def unique_product_slug(session, name: str, sku: str, product_id: str, requested: str = "") -> str:
+    """Resolve a collision-free /product/<slug> permalink for a catalog piece."""
+    candidate = slugify(requested)[:180] if requested else ""
+    if not candidate:
+        candidate = build_product_slug(name, sku, product_id)[:180]
+    base = candidate or "thrift-piece"
+    suffix = 2
+    while session.query(Product.id).filter(
+        Product.slug == candidate, Product.id != product_id
+    ).first() is not None:
+        candidate = f"{base}-{suffix}"[:200]
+        suffix += 1
+    return candidate
+
+
+def apply_pdp_fields(prod, body: dict) -> None:
+    """Copy Product Detail Page attributes from an intake/update payload.
+
+    Flat-lay measurements, fabric composition, flaw disclosure and care
+    instructions are what make a one-of-one thrift listing trustworthy, so
+    they travel through the same validated path as the rest of the catalog.
+    """
+    if "fabric" in body:
+        prod.fabric = clean_text(body.get("fabric"), 255)
+    if "measurements" in body:
+        prod.measurements = normalize_measurements(body.get("measurements"))
+    if "flaw_notes" in body:
+        prod.flaw_notes = clean_multiline_text(body.get("flaw_notes"), 1200)
+    if "care_notes" in body:
+        prod.care_notes = clean_multiline_text(body.get("care_notes"), 1200)
+    if "staff_notes" in body:
+        prod.staff_notes = clean_multiline_text(body.get("staff_notes"), 1200)
+    if "flaw_photo_index" in body:
+        try:
+            index = int(body.get("flaw_photo_index"))
+        except (TypeError, ValueError):
+            index = -1
+        prod.flaw_photo_index = index if 0 <= index <= 11 else -1
 
 
 def parse_operator_datetime(value) -> datetime:
@@ -734,6 +795,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     stock_lot_id=lot_id,
                     inventory_status=("AVAILABLE" if stock_count > 0 else "OUT_OF_STOCK"),
                 )
+                # Shareable permalink + thrift-specific PDP detail fields.
+                prod.slug = unique_product_slug(
+                    session, prod.name, sku, pid, clean_text(body.get("slug", ""), 200)
+                )
+                apply_pdp_fields(prod, body)
                 session.add(prod)
 
                 session.add(Inventory(
@@ -812,6 +878,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if "images" in body:
                     supplied_images = body.get("images") or []
                     prod.images = [safe_image_url(u) for u in supplied_images if safe_image_url(u)][:12] if isinstance(supplied_images, list) else []
+                apply_pdp_fields(prod, body)
+                if "slug" in body or "name" in body or not prod.slug:
+                    prod.slug = unique_product_slug(
+                        session, prod.name, prod.sku, prod.id, clean_text(body.get("slug", ""), 200)
+                    )
                 if "base_price" in body or "total_transport_cost" in body or "selling_price" in body:
                     try:
                         base = body.get("base_price", prod.base_price or prod.selling_price)
@@ -832,12 +903,27 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 return json_response({"ok": True, "status": "updated", "product": prod.to_dict()})
 
         if clean_path.startswith("/api/products/") and method == "GET":
-            pid = clean_path.split("/")[-1]
+            # Public PDP lookup: resolves by id, permalink slug, SKU or barcode
+            # so /product/<slug> can hydrate from a single round trip.
+            identifier = urllib.parse.unquote(clean_path.split("/")[-1])[:200]
             with get_db() as session:
-                prod = session.query(Product).filter_by(id=pid).first()
+                prod = lookup_product(session, identifier)
                 if not prod:
                     return json_response({"error": "Product not found"}, status=404)
-                return json_response({"product": prod.to_dict()})
+                data = prod.to_dict()
+                held = (
+                    session.query(func.coalesce(func.sum(InventoryLock.quantity), 0))
+                    .filter(
+                        InventoryLock.product_id == prod.id,
+                        InventoryLock.expires_at > datetime.utcnow(),
+                    )
+                    .scalar()
+                    or 0
+                )
+                data["authoritative_stock_count"] = data["in_stock_count"]
+                data["in_stock_count"] = max(0, data["in_stock_count"] - int(held))
+                data["available_count"] = data["in_stock_count"]
+                return json_response({"product": data})
 
         # ----------------------------------------------------
         # 3. Real-time POS inventory locks (Protected)

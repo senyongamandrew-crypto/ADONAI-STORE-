@@ -5,6 +5,9 @@
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const CART_KEY = "adonai-cart-v1";
+  // Shared presentation kit (grades, measurements, permalinks, WhatsApp,
+  // responsive WebP markup) — identical logic on the rail and the PDP.
+  const PK = window.AdonaiPDP;
   const displayPrice = p => Number(p && (p.final_selling_price != null ? p.final_selling_price : p.selling_price)) || 0;
   const CONSENT_KEY = "adonai-consent-v1";
 
@@ -123,6 +126,16 @@
   let products = [];
   let fDemo = "All", fCat = "All", fSize = "All", fCond = "All", fInventory = "All", fMax = 200000, term = "";
 
+  // Deep links from the PDP breadcrumb (/?demo=Women&cat=Dresses%20%26%20Skirts)
+  // preselect the rail filters so "Home › Women › Dresses" behaves like a
+  // real category page.
+  (function applyUrlFilters() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("demo")) fDemo = params.get("demo");
+    if (params.get("cat")) fCat = params.get("cat");
+    if (params.get("q")) term = params.get("q").trim().toLowerCase();
+  })();
+
   function getProductImages(p) {
     if (!p) return [];
     const list = [];
@@ -154,12 +167,6 @@
     if (changed) { saveCart(); renderCart(); }
     populateFilterOptions();
     renderChips(); renderGrid();
-
-    // If modal is currently open, refresh its data
-    if (activeModalProductId) {
-      const p = products.find(x => x.id === activeModalProductId);
-      if (p) renderProductModal(p);
-    }
   }
 
   function populateFilterOptions() {
@@ -318,12 +325,22 @@
   /* ---------- product card with multi-angle preview ---------- */
   function mediaHTML(p, photos, disc) {
     const mainImg = photos[0] || p.image_url;
-    const img = mainImg ? `<img src="${esc(mainImg)}" alt="${esc(p.name)}" width="400" height="500" loading="lazy" decoding="async" />` : "";
-    const dots = photos.length > 1
-      ? `<div class="media-dots" title="Click to view all photo angles">${photos.map((src, i) => `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(src)}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" /></i>`).join("")}</div>`
+    const img = mainImg
+      ? PK.pictureHTML(mainImg, {
+          alt: p.name,
+          sizes: "(min-width: 1024px) 280px, (min-width: 640px) 45vw, 90vw",
+          width: 400,
+          height: 500
+        })
       : "";
+    const dots = photos.length > 1
+      ? `<div class="media-dots" title="Open the full photo set">${photos.map((src, i) =>
+          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.resolveSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
+      : "";
+    const grade = PK.gradeFor(p);
     return `
       <div class="pmedia">
+        <span class="grade-badge" style="--grade:${grade.color}">${esc(grade.short)}</span>
         ${disc > 0 ? `<span class="discount-badge">${disc}% OFF</span>` : ""}
         <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE"}</span>
         ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
@@ -335,31 +352,36 @@
     const sold = p.in_stock_count <= 0;
     const disc = discountPercent(p);
     const photos = getProductImages(p);
+    const href = esc(PK.productPath(p));
     return `
-    <article class="pcard ${sold ? "sold" : ""}" data-card="${esc(p.id)}" tabindex="0" role="button" aria-label="View details and photo views for ${esc(p.name)}">
-      ${mediaHTML(p, photos, disc)}
-      <div class="pbody">
-        <div class="phead-row">
-          <span class="pdem">${esc(p.demographic || p.category)}</span>
-          <span class="psku">${esc(p.sku || p.id)}</span>
+    <article class="pcard ${sold ? "sold" : ""}" data-card="${esc(p.id)}">
+      <a class="pcard-link" href="${href}" aria-label="View full details, measurements and photos for ${esc(p.name)}">
+        ${mediaHTML(p, photos, disc)}
+        <div class="pbody">
+          <div class="phead-row">
+            <span class="pdem">${esc(p.demographic || p.category)}</span>
+            <span class="psku">${esc(p.sku || p.id)}</span>
+          </div>
+          <h3 class="pname">${esc(p.name)}</h3>
+          <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : "", p.condition].filter(Boolean).join(" · "))}</p>
+          ${ratingHTML(p)}
+          ${PK.hasMeasurements(p) ? `<p class="pmeasure">📏 Exact flat-lay measurements listed</p>` : ""}
+          <div class="price-row">
+            <span class="pprice">${DB.ugx(displayPrice(p))}</span>
+            ${p.compare_price > displayPrice(p) ? `<span class="pcompare">${DB.ugx(p.compare_price)}</span>` : ""}
+          </div>
         </div>
-        <h3 class="pname">${esc(p.name)}</h3>
-        <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : "", p.item_condition === "BRAND_NEW" ? "Factory tagged" : "1-of-1 piece"].filter(Boolean).join(" · "))}</p>
-        ${ratingHTML(p)}
-        <div class="price-row">
-          <span class="pprice">${DB.ugx(displayPrice(p))}</span>
-          ${p.compare_price > displayPrice(p) ? `<span class="pcompare">${DB.ugx(p.compare_price)}</span>` : ""}
-        </div>
-        <div class="pcard-actions">
-          <button class="add-cart-btn" data-add="${esc(p.id)}" ${sold ? "disabled" : ""} type="button" aria-label="Add ${esc(p.name)} to cart">
-            ${sold ? "● Sold Out" : `
-              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-              </svg>
-              Add to Cart
-            `}
-          </button>
-        </div>
+      </a>
+      <div class="pcard-actions">
+        <button class="add-cart-btn" data-add="${esc(p.id)}" ${sold ? "disabled" : ""} type="button" aria-label="Add ${esc(p.name)} to cart">
+          ${sold ? "● Sold Out" : `
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+            </svg>
+            Add to Cart
+          `}
+        </button>
+        <a class="view-detail-btn" href="${href}">Details &amp; measurements</a>
       </div>
     </article>`;
   }
@@ -390,206 +412,37 @@
     }
     const angleDot = e.target.closest("[data-angle]");
     if (angleDot) {
+      e.preventDefault();
       e.stopPropagation();
       const card = e.target.closest("[data-card]");
-      if (card) {
-        return openProductModal(card.dataset.card, Number(angleDot.dataset.angle));
-      }
+      if (card) return openProductPage(card.dataset.card, Number(angleDot.dataset.angle));
     }
+    // Cards are real <a> links to /product/<slug>: let the browser navigate
+    // (so middle-click, long-press and "open in new tab" all keep working)
+    // and only record the analytics event here.
     const card = e.target.closest("[data-card]");
-    if (card) {
-      openProductModal(card.dataset.card, 0);
-    }
-  });
-
-  $("#productGrid").addEventListener("keydown", e => {
-    if (e.key === "Enter" || e.key === " ") {
-      const card = e.target.closest("[data-card]");
-      if (card && !e.target.closest("button")) {
-        e.preventDefault();
-        openProductModal(card.dataset.card, 0);
-      }
+    if (card && window.AdonaiAnalytics) {
+      const p = products.find(x => x.id === card.dataset.card);
+      if (p) window.AdonaiAnalytics.trackViewItem(p);
     }
   });
 
   /* ============================================================
-     PRODUCT DETAIL MODAL & MULTI-ANGLE VIEWER
+     PRODUCT DETAIL PAGE NAVIGATION
+     The full specification experience (flat-lay measurements, flaw
+     disclosure, delivery estimator, WhatsApp ordering) lives on the
+     dedicated, shareable PDP at /product/<slug>, so a rail card deep
+     links straight into it instead of opening a partial quick-view.
      ============================================================ */
-  let activeModalProductId = null;
-  let activeModalPhotoIdx = 0;
-
-  function openProductModal(id, initialPhotoIdx = 0) {
+  function openProductPage(id, photoIndex) {
     const p = products.find(x => x.id === id) || DB.getProduct(id);
     if (!p) return;
-    activeModalProductId = id;
-    activeModalPhotoIdx = Math.max(0, initialPhotoIdx);
-    renderProductModal(p);
-    $("#prodBackdrop").classList.add("open");
-    document.body.classList.add("modal-open");              // state hook (inert styling)
-    if (window.AdonaiScrollLock) window.AdonaiScrollLock.lock("product-modal");
-    if (window.AdonaiAnalytics) {
-      window.AdonaiAnalytics.trackViewItem(p);
-    }
-    document.title = `${p.name} — ${DB.ugx(displayPrice(p))} | Adonai Store Kampala`;
+    if (window.AdonaiAnalytics) window.AdonaiAnalytics.trackViewItem(p);
+    const suffix = Number(photoIndex) > 0 ? `?photo=${Number(photoIndex)}` : "";
+    window.location.href = PK.productPath(p) + suffix;
   }
 
-  function closeProductModal() {
-    $("#prodBackdrop").classList.remove("open");
-    document.body.classList.remove("modal-open");
-    if (window.AdonaiScrollLock) {
-      window.AdonaiScrollLock.unlock("product-modal");
-      window.AdonaiScrollLock.selfHeal();
-    }
-    activeModalProductId = null;
-    updateDynamicSEO();
-  }
-
-  function renderProductModal(p) {
-    const photos = getProductImages(p);
-    const sold = p.in_stock_count <= 0;
-    const disc = discountPercent(p);
-    const totalPhotos = photos.length;
-    if (activeModalPhotoIdx >= totalPhotos) activeModalPhotoIdx = Math.max(0, totalPhotos - 1);
-    const activePhoto = photos[activeModalPhotoIdx] || "";
-
-    const ANGLE_NAMES = ["1. Front View", "2. Back View", "3. Fabric / Texture", "4. Tag & Authenticity"];
-    const angleLabel = totalPhotos > 0
-      ? (ANGLE_NAMES[activeModalPhotoIdx] || `Angle ${activeModalPhotoIdx + 1}`)
-      : "Product view";
-    const isBrandNew = p.item_condition === "BRAND_NEW";
-    const availableSizes = (Array.isArray(p.size_variants) && p.size_variants.length ? p.size_variants : [p.size || "Standard"]);
-    const availableColors = (Array.isArray(p.color_variants) && p.color_variants.length ? p.color_variants : [p.color || "Standard"]);
-    const measurements = p.measurements && typeof p.measurements === "object" ? p.measurements : {};
-    const measurementText = Object.entries(measurements).map(([key, value]) => `${key}: ${value}`).join(" · ");
-
-    const modalBox = $("#prodModal");
-    modalBox.innerHTML = `
-      <button class="pmodal-close" id="closeProdModal" aria-label="Close product view">✕</button>
-
-      <!-- Left column: Multi-angle photo gallery -->
-      <div class="pmodal-gallery">
-        <div class="pmodal-stage">
-          ${activePhoto
-            ? `<img id="pmodalMainImg" src="${esc(activePhoto)}" alt="${esc(p.name)} - ${esc(angleLabel)}" />`
-            : `<span class="media-icon">${catIcon(p.category)}</span>`}
-          ${totalPhotos > 1 ? `
-            <button class="pmodal-nav prev" id="pmodalPrev" aria-label="Previous angle">‹</button>
-            <button class="pmodal-nav next" id="pmodalNext" aria-label="Next angle">›</button>
-            <span class="pmodal-badge" id="pmodalBadge">${activeModalPhotoIdx + 1} / ${totalPhotos} · ${esc(angleLabel)}</span>
-          ` : ""}
-        </div>
-
-        ${totalPhotos > 1 ? `
-          <div class="pmodal-thumbs" id="pmodalThumbs">
-            ${photos.map((src, idx) => `
-              <div class="pmodal-thumb ${idx === activeModalPhotoIdx ? "active" : ""}" data-pthumb="${idx}" title="${ANGLE_NAMES[idx] || `Angle ${idx + 1}`}">
-                <img src="${esc(src)}" alt="Angle ${idx + 1}" onerror="this.remove()" />
-                <span class="pmodal-thumb-hint">${idx === 0 ? "Front" : idx === 1 ? "Back" : idx === 2 ? "Fabric" : "Tag"}</span>
-              </div>`).join("")}
-          </div>
-        ` : `
-          <p class="pmodal-thumb-hint" style="text-align:center;margin-top:2px">📷 Genuine one-of-one item photo · Laundered &amp; inspected in Kampala</p>
-        `}
-      </div>
-
-      <!-- Right column: Item details & checkout -->
-      <div class="pmodal-info">
-        <div class="pmodal-kicker">
-          <span>${isBrandNew ? "Brand-New Apparel" : "Curated Vintage / Pre-Loved"}</span> · <span>${esc(p.category)}</span>
-          <code>${esc(p.sku || p.barcode_id || p.id)}</code>
-        </div>
-        <h2 class="pmodal-title" id="pmodalTitle">${esc(p.name)}</h2>
-
-        <div class="pmodal-price-box">
-          <span class="pmodal-price">${DB.ugx(displayPrice(p))}</span>
-          ${p.compare_price > displayPrice(p) ? `<span class="pmodal-compare">${DB.ugx(p.compare_price)}</span><span class="pmodal-disc">-${disc}% OFF</span>` : ""}
-          <span class="pmodal-stock ${sold ? "out" : "in"}">
-            ${sold ? "● OUT OF STOCK" : (isBrandNew ? `✓ ${p.in_stock_count} units in stock` : "✓ 1-of-1 Piece on Rail")}
-          </span>
-        </div>
-
-        <div class="pmodal-specs">
-          <div class="pmodal-spec-row"><span class="pmodal-spec-k">Brand / Label</span><span class="pmodal-spec-v">${esc(p.brand || "Adonai Store")}</span></div>
-          ${isBrandNew ? `
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Available sizes</span><span class="pmodal-spec-v">${availableSizes.map(size => `<button type="button" class="size-option">${esc(size)}</button>`).join(" ")}</span></div>
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Colour variants</span><span class="pmodal-spec-v">${esc(availableColors.join(" · "))}</span></div>
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Factory notes</span><span class="pmodal-spec-v">${esc(p.factory_tag_notes || "Intact factory tags")}</span></div>
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Inner packaging</span><span class="pmodal-spec-v">${esc(p.inner_packaging || "Original packaging")}</span></div>
-          ` : `
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">1-of-1 notice</span><span class="pmodal-spec-v">Single quantity · hand-inspected and laundered</span></div>
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Exact measurements</span><span class="pmodal-spec-v">${esc(measurementText || "See item description or ask our concierge")}</span></div>
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Fabric grading</span><span class="pmodal-spec-v">${esc(p.fabric_grading_notes || p.condition || "Inspected condition disclosed in the description")}</span></div>
-            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Size / Fit</span><span class="pmodal-spec-v">${esc(p.size && p.size !== "-" ? p.size : "Standard")}</span></div>
-          `}
-        </div>
-
-        ${p.desc ? `<p class="pmodal-story">${esc(p.desc)}</p>` : ""}
-        ${p.staff_notes ? `<div class="pmodal-store-notes"><strong>Store note:</strong> ${esc(p.staff_notes)}</div>` : ""}
-
-        <div class="pmodal-assurance">
-          📍 ${esc(S.address || "Kampala, Uganda")} · ✦ Adonai-managed delivery across Kampala & Uganda · 📱 MTN MoMo / Airtel Money / Cash
-        </div>
-
-        <div class="pmodal-actions">
-          <button class="pmodal-claim-btn" id="pmodalClaimBtn" data-modal-claim="${esc(p.id)}" ${sold ? "disabled" : ""}>
-            ${sold ? "Sold" : `${ICONS.message.replace("<svg ", "<svg width='18' height='18' ")} Add Piece to Cart`}
-          </button>
-          <a class="pmodal-wa-btn" href="https://wa.me/${esc(S.whatsapp)}?text=${encodeURIComponent(`Hello Adonai Store, I would like to ask about: ${p.name} (${p.sku || p.barcode_id}, ${DB.ugx(displayPrice(p))}, Size: ${p.size}). Is it still on the shelf?`)}" target="_blank" rel="noopener">
-            ${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Inquire on WhatsApp directly
-          </a>
-        </div>
-      </div>
-    `;
-
-    $("#closeProdModal").addEventListener("click", closeProductModal);
-
-    const prevBtn = $("#pmodalPrev");
-    const nextBtn = $("#pmodalNext");
-    if (prevBtn) {
-      prevBtn.addEventListener("click", e => {
-        e.stopPropagation();
-        activeModalPhotoIdx = (activeModalPhotoIdx - 1 + totalPhotos) % totalPhotos;
-        renderProductModal(p);
-      });
-    }
-    if (nextBtn) {
-      nextBtn.addEventListener("click", e => {
-        e.stopPropagation();
-        activeModalPhotoIdx = (activeModalPhotoIdx + 1) % totalPhotos;
-        renderProductModal(p);
-      });
-    }
-
-    const thumbsBox = $("#pmodalThumbs");
-    if (thumbsBox) {
-      thumbsBox.addEventListener("click", e => {
-        const t = e.target.closest("[data-pthumb]");
-        if (t) {
-          activeModalPhotoIdx = Number(t.dataset.pthumb);
-          renderProductModal(p);
-        }
-      });
-    }
-
-    const claimBtn = $("#pmodalClaimBtn");
-    if (claimBtn) {
-      claimBtn.addEventListener("click", () => {
-        addToCart(p.id);
-        closeProductModal();
-      });
-    }
-  }
-
-  $("#prodBackdrop").addEventListener("click", e => {
-    if (e.target === $("#prodBackdrop")) closeProductModal();
-  });
-  window.addEventListener("keydown", e => {
-    if (e.key === "Escape" && activeModalProductId) {
-      closeProductModal();
-    }
-  });
-
-  async function addToCart(id) {
+  function addToCart(id) {
     const p = products.find(x => x.id === id);
     if (!p || p.in_stock_count <= 0) return toast("That item is currently unavailable");
     const line = cart.find(l => l.product_id === id);
@@ -1003,14 +856,21 @@
     DELIVERY_AREAS = buildDeliveryAreas();
     if (selectedAreaIndex >= DELIVERY_AREAS.length) selectedAreaIndex = 0;
     renderCart();
-    if (activeModalProductId) {
-      const product = products.find(p => p.id === activeModalProductId);
-      if (product) renderProductModal(product);
-    }
+    renderGrid();
     updateDynamicSEO();
   });
 
   /* ---------- boot ---------- */
   refreshProducts();
   renderCart();
+
+  // "Checkout now" from a Product Detail Page lands on /?cart=1 — open the
+  // bag drawer straight away so the shopper keeps their momentum.
+  (function openCartFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cart") === "1" || window.location.hash === "#cart") {
+      openCart();
+      history.replaceState(null, "", window.location.pathname);
+    }
+  })();
 })();

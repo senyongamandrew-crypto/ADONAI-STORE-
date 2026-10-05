@@ -5,6 +5,8 @@ Optimized for high-concurrency e-commerce queries, indexed searches, and Postgre
 from datetime import datetime
 from enum import Enum as PyEnum
 import json
+import re
+import unicodedata
 from sqlalchemy import (
     Boolean,
     Column,
@@ -23,6 +25,88 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+
+# ============================================================================
+# Product Detail Page (PDP) support helpers
+# ============================================================================
+# Flat-lay measurement keys accepted by the catalog. Thrift sizing varies by
+# manufacturing standard and era, so the PDP never relies on the tagged size
+# alone: every value below is stored in INCHES and converted to centimetres
+# client-side.
+MEASUREMENT_KEYS = (
+    # Tops / jackets / dresses
+    "shoulder", "chest", "sleeve", "length",
+    # Pants / jeans / skirts
+    "waist", "hip", "inseam", "rise", "thigh", "leg_opening",
+    # Footwear
+    "insole", "heel",
+)
+
+# Condition grades rendered as colour-coded badges on the storefront.
+CONDITION_GRADES = (
+    "Brand New with Tags (BNWT)",
+    "Grade A — Excellent",
+    "Grade B — Good",
+    "Vintage / Collector",
+)
+
+
+def slugify(value: str, fallback: str = "piece") -> str:
+    """Create a URL-safe, ASCII slug segment (used by /product/<slug>)."""
+    text_value = unicodedata.normalize("NFKD", str(value or ""))
+    text_value = text_value.encode("ascii", "ignore").decode("ascii").lower()
+    text_value = re.sub(r"[^a-z0-9]+", "-", text_value).strip("-")
+    text_value = re.sub(r"-{2,}", "-", text_value)
+    return text_value or fallback
+
+
+def build_product_slug(name: str, sku: str = "", product_id: str = "") -> str:
+    """Stable, human-readable, collision-free product slug.
+
+    `<item-name>-<sku>` — the SKU is already unique per piece, so the slug is
+    unique too while staying readable and keyword-rich for SEO.
+    """
+    name_part = slugify(name, "thrift-piece")[:120].strip("-")
+    tail = slugify(sku or product_id, "")[:40].strip("-")
+    if tail and not name_part.endswith(tail):
+        return f"{name_part}-{tail}".strip("-")
+    return name_part or tail or "thrift-piece"
+
+
+def normalize_measurements(raw) -> dict:
+    """Coerce a measurements payload into a clean `{key: inches}` dict.
+
+    Accepts a dict, a JSON string, or `None`. Unknown keys are preserved only
+    when they are simple scalars so staff can record uncommon garment specs
+    (e.g. "cuff") without a schema migration.
+    """
+    if raw is None or raw == "":
+        return {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    cleaned = {}
+    for key, value in raw.items():
+        key_name = slugify(key, "").replace("-", "_")[:40]
+        if not key_name:
+            continue
+        if key_name == "notes":
+            note = str(value or "").strip()[:400]
+            if note:
+                cleaned["notes"] = note
+            continue
+        try:
+            inches = round(float(value), 2)
+        except (TypeError, ValueError):
+            continue
+        if 0 < inches <= 120:
+            cleaned[key_name] = inches
+    return cleaned
 
 
 class ItemCondition(str, PyEnum):
@@ -129,6 +213,16 @@ class Product(Base):
     image_url = Column(Text, nullable=True)
     images_json = Column(Text, default="[]")  # JSON string array of additional image angles
     rack_location = Column(String(50), nullable=True, index=True)
+    # ---- Product Detail Page (PDP) fields --------------------------------
+    # slug powers the shareable /product/<slug> permalink used by the
+    # WhatsApp deep links and the sitemap.
+    slug = Column(String(200), nullable=True, index=True)
+    fabric = Column(String(255), nullable=True)          # e.g. "100% Cotton"
+    measurements_json = Column(Text, default="{}")        # flat-lay specs, inches
+    flaw_notes = Column(Text, nullable=True)              # mandatory disclosure copy
+    flaw_photo_index = Column(Integer, default=-1)        # gallery index of the flaw close-up
+    care_notes = Column(Text, nullable=True)              # washing / care instructions
+    staff_notes = Column(Text, nullable=True)             # floor-staff + shopper note
     # Additive financial-ledger fields.  These are also installed safely by the
     # Render migration for databases that already contain the products table.
     stock_lot_id = Column(String(64), nullable=True, index=True)
@@ -155,42 +249,24 @@ class Product(Base):
     def images(self, value):
         self.images_json = json.dumps(value if isinstance(value, list) else [])
 
-    @staticmethod
-    def _json_value(raw, fallback):
-        try:
-            value = json.loads(raw) if raw else fallback
-            return value if isinstance(value, type(fallback)) else fallback
-        except Exception:
-            return fallback
-
-    @property
-    def size_variants(self):
-        return self._json_value(self.size_variants_json, [])
-
-    @size_variants.setter
-    def size_variants(self, value):
-        self.size_variants_json = json.dumps(value if isinstance(value, list) else [])
-
-    @property
-    def color_variants(self):
-        return self._json_value(self.color_variants_json, [])
-
-    @color_variants.setter
-    def color_variants(self, value):
-        self.color_variants_json = json.dumps(value if isinstance(value, list) else [])
-
     @property
     def measurements(self):
-        return self._json_value(self.measurements_json, {})
+        return normalize_measurements(self.measurements_json)
 
     @measurements.setter
     def measurements(self, value):
-        self.measurements_json = json.dumps(value if isinstance(value, dict) else {})
+        self.measurements_json = json.dumps(normalize_measurements(value))
+
+    @property
+    def public_slug(self):
+        """Always return a usable permalink slug, even for legacy rows."""
+        return self.slug or build_product_slug(self.name, self.sku, self.id)
 
     def to_dict(self):
         return {
             "id": self.id,
             "sku": self.sku,
+            "slug": self.public_slug,
             "barcode_id": self.barcode_id,
             "name": self.name,
             "brand": self.brand or "",
@@ -213,13 +289,25 @@ class Product(Base):
             "total_transport_cost": float(self.total_transport_cost or 0),
             "embedded_transport_portion": float(self.embedded_transport_portion if self.embedded_transport_portion is not None else (self.total_transport_cost or 0) * 0.5),
             "checkout_transport_portion": float(self.checkout_transport_portion if self.checkout_transport_portion is not None else (self.total_transport_cost or 0) * 0.5),
-            "final_selling_price": float(self.final_selling_price if self.final_selling_price is not None else self.selling_price or 0),
+            # Defensive: never advertise UGX 0 to a shopper if the generated
+            # column is empty on a legacy row — fall back to selling_price.
+            "final_selling_price": float(
+                self.final_selling_price
+                if self.final_selling_price not in (None, 0)
+                else (self.selling_price or 0)
+            ),
             "selling_price": self.selling_price,
             "compare_price": self.compare_price,
             "in_stock_count": self.in_stock_count,
             "desc": self.desc or "",
             "image_url": self.image_url or "",
             "images": self.images,
+            "fabric": self.fabric or "",
+            "measurements": self.measurements,
+            "flaw_notes": self.flaw_notes or "",
+            "flaw_photo_index": self.flaw_photo_index if self.flaw_photo_index is not None else -1,
+            "care_notes": self.care_notes or "",
+            "staff_notes": self.staff_notes or "",
             "rack_location": self.rack_location or "Rail A-1",
             "stock_lot_id": self.stock_lot_id or "",
             "inventory_status": self.inventory_status or "AVAILABLE",

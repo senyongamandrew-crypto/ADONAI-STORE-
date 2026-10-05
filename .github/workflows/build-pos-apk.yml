@@ -46,6 +46,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Verify Responsive Product Image Manifest
+        run: |
+          pip install pillow
+          python scripts/optimize-product-images.py --check
+
       - name: Run Backend Integration & Security Tests
         run: |
           python test_render_postgres.py

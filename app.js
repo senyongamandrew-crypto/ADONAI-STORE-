@@ -950,6 +950,30 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   }
 
   /* ---- product editor modal (edit / delete) ---- */
+  /* Measurements travel as a small object; the edit modal exposes them as
+     readable "name: value" lines so staff can fix a number in seconds. */
+  function measurementsToText(measurements) {
+    if (!measurements || typeof measurements !== "object") return "";
+    const lines = Object.keys(measurements)
+      .filter(key => key !== "notes")
+      .map(key => `${key}: ${measurements[key]}`);
+    if (measurements.notes) lines.push(`notes: ${measurements.notes}`);
+    return lines.join("\n");
+  }
+
+  function textToMeasurements(text) {
+    const out = {};
+    String(text || "").split(/\r?\n/).forEach(line => {
+      const match = line.match(/^\s*([A-Za-z_ ]+?)\s*[:=]\s*(.+?)\s*$/);
+      if (!match) return;
+      const key = match[1].trim().toLowerCase().replace(/\s+/g, "_");
+      if (key === "notes") { out.notes = match[2].trim(); return; }
+      const value = parseFloat(match[2]);
+      if (Number.isFinite(value) && value > 0) out[key] = value;
+    });
+    return out;
+  }
+
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
@@ -985,7 +1009,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div class="field"><label>Compare-at (UGX)</label><input id="mpCompare" type="number" class="sel-full" value="${p ? p.compare_price : ""}" /></div>
         <div class="field"><label>Stock</label><input id="mpStock" type="number" min="0" class="sel-full" value="${p ? p.in_stock_count : 1}" /></div>
       </div>
-      <div class="field product-angle-editor"><label>Product photos — 4 required views<span class="fhint">Front, back, fabric / texture, brand &amp; size tag</span></label><div class="product-angle-grid">${modalImages.map((img, i) => `<div class="product-angle-slot"><div class="product-angle-preview" data-mp-preview="${i}">${img ? `<img src="${esc(img)}" alt="View ${i + 1}" />` : `<span>View ${i + 1}</span>`}</div><button type="button" class="btn sm" data-mp-image="${i}">Upload ${["front", "back", "fabric", "tag"][i]}</button></div>`).join("")}</div></div>
+      <h4 class="sec" style="margin:18px 0 8px">Product page details</h4>
+      <div class="field"><label>Fabric &amp; composition</label><input id="mpFabric" class="sel-full" value="${v("fabric")}" placeholder="100% Cotton denim · 12.5oz" /></div>
+      <div class="field"><label>Care instructions</label><input id="mpCare" class="sel-full" value="${v("care_notes")}" placeholder="Machine wash cold inside out." /></div>
+      <div class="field"><label>Flat-lay measurements<span class="fhint">inches · one per line as name: value</span></label>
+        <textarea id="mpMeasure" class="sel-full" placeholder="shoulder: 18.5&#10;chest: 22&#10;sleeve: 25&#10;length: 26">${measurementsToText(p && p.measurements)}</textarea></div>
+      <div class="field"><label>Flaw &amp; condition notes</label><textarea id="mpFlaws" class="sel-full" placeholder="Describe every flaw a shopper would want to know about.">${v("flaw_notes")}</textarea></div>
+      <div class="field"><label>Flaw close-up photo index<span class="fhint">-1 when there is no flaw photo</span></label>
+        <input id="mpFlawPhoto" type="number" min="-1" max="3" class="sel-full" value="${p && p.flaw_photo_index != null ? p.flaw_photo_index : -1}" /></div>
+      ${Intake.imageFieldHTML(modalImageState.image_url)}
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
@@ -1042,25 +1074,61 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       select.innerHTML = `<option value="">Sign in to load registered lots</option>`;
     }
   }
-  function intakeCondition() {
-    return $("#inItemCondition") ? $("#inItemCondition").value : "BRAND_NEW";
+  /* ------------------------------------------------------------------
+     FLAT-LAY MEASUREMENTS (intake → product detail page)
+     Thrift stock is one-of-one, so sizing is sold on real measurements
+     rather than on a tagged S/M/L. The field set follows the garment type.
+     ------------------------------------------------------------------ */
+  const MEASURE_SETS = {
+    top: [
+      ["shoulder", "Shoulder width"],
+      ["chest", "Pit-to-pit (chest)"],
+      ["sleeve", "Sleeve length"],
+      ["length", "Total length"]
+    ],
+    bottom: [
+      ["waist", "Waist (flat)"],
+      ["hip", "Hip width"],
+      ["inseam", "Inseam length"],
+      ["rise", "Rise"],
+      ["thigh", "Thigh width"],
+      ["leg_opening", "Leg opening"]
+    ],
+    other: [
+      ["length", "Length"],
+      ["insole", "Insole length"],
+      ["heel", "Heel height"]
+    ]
+  };
+
+  // Categories decide which measurement set is offered by default.
+  function measureSetForCategory(category) {
+    const value = String(category || "").toLowerCase();
+    if (/pant|jean|skirt|short|trouser/.test(value)) return "bottom";
+    if (/shoe|accessor|bag|belt/.test(value)) return "other";
+    return "top";
   }
-  function setIntakeCondition(value) {
-    const condition = value === "BRAND_NEW" ? "BRAND_NEW" : "PRE_LOVED";
-    $("#inItemCondition").value = condition;
-    $$('[data-intake-condition]').forEach(button => button.classList.toggle("active", button.dataset.intakeCondition === condition));
-    const isNew = condition === "BRAND_NEW";
-    const qty = $("#inQty");
-    if (qty) { qty.min = isNew ? "0" : "1"; if (!isNew && Number(qty.value) !== 1) qty.value = "1"; }
-    const hint = $("#inQtyHint");
-    if (hint) hint.textContent = isNew ? "Brand-new apparel supports multi-quantity stock" : "Pre-loved pieces are single-quantity 1-of-1 items";
-    const cond = $("#inCond");
-    if (cond) {
-      cond.value = isNew ? "Factory Fresh" : (cond.value === "Factory Fresh" ? "Grade A — Excellent" : cond.value);
-    }
-    const tag = $("#tagCondition");
-    if (tag) tag.textContent = isNew ? "BRAND-NEW APPAREL" : "1-OF-1 VINTAGE";
-    paintTag();
+
+  function buildMeasureFields(setKey, existing) {
+    const fields = MEASURE_SETS[setKey] || MEASURE_SETS.top;
+    const values = existing || {};
+    $("#measureFields").innerHTML = fields.map(([key, label]) => `
+      <div class="field">
+        <label>${label}<span class="unit">inches</span></label>
+        <input class="sel-full" type="number" step="0.1" min="0" data-measure="${key}"
+               value="${values[key] != null ? values[key] : ""}" placeholder="0.0" />
+      </div>`).join("");
+  }
+
+  function readMeasurements() {
+    const out = {};
+    document.querySelectorAll("#measureFields [data-measure]").forEach(input => {
+      const value = Number(input.value);
+      if (Number.isFinite(value) && value > 0) out[input.dataset.measure] = value;
+    });
+    const note = ($("#inMeasureNote") && $("#inMeasureNote").value.trim()) || "";
+    if (note) out.notes = note;
+    return out;
   }
 
   function initIntakeForm() {
@@ -1089,9 +1157,16 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (g) $("#inGroup").value = g;
       paintTag();
     });
-    ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inTransport", "inRrp", "inSku", "inSizeVariants", "inFactoryNotes", "inMeasurements", "inFabricNotes"].forEach(id => {
-      const element = $("#" + id); if (element) element.addEventListener("input", paintTag);
+    ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inTransport", "inRrp", "inSku"].forEach(id => $("#" + id).addEventListener("input", paintTag));
+    $("#inMeasureSet").addEventListener("change", () => buildMeasureFields($("#inMeasureSet").value));
+    $("#inCat").addEventListener("change", () => {
+      const suggested = measureSetForCategory($("#inCat").value);
+      if ($("#inMeasureSet").value !== suggested) {
+        $("#inMeasureSet").value = suggested;
+        buildMeasureFields(suggested);
+      }
     });
+    buildMeasureFields($("#inMeasureSet").value);
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
     buildPhotoRow();
@@ -1182,6 +1257,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       compare_price: Number($("#inRrp").value) || 0,
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
+      // Product detail page specifications
+      fabric: $("#inFabric").value.trim(),
+      care_notes: $("#inCare").value.trim(),
+      measurements: readMeasurements(),
+      flaw_notes: $("#inFlaws").value.trim(),
+      flaw_photo_index: Number($("#inFlawPhoto").value),
       visibility: $("#inVis").value,
       in_stock_count: Number($("#inStatus").value) ? Math.max(0, Math.floor(Number($("#inQty").value) || 0)) : 0,
       sku: $("#inSku").value.trim(),
@@ -1198,8 +1279,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const p = await DB.addProduct(vals);
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
-        ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes", "inSizeVariants", "inFactoryNotes", "inMeasurements", "inFabricNotes"].forEach(id => $("#" + id).value = "");
-        $("#inQty").value = "1";
+        ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes",
+         "inFabric", "inCare", "inMeasureNote", "inFlaws"].forEach(id => $("#" + id).value = "");
+        $("#inFlawPhoto").value = "-1";
+        buildMeasureFields($("#inMeasureSet").value);
         intakePhotos.fill(""); paintAngles();
         $("#inStockLot").value = "";
         $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();
@@ -2204,8 +2287,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         total_transport_cost: Number($("#mpTransport").value) || 0,
         selling_price: Number($("#mpSell").value) || 0,
         compare_price: Number($("#mpCompare").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
-        image_url: (modalBox._images || []).filter(Boolean)[0] || "",
-        images: (modalBox._images || []).filter(Boolean)
+        image_url: modalBox._imageState ? modalBox._imageState.image_url : "",
+        // Product detail page specifications
+        fabric: $("#mpFabric").value.trim(),
+        care_notes: $("#mpCare").value.trim(),
+        measurements: textToMeasurements($("#mpMeasure").value),
+        flaw_notes: $("#mpFlaws").value.trim(),
+        flaw_photo_index: Number($("#mpFlawPhoto").value)
       };
       if (!vals.name) return toast("Name required", false);
       try {

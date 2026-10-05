@@ -30,7 +30,7 @@
   const ITEM_CONDITIONS = ["BRAND_NEW", "PRE_LOVED"];
   const QUANTITY_TYPES = ["BRAND_NEW", "PRE_LOVED"];
   const DEMO_CODES    = { "Men": "MEN", "Women": "WOM", "Children": "KID", "Unisex": "UNI" };
-  const CONDITIONS    = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector"];
+  const CONDITIONS    = ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"];
   // Unisex is a first-class demographic so it is available in inventory,
   // cashier filters, and the public storefront filters.
   const DEMOGRAPHICS  = ["Men", "Women", "Children", "Unisex"];
@@ -92,27 +92,52 @@
       ["Essential Cotton Crew Tee", "Adonai Basics", "Optic White", "Unisex", "Tops & Shirts", "S / M / L / XL", "Factory Fresh", 18000, 32000, 42000, 12, "Factory-fresh heavyweight cotton tee with intact brand tags.", "BRAND_NEW", ["S", "M", "L", "XL"], ["Optic White", "Black"], "Factory tag attached; 100% cotton.", "intact", {}, "New factory cotton; no wear or defects."],
       ["Everyday Straight-Leg Denim", "Adonai Basics", "Dark Indigo", "Women", "Pants & Jeans", "26 / 28 / 30 / 32", "Factory Fresh", 42000, 72000, 85000, 8, "Brand-new straight-leg denim with factory sizing tags and original inner packaging.", "BRAND_NEW", ["26", "28", "30", "32"], ["Dark Indigo"], "Factory sizing and care tags intact.", "intact", {}, "Factory-fresh denim; no marks, fading, or alterations."]
     ];
-    const IMGS = Array.from({ length: raw.length }, (_, i) => `assets/products/p${1001 + i}.jpg`);
-    return raw.map((r, i) => ({
-      id: "PRD-" + String(1001 + i),
-      sku: "ADN-" + (DEMO_CODES[r[3]] || "GEN") + "-" + String(1001 + i),
-      barcode_id: "ADT-" + String(10001 + i),
-      name: r[0], brand: r[1], color: r[2], demographic: r[3],
-      category: r[4], size: r[5], condition: r[6],
-      item_condition: r[13] || "PRE_LOVED",
-      quantity_type: r[13] || "PRE_LOVED",
-      size_variants: Array.isArray(r[14]) ? r[14] : [],
-      color_variants: Array.isArray(r[15]) ? r[15] : [],
-      factory_tag_notes: r[16] || "",
-      inner_packaging: r[17] || "",
-      measurements: r[18] || {},
-      fabric_grading_notes: r[19] || (r[13] === "BRAND_NEW" ? "Factory-fresh condition." : "Hand-inspected and laundered; disclosed wear is part of the item story."),
-      cost_price: r[7], selling_price: r[8], compare_price: r[9],
-      in_stock_count: r[10], desc: r[11], inventory_status: r[10] > 0 ? "AVAILABLE" : "OUT_OF_STOCK",
-      // Curated local photography — staff replace with the real photo(s) at intake.
-      image_url: IMGS[i % 16], images: [],
-      created_at: new Date(Date.now() - (30 - i) * 86400000).toISOString()
-    }));
+    /* Flat-lay measurements (inches), fabric, care and mandatory flaw
+       disclosure — mirrors db_init.py so the offline seed matches the API. */
+    const PDP = [
+      // Hero piece: four angles (front, back, fabric, flaw) demonstrate the gallery.
+      { m: { shoulder: 18.5, chest: 22, sleeve: 25, length: 26 }, f: "100% Cotton denim · 12.5oz", c: "Machine wash cold inside out. Hang dry. Do not bleach.",
+        x: "Light fraying along the left cuff hem and a small pale wear mark just above it. The denim is intact — no holes, and every button and rivet is original.",
+        fp: 3, imgs: ["assets/products/p1001.jpg", "assets/products/p1001-back.jpg", "assets/products/p1001-fabric.jpg", "assets/products/p1001-flaw.jpg"] },
+      { m: { shoulder: 19.5, chest: 24, sleeve: 26, length: 31 }, f: "Waxed cotton shell · corduroy collar · polyester lining", c: "Do not machine wash. Sponge clean with cold water and re-wax once a year.", x: "Wax finish has faded slightly at both cuffs and there is a neat 1-inch seam repair inside the left pocket. Fully weatherproof and structurally sound." },
+      { m: { chest: 17, waist: 16, length: 51 }, f: "100% Silk", c: "Dry clean, or cold hand wash with silk detergent and dry flat.", x: "Two faint pin marks beside the left strap from the original hemming — only visible up close." },
+      { m: { insole: 11, heel: 1.2 }, f: "Full-grain leather upper · leather sole · elastic gusset", c: "Wipe with a damp cloth and polish monthly. Use shoe trees between wears.", x: "Resoled once by a cobbler and light creasing across the toe box. Uppers are crack-free." },
+      { m: { shoulder: 18, chest: 22.5, sleeve: 25, length: 30 }, f: "100% Cotton oxford", c: "Machine wash warm, tumble dry low, iron on medium.", x: "" },
+      { m: { shoulder: 15.5, chest: 19, sleeve: 23, length: 26 }, f: "Cotton velvet · satin lapels · viscose lining", c: "Dry clean only. Steam lightly to lift the pile.", x: "" },
+      { m: { waist: 13, hip: 19, length: 31 }, f: "Polyester satin · elastic waistband", c: "Hand wash cold, hang dry, cool iron on the reverse.", x: "" },
+      { m: { shoulder: 14.5, chest: 18, sleeve: 9, length: 44 }, f: "100% Cotton wax print (Kitenge)", c: "Wash separately on the first wash — wax-print colours may run.", x: "" },
+      { m: { waist: 15, hip: 20, inseam: 29, rise: 11.5, thigh: 11, leg_opening: 7.5 }, f: "100% Cotton rigid denim", c: "Machine wash cold inside out. Line dry to keep the fade.", x: "Honest fade across both knees and a small frayed edge on the right back pocket. No holes or repairs." },
+      { m: { waist: 16.5, hip: 21, inseam: 30, rise: 11, thigh: 12, leg_opening: 8 }, f: "Cotton twill", c: "Machine wash warm, tumble dry low, iron the pleats.", x: "Faint shadow at the original hem line where the leg was let down. Hem professionally re-stitched." },
+      { m: { length: 15, notes: "Body 14in wide x 15in tall x 5in deep · 11in handle drop" }, f: "Heavy cotton canvas · leather handles", c: "Spot clean with mild soap. Air dry out of direct sun.", x: "" },
+      { m: { length: 42, notes: "Fits a 32in–36in waist · 1.5in strap width" }, f: "Full-grain leather · solid brass buckle", c: "Condition with leather balm twice a year.", x: "Buckle carries a light patina and the third hole shows normal wear." },
+      { m: { shoulder: 12.5, chest: 15, sleeve: 17, length: 17 }, f: "Cotton denim", c: "Machine wash cold, tumble dry low.", x: "One snap shows minor tarnish. Every snap opens and closes properly." },
+      { m: { length: 26, notes: "26in x 26in square with a hand-rolled hem" }, f: "100% Silk", c: "Dry clean only.", x: "" },
+      { m: { insole: 11.2 }, f: "Suede and mesh upper · gum rubber outsole", c: "Brush suede dry. Spot clean the midsole with mild soap.", x: "Even tread wear across the outsole. Interior washed, disinfected and odour-free." },
+      { m: { shoulder: 14, chest: 18, sleeve: 7, length: 24 }, f: "100% Rayon", c: "Hand wash cold, line dry, cool iron.", x: "" }
+    ];
+    const slugify = v => String(v || "").toLowerCase().normalize("NFKD")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const IMGS = Array.from({ length: 16 }, (_, i) => `assets/products/p${1001 + i}.jpg`);
+    return raw.map((r, i) => {
+      const sku = "ADN-" + (DEMO_CODES[r[3]] || "GEN") + "-" + String(1001 + i);
+      const extra = PDP[i] || { m: {}, f: "", c: "", x: "" };
+      return {
+        id: "PRD-" + String(1001 + i),
+        sku,
+        slug: slugify(r[0]) + "-" + slugify(sku),
+        barcode_id: "ADT-" + String(10001 + i),
+        name: r[0], brand: r[1], color: r[2], demographic: r[3],
+        category: r[4], size: r[5], condition: r[6],
+        cost_price: r[7], selling_price: r[8], compare_price: r[9],
+        in_stock_count: r[10], desc: r[11],
+        // Product Detail Page specifications
+        measurements: extra.m, fabric: extra.f, care_notes: extra.c,
+        flaw_notes: extra.x, flaw_photo_index: extra.fp != null ? extra.fp : -1, staff_notes: "",
+        // Curated local photography — staff replace with the real photo(s) at intake.
+        image_url: IMGS[i], images: extra.imgs || [],
+        created_at: new Date(Date.now() - (30 - i) * 86400000).toISOString()
+      };
+    });
   }
 
   /* Slim reference dataset: ONE register sale + ONE ledger expense (matches the

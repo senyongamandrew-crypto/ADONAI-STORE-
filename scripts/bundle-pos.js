@@ -10,6 +10,13 @@ const ROOT = path.resolve(__dirname, '..');
 const POS_DIST = path.join(ROOT, 'pos-dist');
 const ANDROID_ASSETS = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'public');
 
+/**
+ * Responsive WebP derivatives (p1001-320.webp, …) are generated for the public
+ * storefront's <picture> srcset only. The POS register and admin console render
+ * the base JPEG, so shipping the whole ladder would bloat the APK for nothing.
+ */
+const STOREFRONT_ONLY_ASSET = /-\d+\.webp$/i;
+
 function copyDirRecursive(src, dest) {
   if (!fs.existsSync(src)) return;
   fs.mkdirSync(dest, { recursive: true });
@@ -19,7 +26,7 @@ function copyDirRecursive(src, dest) {
     const destPath = path.join(dest, entry.name);
     if (entry.isDirectory()) {
       copyDirRecursive(srcPath, destPath);
-    } else {
+    } else if (!STOREFRONT_ONLY_ASSET.test(entry.name)) {
       fs.copyFileSync(srcPath, destPath);
     }
   }
