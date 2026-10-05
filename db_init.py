@@ -144,6 +144,16 @@ def apply_additive_schema_migrations():
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
             ("category", "VARCHAR(100)"),
         ],
+        "orders": [
+            # Online payment lifecycle (Flutterwave). Existing orders keep
+            # 'unpaid' — exactly their historical cash-on-delivery meaning.
+            ("payment_status", "VARCHAR(20) NOT NULL DEFAULT 'unpaid'"),
+            ("payment_provider", "VARCHAR(30)"),
+            ("payment_reference", "VARCHAR(100)"),
+            ("payment_token_hash", "VARCHAR(128)"),
+            ("paid_at", "TIMESTAMP"),
+            ("payment_expires_at", "TIMESTAMP"),
+        ],
     }
     with engine.begin() as connection:
         # Existing PostgreSQL installations need the enum types created before
@@ -495,7 +505,6 @@ def seed_products(session):
             color_variants_json=json.dumps(r[15] if isinstance(r[15], list) else []),
             factory_tag_notes=r[16],
             inner_packaging=r[17],
-            measurements_json=json.dumps(r[18] if isinstance(r[18], dict) else {}),
             fabric_grading_notes=r[19],
             cost_price=r[7],
             # base_price must be seeded too: final_selling_price is a generated

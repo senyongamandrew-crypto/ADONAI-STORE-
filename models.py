@@ -250,6 +250,28 @@ class Product(Base):
         self.images_json = json.dumps(value if isinstance(value, list) else [])
 
     @property
+    def size_variants(self):
+        try:
+            return json.loads(self.size_variants_json) if self.size_variants_json else []
+        except Exception:
+            return []
+
+    @size_variants.setter
+    def size_variants(self, value):
+        self.size_variants_json = json.dumps(value if isinstance(value, list) else [])
+
+    @property
+    def color_variants(self):
+        try:
+            return json.loads(self.color_variants_json) if self.color_variants_json else []
+        except Exception:
+            return []
+
+    @color_variants.setter
+    def color_variants(self, value):
+        self.color_variants_json = json.dumps(value if isinstance(value, list) else [])
+
+    @property
     def measurements(self):
         return normalize_measurements(self.measurements_json)
 
@@ -363,10 +385,19 @@ class Order(Base):
     total = Column(Integer, nullable=False)
     
     # Tender / Payment details
-    tender_type = Column(String(50), default="cash")  # 'cash', 'mtn', 'airtel'
+    tender_type = Column(String(50), default="cash")  # 'cash', 'mtn', 'airtel', 'flutterwave'
     tender_amount = Column(Integer, nullable=True)
     tender_change = Column(Integer, nullable=True)
-    
+
+    # Online gateway payment lifecycle (Flutterwave). Web orders paid online
+    # start 'pending' and only become 'paid' after server-side verification.
+    payment_status = Column(String(20), default="unpaid", index=True)  # 'unpaid', 'pending', 'paid', 'failed'
+    payment_provider = Column(String(30), nullable=True)  # 'flutterwave', etc.
+    payment_reference = Column(String(100), nullable=True, index=True)  # latest gateway tx_ref
+    payment_token_hash = Column(String(128), nullable=True)  # sha256 of the per-order payment token
+    paid_at = Column(DateTime, nullable=True)
+    payment_expires_at = Column(DateTime, nullable=True, index=True)  # stock released when this lapses unpaid
+
     # Staff attribution
     cashier_id = Column(String(50), nullable=True)
     cashier_name = Column(String(100), nullable=True)
@@ -399,6 +430,13 @@ class Order(Base):
                 "tendered": self.tender_amount,
                 "change": self.tender_change
             } if self.tender_type else None,
+            "payment": {
+                "status": self.payment_status or "unpaid",
+                "provider": self.payment_provider or "",
+                "reference": self.payment_reference or "",
+                "paid_at": self.paid_at.isoformat() if self.paid_at else None,
+                "expires_at": self.payment_expires_at.isoformat() if self.payment_expires_at else None,
+            },
             "cashier": {
                 "id": self.cashier_id,
                 "name": self.cashier_name
@@ -445,6 +483,46 @@ class OrderItem(Base):
             "category": self.category or "Uncategorised",
             "qty": self.qty,
             "line_total": self.line_total
+        }
+
+
+class PaymentTransaction(Base):
+    """
+    One row per online payment ATTEMPT (a fresh gateway tx_ref each time).
+    This is the idempotency backbone of the payment flow: both the browser
+    verify call and the server-to-server webhook settle through these rows,
+    and each attempt is marked successful exactly once.
+    """
+    __tablename__ = "payment_transactions"
+
+    id = Column(String(50), primary_key=True)  # PAY-..., internal id
+    tx_ref = Column(String(100), unique=True, nullable=False, index=True)  # gateway reference for the attempt
+    order_id = Column(String(50), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(30), default="flutterwave", nullable=False)
+    flw_transaction_id = Column(String(40), nullable=True, index=True)  # numeric gateway transaction id
+    amount = Column(Integer, nullable=False, default=0)  # expected amount (server-side order total)
+    currency = Column(String(10), default="UGX", nullable=False)
+    status = Column(String(20), default="pending", nullable=False, index=True)  # 'pending', 'successful', 'failed'
+    channel = Column(String(40), nullable=True)  # 'mobilemoneyuganda', 'card', ...
+    gateway_payload = Column(Text, nullable=True)  # compact verify-response audit snapshot
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    order = relationship("Order")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "tx_ref": self.tx_ref,
+            "order_id": self.order_id,
+            "provider": self.provider,
+            "flw_transaction_id": self.flw_transaction_id or "",
+            "amount": self.amount,
+            "currency": self.currency,
+            "status": self.status,
+            "channel": self.channel or "",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
