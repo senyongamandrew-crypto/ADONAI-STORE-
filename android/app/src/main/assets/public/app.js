@@ -2151,6 +2151,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     }
     const btnSaveProd = t.closest("[data-save-prod]");
     if (btnSaveProd) {
+      const savedImages = (modalBox._images || []).filter(Boolean);
+      if (savedImages.length < 4) return toast("Upload all 4 product views before saving", false);
       const vals = {
         name: $("#mpName").value.trim(), brand: $("#mpBrand").value.trim() || "Unbranded",
         color: $("#mpColor").value.trim(), demographic: $("#mpDemo").value, category: $("#mpCat").value,
