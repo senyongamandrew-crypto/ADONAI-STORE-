@@ -1080,7 +1080,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     broadcast_event(
                         "NEW_ORDER",
                         f"🧾 POS Sale {order_id}",
-                        f"Charged — UGX {grand_total:,} ({order.tender_type or 'cash'})",
+                        f"POS sale recorded ({order.tender_type or 'cash'})",
                         {"order_id": order_id, "amount": grand_total,
                          "customer": order.customer_name, "channel": channel},
                     )
@@ -1088,7 +1088,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     broadcast_event(
                         "NEW_ORDER",
                         f"🛍️ New {channel.title()} Order #{order_number}",
-                        f"Order received — UGX {grand_total:,}",
+                        "New order received",
                         {"order_id": order_id, "amount": grand_total,
                          "customer": order.customer_name, "channel": channel},
                     )
