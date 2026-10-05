@@ -953,7 +953,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
-    const modalImageState = { image_url: p ? (p.image_url || "") : "" };
+    const modalImages = p && Array.isArray(p.images) ? p.images.slice(0, 4) : [];
+    if (!modalImages.length && p && p.image_url) modalImages.push(p.image_url);
+    while (modalImages.length < 4) modalImages.push("");
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>${p ? "Edit item" : "New item"}</h3>
@@ -972,19 +974,45 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       </div>
       <div class="fgrid">
         <div class="field"><label>Cost (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
-        <div class="field"><label>Selling (UGX)</label><input id="mpSell" type="number" class="sel-full" value="${p ? p.selling_price : ""}" /></div>
+        <div class="field"><label>Base price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
+      </div>
+      <div class="fgrid">
+        <div class="field"><label>Total transport (UGX)<span class="fhint">50% embedded in price · 50% at checkout</span></label><input id="mpTransport" type="number" min="0" class="sel-full" value="${p ? (p.total_transport_cost || 0) : 0}" /></div>
+        <div class="field"><label>Final selling price (UGX)</label><input id="mpSell" type="number" class="sel-full" value="${p ? p.selling_price : ""}" readonly /></div>
       </div>
       <div class="fgrid">
         <div class="field"><label>Compare-at (UGX)</label><input id="mpCompare" type="number" class="sel-full" value="${p ? p.compare_price : ""}" /></div>
-        <div class="field"><label>Stock</label><input id="mpStock" type="number" class="sel-full" value="${p ? p.in_stock_count : 1}" /></div>
+        <div class="field"><label>Stock</label><input id="mpStock" type="number" min="0" class="sel-full" value="${p ? p.in_stock_count : 1}" /></div>
       </div>
-      ${Intake.imageFieldHTML(modalImageState.image_url)}
+      <div class="field product-angle-editor"><label>Product photos — 4 required views<span class="fhint">Front, back, fabric / texture, brand &amp; size tag</span></label><div class="product-angle-grid">${modalImages.map((img, i) => `<div class="product-angle-slot"><div class="product-angle-preview" data-mp-preview="${i}">${img ? `<img src="${esc(img)}" alt="View ${i + 1}" />` : `<span>View ${i + 1}</span>`}</div><button type="button" class="btn sm" data-mp-image="${i}">Upload ${["front", "back", "fabric", "tag"][i]}</button></div>`).join("")}</div></div>
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
-    Intake.bindImageEditor(modalBox, modalImageState);
-    modalBox._imageState = modalImageState;
+    modalBox._images = modalImages;
+    const recalculateModalPrice = () => {
+      const base = Math.max(0, Number($("#mpBase").value) || 0);
+      const transport = Math.max(0, Number($("#mpTransport").value) || 0);
+      $("#mpSell").value = Math.round(base + (transport / 2));
+    };
+    $("#mpBase").addEventListener("input", recalculateModalPrice);
+    $("#mpTransport").addEventListener("input", recalculateModalPrice);
+    $$("[data-mp-image]").forEach(button => button.addEventListener("click", () => {
+      const slot = Number(button.dataset.mpImage);
+      const input = document.createElement("input");
+      input.type = "file"; input.accept = "image/png, image/jpeg, image/jpg, image/webp, image/*";
+      input.onchange = async () => {
+        const file = input.files && input.files[0]; if (!file) return;
+        try {
+          button.disabled = true; button.textContent = "Uploading…";
+          modalImages[slot] = await Intake.compressImage(file);
+          const preview = $("[data-mp-preview='" + slot + "']");
+          if (preview) preview.innerHTML = `<img src="${esc(modalImages[slot])}" alt="View ${slot + 1}" />`;
+        } catch (err) { toast(err.message || "Could not load photo", false); }
+        finally { button.disabled = false; button.textContent = `Upload ${["front", "back", "fabric", "tag"][slot]}`; }
+      };
+      input.click();
+    }));
   }
 
   /* ============================================================
@@ -2127,9 +2155,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         name: $("#mpName").value.trim(), brand: $("#mpBrand").value.trim() || "Unbranded",
         color: $("#mpColor").value.trim(), demographic: $("#mpDemo").value, category: $("#mpCat").value,
         size: $("#mpSize").value.trim() || "-", condition: $("#mpCond").value,
-        cost_price: Number($("#mpCost").value) || 0, selling_price: Number($("#mpSell").value) || 0,
+        cost_price: Number($("#mpCost").value) || 0,
+        base_price: Number($("#mpBase").value) || 0,
+        total_transport_cost: Number($("#mpTransport").value) || 0,
+        selling_price: Number($("#mpSell").value) || 0,
         compare_price: Number($("#mpCompare").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
-        image_url: modalBox._imageState ? modalBox._imageState.image_url : ""
+        image_url: (modalBox._images || []).filter(Boolean)[0] || "",
+        images: (modalBox._images || []).filter(Boolean)
       };
       if (!vals.name) return toast("Name required", false);
       try {
