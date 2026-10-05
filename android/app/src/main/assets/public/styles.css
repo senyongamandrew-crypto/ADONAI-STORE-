@@ -1427,3 +1427,73 @@ html[data-pointer="touch"] .btn,
 html[data-pointer="touch"] .tab,
 html[data-pointer="touch"] .chip,
 html[data-pointer="touch"] .nav-item { min-height: 44px; }
+
+/* Cart/catalog scroll contract */
+html, body { margin: 0; padding: 0; height: 100%; height: 100dvh; }
+.app-viewport { display:flex; flex-direction:column; width:100vw; height:100%; height:100dvh; position:relative; }
+.catalog-dashboard-region { flex:1; width:100%; overflow-y:auto !important; -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain; padding:16px; box-sizing:border-box; }
+body.cart-drawer-open { overflow:hidden !important; touch-action:none; }
+body.cart-drawer-closed { overflow:auto !important; touch-action:auto !important; }
+
+/* Audit export category picker */
+.export-menu-wrap { position: relative; }
+.export-menu {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; min-width: 245px;
+  padding: 6px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); box-shadow: 0 14px 34px rgba(17,24,39,.16);
+}
+.export-menu[hidden] { display: none; }
+.export-menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px;
+  border: 0; border-radius: 9px; background: transparent; color: var(--ink);
+  text-align: left; cursor: pointer;
+}
+.export-menu button:hover, .export-menu button:focus-visible { background: var(--tint); }
+.export-menu button > span:first-child {
+  display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px;
+  border-radius: 8px; background: #ECFDF5; color: var(--green); font-size: 16px;
+}
+.export-menu button strong, .export-menu button small { display: block; }
+.export-menu button strong { font-size: 12px; }
+.export-menu button small { margin-top: 1px; color: var(--muted); font-size: 10px; }
+@media (max-width: 720px) {
+  .export-menu { right: 0; left: auto; min-width: 230px; }
+}
+.export-menu-wrap > summary { list-style: none; }
+.export-menu-wrap > summary::-webkit-details-marker { display: none; }
+.export-menu-wrap > summary::after { content: ""; }
+.audit-download-fallback {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px;
+  color: var(--green); font-size: 11px; font-weight: 700; text-decoration: underline;
+}
+.audit-download-fallback[hidden] { display: none; }
+
+/* Product cards restored to the operations dashboard */
+.dashboard-products-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px;
+}
+.dashboard-product-card {
+  min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--card); transition: transform .15s, box-shadow .15s;
+}
+.dashboard-product-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.dashboard-product-image {
+  aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden;
+  background: var(--tint); color: var(--muted); font-size: 28px;
+}
+.dashboard-product-image img { width: 100%; height: 100%; object-fit: cover; }
+.dashboard-product-info { display: flex; flex-direction: column; gap: 3px; padding: 9px 10px 11px; }
+.dashboard-product-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.dashboard-product-info span { color: var(--muted); font-size: 10px; }
+.dashboard-product-info b { color: var(--green); font: 700 13px var(--font-display); }
+.dashboard-products-empty { padding: 12px 0; }
+@media (max-width: 480px) {
+  .dashboard-products-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+}
+
+.product-angle-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; margin-top:8px; }
+.product-angle-slot { min-width:0; }
+.product-angle-preview { aspect-ratio:1; display:grid; place-items:center; overflow:hidden; border:1px solid var(--line); border-radius:9px; background:var(--tint); color:var(--muted); font-size:10px; text-align:center; }
+.product-angle-preview img { width:100%; height:100%; object-fit:cover; }
+.product-angle-slot .btn { width:100%; margin-top:5px; padding-left:4px; padding-right:4px; font-size:10px; }
+@media (max-width:480px) { .product-angle-grid { grid-template-columns:repeat(2, minmax(0,1fr)); } }

@@ -279,6 +279,7 @@ ACCOUNT_NAMES = {
     "1200": "Inventory Asset",
     "1300": "Logistics / Transport Expense",
     "4000": "Sales Revenue",
+    "4100": "Transport Fee Revenue",
     "5000": "Cost of Goods Sold",
     "5100": "Operating Expense",
     "5200": "Inventory Write-Off Loss",
@@ -411,11 +412,14 @@ def reverse_journal_entry(session, original, *, source, description, staff, occu
     return reversal
 
 
-def sale_journal_lines(total: int, cogs: int, tender_type: str):
+def sale_journal_lines(total: int, cogs: int, tender_type: str, transport_total: int = 0):
     payment_code, payment_name = payment_account(tender_type)
+    transport_total = max(0, int(transport_total or 0))
+    sales_revenue = max(0, int(total) - transport_total)
     lines = [
         {"account_code": payment_code, "account_name": payment_name, "debit": total},
-        {"account_code": "4000", "account_name": ACCOUNT_NAMES["4000"], "credit": total},
+        *([{"account_code": "4000", "account_name": ACCOUNT_NAMES["4000"], "credit": sales_revenue}] if sales_revenue else []),
+        *([{"account_code": "4100", "account_name": ACCOUNT_NAMES["4100"], "credit": transport_total}] if transport_total else []),
     ]
     if cogs:
         lines.extend([
@@ -1025,6 +1029,14 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             own_lock.expires_at = now + timedelta(minutes=5)
 
                 grand_total = subtotal + delivery_fee
+                # Internally classify the complete catalog transport cost as one
+                # transport-fee revenue line. Customers only see the checkout
+                # half as their delivery fee; the embedded half stays hidden in
+                # the product price but is included in this ledger total.
+                transport_total = sum(
+                    whole_money((products[pid].total_transport_cost or 0) * requested[pid])
+                    for pid in requested
+                )
                 tender = body.get("tender") or {}
                 cashier = body.get("cashier") or staff_info or {}
                 tender_type = tender.get("type", "cash" if channel == "pos" else "mobile_money")
@@ -1070,7 +1082,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     description=f"{channel.upper()} sale {order_id}",
                     occurred_at=now,
                     staff=cashier,
-                    lines=sale_journal_lines(grand_total, cogs, tender_type),
+                    lines=sale_journal_lines(grand_total, cogs, tender_type, transport_total),
                 )
                 session.flush()
 
@@ -1080,7 +1092,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     broadcast_event(
                         "NEW_ORDER",
                         f"🧾 POS Sale {order_id}",
-                        f"Charged — UGX {grand_total:,} ({order.tender_type or 'cash'})",
+                        f"POS sale recorded ({order.tender_type or 'cash'})",
                         {"order_id": order_id, "amount": grand_total,
                          "customer": order.customer_name, "channel": channel},
                     )
@@ -1088,7 +1100,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     broadcast_event(
                         "NEW_ORDER",
                         f"🛍️ New {channel.title()} Order #{order_number}",
-                        f"Order received — UGX {grand_total:,}",
+                        "New order received",
                         {"order_id": order_id, "amount": grand_total,
                          "customer": order.customer_name, "channel": channel},
                     )

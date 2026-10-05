@@ -87,6 +87,11 @@
       </div>
       <div class="kpis" id="kpiCards"></div>
 
+      <div class="card dashboard-products-card" style="margin-top:18px">
+        <div class="card-head"><div><h3>Product Cards</h3><p class="muted small">Latest available pieces on the rack</p></div><button class="btn ghost sm" data-goto="inventory">View inventory →</button></div>
+        <div class="dashboard-products-grid" id="dashboardProductCards"></div>
+      </div>
+
       <div class="dash-grid-top">
         <div class="card">
           <div class="card-head">
@@ -211,6 +216,8 @@
           <div class="field"><label>Color / wash</label><input class="sel-full" id="inColor" placeholder="e.g. Indigo, Olive, Terracotta" /></div>
         </div>
         <div class="fgrid">
+          <div class="field"><label>Quantity / units received<span class="fhint">Number of identical units being added</span></label>
+            <input id="inQty" class="sel-full" type="number" min="0" step="1" value="1" placeholder="1" /></div>
           <div class="field"><label>Stock status</label>
             <select id="inStatus" class="sel-full"><option value="1">Available</option><option value="0">Sold</option></select></div>
           <div class="field full"><label>Channel visibility</label>
@@ -272,8 +279,18 @@
           <p class="muted">Review completed sales, print receipts, and export posted records for documentation.</p>
         </div>
         <div class="row audit-actions">
-          <button class="btn ghost" id="btnExportAudit">Export CSV</button>
-          <button class="btn primary" id="btnPrintAudit">Print summary</button>
+          <details class="export-menu-wrap" id="auditExportDetails">
+            <summary class="btn ghost" id="btnExportAudit">Export CSV <span aria-hidden="true">⌄</span></summary>
+            <div class="export-menu" id="auditExportMenu">
+              <button type="button" data-export-audit="sales"><span>▣</span><span><strong>Sales records</strong><small>Posted transactions</small></span></button>
+              <button type="button" data-export-audit="stock"><span>▤</span><span><strong>Stock inventory</strong><small>Catalog and quantities</small></span></button>
+              <button type="button" data-export-audit="ledger"><span>▥</span><span><strong>Financial ledger</strong><small>Payment and value summary</small></span></button>
+              <button type="button" data-export-audit="staff"><span>♙</span><span><strong>Staff directory</strong><small>Cashier and role records</small></span></button>
+              <button type="button" data-export-audit="demo"><span>✦</span><span><strong>Demo examples</strong><small>Safe sample rows — delete anytime</small></span></button>
+            </div>
+          </details>
+          <button class="btn primary" id="btnPrintAudit" type="button">Print summary</button>
+          <a class="audit-download-fallback" id="auditDownloadFallback" hidden download>Download file</a>
         </div>
       </div>
       <input class="search-wide" id="auditSearch" type="search" placeholder="Search receipt, customer, cashier or payment method" />

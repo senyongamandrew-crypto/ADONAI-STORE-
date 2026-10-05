@@ -329,6 +329,16 @@
       kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", Icons.svg("package", "ico-18")) +
       kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", Icons.svg("boxes", "ico-18"));
 
+    const dashboardProducts = $("#dashboardProductCards");
+    if (dashboardProducts) {
+      const available = DB.listProducts().filter(p => Number(p.in_stock_count) > 0).slice(0, 8);
+      dashboardProducts.innerHTML = available.length ? available.map(p => `
+        <article class="dashboard-product-card">
+          <div class="dashboard-product-image">${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.remove()" />` : Icons.svg("tag", "ico-20")}</div>
+          <div class="dashboard-product-info"><strong>${esc(p.name)}</strong><span>${esc(p.sku || "No SKU")} · ${Number(p.in_stock_count)} in stock</span><b>${ugx(p.selling_price || p.base_price || 0)}</b></div>
+        </article>`).join("") : `<p class="muted small dashboard-products-empty">No available product cards yet. Add stock from Catalog Intake.</p>`;
+    }
+
     /* ---- hourly + weekly chart ---- */
     const cv = $("#hourlyChart");
     const dpr = window.devicePixelRatio || 1;
@@ -669,6 +679,44 @@
     if (b2) b2.addEventListener("click", doPrint);
   }
 
+  function orderCustomerPhone(value) {
+    const raw = String(value || "").replace(/\D/g, "");
+    if (!raw) return "";
+    if (raw.startsWith("0")) return "256" + raw.slice(1);
+    if (raw.startsWith("256")) return raw;
+    return raw;
+  }
+
+  function sendOrderConfirmation(s) {
+    const phone = orderCustomerPhone(s.customer_phone);
+    if (!phone) return toast("This order has no customer phone number", false);
+    const settings = DB.getSettings();
+    const storeName = settings.store_name || "Adonai Thrift Store";
+    const location = s.customer_location || s.delivery_area || "the agreed delivery address";
+    const itemLines = (s.items || []).map(it => `• ${it.qty || 1} × ${it.name} — ${ugx(it.line_total || 0)}`).join("\n");
+    const payment = s.tender && s.tender.paid ? `${DB.TENDER_LABEL(s.tender)} — PAID` : "Payment pending / to be confirmed";
+    const message = `Hello ${s.customer_name || "there"},
+
+This is ${storeName}. We have received and reviewed your order ${s.order_number || s.id}.
+
+Order details:
+${itemLines || "• Your selected item(s)"}
+
+Total: ${ugx(s.total || 0)}
+Payment: ${payment}
+Delivery: ${location}${s.delivery_notes ? `\nDelivery notes: ${s.delivery_notes}` : ""}
+
+We will keep you updated on dispatch and delivery. Please reply here if any detail needs to be corrected. Thank you for shopping with ${storeName}.`;
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      const link = document.createElement("a");
+      link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      link.click();
+    }
+    toast("WhatsApp confirmation prepared — tap Send to deliver it");
+  }
+
   function orderDetailModal(id) {
     const s = DB.getSale(id);
     if (!s) return toast("Order not found", false);
@@ -769,6 +817,7 @@
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Completed">✓ Complete Order</button>
         ` : ""}
 
+        <button class="btn primary btn-full" id="btnSendOrderConfirmation">${Icons.svg("message-circle", "ico-14")} Send WhatsApp Confirmation</button>
         <button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel Order &amp; Release Item to Rack</button>
         <button class="btn light btn-full" id="btnPrintReceiptModal">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
@@ -821,6 +870,9 @@
         }
       });
     }
+
+    const btnConfirm = $("#btnSendOrderConfirmation");
+    if (btnConfirm) btnConfirm.addEventListener("click", () => sendOrderConfirmation(s));
 
     const btnPr = $("#btnPrintReceiptModal");
     if (btnPr) {
@@ -901,7 +953,9 @@
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
-    const modalImageState = { image_url: p ? (p.image_url || "") : "" };
+    const modalImages = p && Array.isArray(p.images) ? p.images.slice(0, 4) : [];
+    if (!modalImages.length && p && p.image_url) modalImages.push(p.image_url);
+    while (modalImages.length < 4) modalImages.push("");
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>${p ? "Edit item" : "New item"}</h3>
@@ -920,19 +974,45 @@
       </div>
       <div class="fgrid">
         <div class="field"><label>Cost (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
-        <div class="field"><label>Selling (UGX)</label><input id="mpSell" type="number" class="sel-full" value="${p ? p.selling_price : ""}" /></div>
+        <div class="field"><label>Base price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
+      </div>
+      <div class="fgrid">
+        <div class="field"><label>Total transport (UGX)<span class="fhint">50% embedded in price · 50% at checkout</span></label><input id="mpTransport" type="number" min="0" class="sel-full" value="${p ? (p.total_transport_cost || 0) : 0}" /></div>
+        <div class="field"><label>Final selling price (UGX)</label><input id="mpSell" type="number" class="sel-full" value="${p ? p.selling_price : ""}" readonly /></div>
       </div>
       <div class="fgrid">
         <div class="field"><label>Compare-at (UGX)</label><input id="mpCompare" type="number" class="sel-full" value="${p ? p.compare_price : ""}" /></div>
-        <div class="field"><label>Stock</label><input id="mpStock" type="number" class="sel-full" value="${p ? p.in_stock_count : 1}" /></div>
+        <div class="field"><label>Stock</label><input id="mpStock" type="number" min="0" class="sel-full" value="${p ? p.in_stock_count : 1}" /></div>
       </div>
-      ${Intake.imageFieldHTML(modalImageState.image_url)}
+      <div class="field product-angle-editor"><label>Product photos — 4 required views<span class="fhint">Front, back, fabric / texture, brand &amp; size tag</span></label><div class="product-angle-grid">${modalImages.map((img, i) => `<div class="product-angle-slot"><div class="product-angle-preview" data-mp-preview="${i}">${img ? `<img src="${esc(img)}" alt="View ${i + 1}" />` : `<span>View ${i + 1}</span>`}</div><button type="button" class="btn sm" data-mp-image="${i}">Upload ${["front", "back", "fabric", "tag"][i]}</button></div>`).join("")}</div></div>
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
-    Intake.bindImageEditor(modalBox, modalImageState);
-    modalBox._imageState = modalImageState;
+    modalBox._images = modalImages;
+    const recalculateModalPrice = () => {
+      const base = Math.max(0, Number($("#mpBase").value) || 0);
+      const transport = Math.max(0, Number($("#mpTransport").value) || 0);
+      $("#mpSell").value = Math.round(base + (transport / 2));
+    };
+    $("#mpBase").addEventListener("input", recalculateModalPrice);
+    $("#mpTransport").addEventListener("input", recalculateModalPrice);
+    $$("[data-mp-image]").forEach(button => button.addEventListener("click", () => {
+      const slot = Number(button.dataset.mpImage);
+      const input = document.createElement("input");
+      input.type = "file"; input.accept = "image/png, image/jpeg, image/jpg, image/webp, image/*";
+      input.onchange = async () => {
+        const file = input.files && input.files[0]; if (!file) return;
+        try {
+          button.disabled = true; button.textContent = "Uploading…";
+          modalImages[slot] = await Intake.compressImage(file);
+          const preview = $("[data-mp-preview='" + slot + "']");
+          if (preview) preview.innerHTML = `<img src="${esc(modalImages[slot])}" alt="View ${slot + 1}" />`;
+        } catch (err) { toast(err.message || "Could not load photo", false); }
+        finally { button.disabled = false; button.textContent = `Upload ${["front", "back", "fabric", "tag"][slot]}`; }
+      };
+      input.click();
+    }));
   }
 
   /* ============================================================
@@ -1068,7 +1148,7 @@
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
       visibility: $("#inVis").value,
-      in_stock_count: Number($("#inStatus").value) ? 1 : 0,
+      in_stock_count: Number($("#inStatus").value) ? Math.max(0, Math.floor(Number($("#inQty").value) || 0)) : 0,
       sku: $("#inSku").value.trim(),
       images: intakePhotos.filter(Boolean),
       image_url: intakePhotos[0] || intakePhotos.find(Boolean) || ""
@@ -1080,6 +1160,7 @@
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes"].forEach(id => $("#" + id).value = "");
+        $("#inQty").value = "1";
         intakePhotos.fill(""); paintAngles();
         $("#inStockLot").value = "";
         $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();
@@ -1130,13 +1211,92 @@
       </div><div class="guest-tags"><span class="itag">${esc(s.payment_method || s.tender_type || "Payment recorded")}</span><span class="itag">${esc(s.channel || "POS")}</span><button class="lnk" data-print-sale="${esc(s.id)}">Print receipt</button></div>
     </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No posted sales match this search.</p></div>`;
   }
-  function exportAuditCSV() {
-    const rows = [["Receipt","Date","Customer","Payment","Channel","Total"]].concat(auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0]));
+  function exportAuditCSV(kind = "sales") {
+    const date = new Date().toISOString().slice(0, 10);
+    let rows;
+    let filename;
+    if (kind === "demo") {
+      rows = [
+        ["Demo type", "Reference", "Description", "Amount / quantity", "Note"],
+        ["Sales", "DEMO-SALE-001", "Sample posted sale", "UGX 85,000", "DEMO — safe to delete"],
+        ["Stock", "DEMO-STK-001", "Sample checked shirt", "4", "DEMO — safe to delete"],
+        ["Ledger", "DEMO-LED-001", "Sample cash receipt", "UGX 85,000", "DEMO — safe to delete"],
+        ["Staff", "DEMO-STF-001", "Sample cashier account", "Active", "DEMO — safe to delete"]
+      ];
+      filename = `adonai-demo-examples-${date}.csv`;
+    } else if (kind === "stock") {
+      rows = [["SKU", "Product", "Category", "Size", "Condition", "In stock", "Selling price"]].concat(
+        DB.listProducts().map(p => [p.sku || "", p.name || "", p.category || "", p.size || "", p.condition || "", p.in_stock_count || 0, p.selling_price || 0])
+      );
+      filename = `adonai-stock-inventory-${date}.csv`;
+    } else if (kind === "staff") {
+      rows = [["Staff ID", "Name", "Role", "Phone", "Active"]].concat(
+        DB.listStaff().map(s => [s.id || "", s.name || "", s.role || "", s.phone || "", s.active === false ? "No" : "Yes"])
+      );
+      filename = `adonai-staff-directory-${date}.csv`;
+    } else if (kind === "ledger") {
+      rows = [["Reference", "Date", "Customer", "Payment method", "Channel", "Debit / value"]].concat(
+        auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0])
+      );
+      filename = `adonai-financial-ledger-${date}.csv`;
+    } else {
+      rows = [["Receipt", "Date", "Customer", "Payment", "Channel", "Total"]].concat(
+        auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0])
+      );
+      filename = `adonai-posted-sales-${date}.csv`;
+    }
     const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = `adonai-posted-sales-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(a.href);
+    const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    // Keep a visible fallback link for Android WebView builds where an
+    // automatic anchor download may be blocked by the host container.
+    const fallback = $("#auditDownloadFallback");
+    if (fallback) {
+      fallback.href = url;
+      fallback.download = filename;
+      fallback.textContent = `Download ${filename}`;
+      fallback.hidden = false;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
+    closeAuditExportMenu();
+    toast(`${filename} ready — download started`);
   }
-  $("#btnExportAudit")?.addEventListener("click", exportAuditCSV);
-  $("#btnPrintAudit")?.addEventListener("click", () => window.print());
+  function closeAuditExportMenu() {
+    const details = $("#auditExportDetails");
+    if (details) details.open = false;
+  }
+  function printAuditSummary() {
+    const sales = auditSales();
+    const total = sales.reduce((n, s) => n + Number(s.total || 0), 0);
+    const sheet = $("#receiptSheet");
+    if (sheet) {
+      sheet.innerHTML = `<div style="font-family:Arial,sans-serif;color:#111;padding:8px">
+        <h2 style="margin:0 0 6px">Adonai Store — Posted Sales</h2>
+        <p style="margin:0 0 12px">${sales.length} posted sale${sales.length === 1 ? "" : "s"} · ${ugx(total)} total value</p>
+        <table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>
+          <th style="text-align:left;border-bottom:1px solid #999;padding:4px 0">Receipt</th>
+          <th style="text-align:left;border-bottom:1px solid #999;padding:4px 0">Date</th>
+          <th style="text-align:right;border-bottom:1px solid #999;padding:4px 0">Total</th>
+        </tr></thead><tbody>${sales.map(s => `<tr>
+          <td style="padding:5px 0;border-bottom:1px solid #ddd">${esc(s.order_number || s.id || "Posted sale")}</td>
+          <td style="padding:5px 0;border-bottom:1px solid #ddd">${esc(new Date(s.created_at || s.createdAt || Date.now()).toLocaleString())}</td>
+          <td style="padding:5px 0;border-bottom:1px solid #ddd;text-align:right">${ugx(s.total || 0)}</td>
+        </tr>`).join("")}</tbody></table>
+      </div>`;
+    }
+    window.print();
+  }
+  $$("[data-export-audit]").forEach(button => button.addEventListener("click", () => exportAuditCSV(button.dataset.exportAudit)));
+  $("#btnPrintAudit")?.addEventListener("click", printAuditSummary);
   function renderGuests() {
     let list = DB.listGuests();
     if (guestTerm) list = list.filter(g => [g.name, g.phone, g.neighborhood].some(x => String(x || "").toLowerCase().includes(guestTerm)));
@@ -1991,13 +2151,19 @@
     }
     const btnSaveProd = t.closest("[data-save-prod]");
     if (btnSaveProd) {
+      const savedImages = (modalBox._images || []).filter(Boolean);
+      if (savedImages.length < 4) return toast("Upload all 4 product views before saving", false);
       const vals = {
         name: $("#mpName").value.trim(), brand: $("#mpBrand").value.trim() || "Unbranded",
         color: $("#mpColor").value.trim(), demographic: $("#mpDemo").value, category: $("#mpCat").value,
         size: $("#mpSize").value.trim() || "-", condition: $("#mpCond").value,
-        cost_price: Number($("#mpCost").value) || 0, selling_price: Number($("#mpSell").value) || 0,
+        cost_price: Number($("#mpCost").value) || 0,
+        base_price: Number($("#mpBase").value) || 0,
+        total_transport_cost: Number($("#mpTransport").value) || 0,
+        selling_price: Number($("#mpSell").value) || 0,
         compare_price: Number($("#mpCompare").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
-        image_url: modalBox._imageState ? modalBox._imageState.image_url : ""
+        image_url: (modalBox._images || []).filter(Boolean)[0] || "",
+        images: (modalBox._images || []).filter(Boolean)
       };
       if (!vals.name) return toast("Name required", false);
       try {
@@ -2016,7 +2182,8 @@
     const printSale = t.closest("[data-print-sale]");
     if (printSale) {
       const sale = DB.listSales().find(s => String(s.id) === String(printSale.dataset.printSale));
-      if (sale) { window.print(); }
+      if (sale) printReceiptModal(sale.id);
+      else toast("Sale record not found", false);
       return;
     }
     /* guests (legacy handlers retained for existing records) */
