@@ -329,6 +329,16 @@
       kpiCard("ONLINE PENDING", webPend.length, "Awaiting packaging / rider", "amber", Icons.svg("package", "ico-18")) +
       kpiCard("ON THE RACK (PIECES)", onRack, `${reserved} reserved in orders`, "blue", Icons.svg("boxes", "ico-18"));
 
+    const dashboardProducts = $("#dashboardProductCards");
+    if (dashboardProducts) {
+      const available = DB.listProducts().filter(p => Number(p.in_stock_count) > 0).slice(0, 8);
+      dashboardProducts.innerHTML = available.length ? available.map(p => `
+        <article class="dashboard-product-card">
+          <div class="dashboard-product-image">${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.remove()" />` : Icons.svg("tag", "ico-20")}</div>
+          <div class="dashboard-product-info"><strong>${esc(p.name)}</strong><span>${esc(p.sku || "No SKU")} · ${Number(p.in_stock_count)} in stock</span><b>${ugx(p.selling_price || p.base_price || 0)}</b></div>
+        </article>`).join("") : `<p class="muted small dashboard-products-empty">No available product cards yet. Add stock from Catalog Intake.</p>`;
+    }
+
     /* ---- hourly + weekly chart ---- */
     const cv = $("#hourlyChart");
     const dpr = window.devicePixelRatio || 1;
@@ -1110,7 +1120,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
       visibility: $("#inVis").value,
-      in_stock_count: Number($("#inStatus").value) ? 1 : 0,
+      in_stock_count: Number($("#inStatus").value) ? Math.max(0, Math.floor(Number($("#inQty").value) || 0)) : 0,
       sku: $("#inSku").value.trim(),
       images: intakePhotos.filter(Boolean),
       image_url: intakePhotos[0] || intakePhotos.find(Boolean) || ""
@@ -1122,6 +1132,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes"].forEach(id => $("#" + id).value = "");
+        $("#inQty").value = "1";
         intakePhotos.fill(""); paintAngles();
         $("#inStockLot").value = "";
         $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();

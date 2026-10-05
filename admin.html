@@ -87,6 +87,11 @@
       </div>
       <div class="kpis" id="kpiCards"></div>
 
+      <div class="card dashboard-products-card" style="margin-top:18px">
+        <div class="card-head"><div><h3>Product Cards</h3><p class="muted small">Latest available pieces on the rack</p></div><button class="btn ghost sm" data-goto="inventory">View inventory →</button></div>
+        <div class="dashboard-products-grid" id="dashboardProductCards"></div>
+      </div>
+
       <div class="dash-grid-top">
         <div class="card">
           <div class="card-head">
@@ -211,6 +216,8 @@
           <div class="field"><label>Color / wash</label><input class="sel-full" id="inColor" placeholder="e.g. Indigo, Olive, Terracotta" /></div>
         </div>
         <div class="fgrid">
+          <div class="field"><label>Quantity / units received<span class="fhint">Number of identical units being added</span></label>
+            <input id="inQty" class="sel-full" type="number" min="0" step="1" value="1" placeholder="1" /></div>
           <div class="field"><label>Stock status</label>
             <select id="inStatus" class="sel-full"><option value="1">Available</option><option value="0">Sold</option></select></div>
           <div class="field full"><label>Channel visibility</label>
