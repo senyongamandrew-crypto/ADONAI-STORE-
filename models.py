@@ -1,8 +1,9 @@
 """
-Adonai Thrift Store — SQLAlchemy ORM Data Models
+Adonai Store — Unified Retail SQLAlchemy ORM Data Models
 Optimized for high-concurrency e-commerce queries, indexed searches, and PostgreSQL.
 """
 from datetime import datetime
+from enum import Enum as PyEnum
 import json
 from sqlalchemy import (
     Boolean,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Numeric,
     Computed,
+    Enum as SAEnum,
     ForeignKey,
     Index,
     Integer,
@@ -21,6 +23,18 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+
+
+class ItemCondition(str, PyEnum):
+    """The two supported inventory streams in the unified catalog."""
+    BRAND_NEW = "BRAND_NEW"
+    PRE_LOVED = "PRE_LOVED"
+
+
+class QuantityType(str, PyEnum):
+    """Stock semantics used by both the web checkout and POS register."""
+    BRAND_NEW = "BRAND_NEW"
+    PRE_LOVED = "PRE_LOVED"
 
 
 class User(Base):
@@ -76,7 +90,30 @@ class Product(Base):
     demographic = Column(String(50), nullable=False, index=True)  # Men, Women, Children
     category = Column(String(100), nullable=False, index=True)
     size = Column(String(20), nullable=True)
-    condition = Column(String(100), nullable=True)  # Grade A, Grade B, Vintage
+    # `condition` remains the human-readable grade (for example Grade A).
+    # `item_condition` is the inventory policy discriminator and is shared by
+    # the storefront, POS, API, and PostgreSQL constraints.
+    item_condition = Column(
+        SAEnum(ItemCondition, name="item_condition_enum", native_enum=True,
+               create_constraint=True, validate_strings=True),
+        nullable=False,
+        default=ItemCondition.BRAND_NEW,
+        index=True,
+    )
+    quantity_type = Column(
+        SAEnum(QuantityType, name="quantity_type_enum", native_enum=True,
+               create_constraint=True, validate_strings=True),
+        nullable=False,
+        default=QuantityType.BRAND_NEW,
+        index=True,
+    )
+    condition = Column(String(100), nullable=True)  # Grade A, Grade B, Collector
+    size_variants_json = Column(Text, default="[]")
+    color_variants_json = Column(Text, default="[]")
+    factory_tag_notes = Column(Text, nullable=True)
+    inner_packaging = Column(String(30), nullable=True)
+    measurements_json = Column(Text, default="{}")
+    fabric_grading_notes = Column(Text, nullable=True)
     cost_price = Column(Integer, default=0)
     # Canonical pricing inputs. The generated columns are also enforced in PostgreSQL;
     # selling_price remains the whole-UGX compatibility field used by the POS.
@@ -118,6 +155,38 @@ class Product(Base):
     def images(self, value):
         self.images_json = json.dumps(value if isinstance(value, list) else [])
 
+    @staticmethod
+    def _json_value(raw, fallback):
+        try:
+            value = json.loads(raw) if raw else fallback
+            return value if isinstance(value, type(fallback)) else fallback
+        except Exception:
+            return fallback
+
+    @property
+    def size_variants(self):
+        return self._json_value(self.size_variants_json, [])
+
+    @size_variants.setter
+    def size_variants(self, value):
+        self.size_variants_json = json.dumps(value if isinstance(value, list) else [])
+
+    @property
+    def color_variants(self):
+        return self._json_value(self.color_variants_json, [])
+
+    @color_variants.setter
+    def color_variants(self, value):
+        self.color_variants_json = json.dumps(value if isinstance(value, list) else [])
+
+    @property
+    def measurements(self):
+        return self._json_value(self.measurements_json, {})
+
+    @measurements.setter
+    def measurements(self, value):
+        self.measurements_json = json.dumps(value if isinstance(value, dict) else {})
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -130,6 +199,15 @@ class Product(Base):
             "category": self.category,
             "size": self.size or "-",
             "condition": self.condition or "",
+            "item_condition": self.item_condition.value if isinstance(self.item_condition, ItemCondition) else (self.item_condition or ItemCondition.PRE_LOVED.value),
+            "quantity_type": self.quantity_type.value if isinstance(self.quantity_type, QuantityType) else (self.quantity_type or QuantityType.PRE_LOVED.value),
+            "size_variants": self.size_variants,
+            "color_variants": self.color_variants,
+            "factory_tag_notes": self.factory_tag_notes or "",
+            "inner_packaging": self.inner_packaging or "",
+            "measurements": self.measurements,
+            "fabric_grading_notes": self.fabric_grading_notes or "",
+            "is_one_of_one": (self.item_condition.value if isinstance(self.item_condition, ItemCondition) else self.item_condition) == ItemCondition.PRE_LOVED.value,
             "cost_price": self.cost_price,
             "base_price": float(self.base_price or 0),
             "total_transport_cost": float(self.total_transport_cost or 0),
@@ -255,8 +333,10 @@ class OrderItem(Base):
     product_id = Column(String(50), nullable=True, index=True)
     barcode_id = Column(String(50), nullable=True)
     name = Column(String(255), nullable=False)
+    item_condition = Column(String(20), nullable=False, default=ItemCondition.BRAND_NEW.value)
+    quantity_type = Column(String(20), nullable=False, default=QuantityType.BRAND_NEW.value)
     unit_price = Column(Integer, nullable=False)
-    # Snapshots preserve historical COGS/category even when the product changes.
+    # Snapshots preserve historical COGS/category/policy even when the product changes.
     unit_cost = Column(Integer, default=0, nullable=False)
     category = Column(String(100), nullable=True, index=True)
     qty = Column(Integer, default=1)
@@ -270,6 +350,8 @@ class OrderItem(Base):
             "product_id": self.product_id,
             "barcode_id": self.barcode_id or "",
             "name": self.name,
+            "item_condition": self.item_condition or ItemCondition.PRE_LOVED.value,
+            "quantity_type": self.quantity_type or QuantityType.PRE_LOVED.value,
             "unit_price": self.unit_price,
             "unit_cost": self.unit_cost or 0,
             "category": self.category or "Uncategorised",

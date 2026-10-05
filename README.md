@@ -1,6 +1,6 @@
-# ADONAI THRIFT STORE — Dual-Target Architecture (Web Storefront + Android Native POS)
+# ADONAI STORE — Dual-Target Architecture (Web Storefront + Android Native POS)
 
-A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plot 45 Salama Road / Kibuli, Kampala, Uganda) built on a **Dual-Target Architecture**:
+A production-grade unified retail and e-commerce system for **Adonai Store** (Plot 45 Salama Road / Kibuli, Kampala, Uganda) built on a **Dual-Target Architecture**. The catalog supports **Brand-New Apparel** (factory-fresh, tagged, multi-quantity) and **Curated Pre-Loved / Vintage Garments** (hand-inspected, unique 1-of-1 pieces):
 
 1. 🛍️ **Public Web Storefront (Render Deployment)**: Lightweight, mobile-responsive, customer-facing e-commerce application served at `/` on Render. Public storefront contains **zero POS/admin links or authentication triggers**.
 2. 📱 **Android POS App (Native APK shell)**: Standalone cashier register and catalog intake terminal packaged into a real, signed Android APK (`com.adonaithrift.pos`).
@@ -44,7 +44,7 @@ A production-grade retail and e-commerce system for **Adonai Thrift Store** (Plo
 ## 1. Public Web Storefront (Render Deployment)
 
 - **Entry Route**: `/`
-- **Features**: Live rail inventory, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, website 1-of-1 order reservation, and direct POS fulfillment sync.
+- **Features**: Live dual-inventory catalog, Brand-New / Vintage filter chips, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, web cart reservations, and direct POS fulfillment sync.
 - **Privacy & Security**: All POS links, admin navigation, and staff login prompts have been completely stripped from the storefront.
 
 ---
@@ -118,11 +118,12 @@ checkout can sync with the live backend.
 ### Live System Parameters
 
 Saving **Store Settings → System Parameters** publishes the store name, contact
-channels, social handles, address, opening hours, delivery scope, and base boda
-fee to the shared backend. The live storefront checks for updated settings every
-5 seconds and refreshes its footer, WhatsApp links, pickup details, delivery
-fees, checkout messages, and browser title without requiring a redeploy. Admin
-and Master Key values remain excluded from every public settings response.
+channels, social handles, address, opening hours, delivery scope, and base delivery
+fee to the shared backend. Adonai owns the delivery workflow while authorized boda
+riders and regional couriers support the last-mile route. The live storefront checks
+for updated settings every 5 seconds and refreshes its footer, WhatsApp links, pickup
+details, delivery fees, checkout messages, and browser title without requiring a
+redeploy. Admin and Master Key values remain excluded from every public settings response.
 
 ### Render Environment Variables
 Configure in your Render Dashboard (**Environment** tab):

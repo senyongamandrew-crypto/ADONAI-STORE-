@@ -1,4 +1,4 @@
-/* ============ Adonai Thrift Store — public storefront logic ============ */
+  /* ============ Adonai Store — unified storefront logic ============ */
 (function () {
   "use strict";
   const $ = (s, r) => (r || document).querySelector(s);
@@ -35,7 +35,7 @@
 
   function renderStoreProfile() {
     S = DB.getSettings();
-    const storeName = S.store_name || "Adonai Thrift Store";
+    const storeName = S.store_name || "Adonai Store";
     const address = S.address || "Kampala, Uganda";
     const whatsapp = String(S.whatsapp || "256758873398").replace(/\D/g, "");
     const whatsappDisplay = S.whatsapp_display || (whatsapp ? "+" + whatsapp : "");
@@ -44,7 +44,7 @@
     const tiktok = S.tiktok || "";
     const instagram = S.instagram || "";
 
-    $("#footTagline").textContent = S.tagline || "Curated pre-loved vintage";
+    $("#footTagline").textContent = S.tagline || "Brand-new apparel + curated vintage pieces";
     $("#footLoc").textContent = address.split(",")[0];
     $("#footContactList").innerHTML = `
       <li><span class="k">WhatsApp:</span> <a class="rust" href="https://wa.me/${esc(whatsapp)}" target="_blank" rel="noopener">${esc(whatsappDisplay)}</a></li>
@@ -59,12 +59,12 @@
     const trackLink = $("#trackOrderLink");
     if (trackLink) trackLink.href = `https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hello ${storeName}, I would like to track my order`)}`;
     const scope = $("#deliveryScopeText");
-    if (scope) scope.textContent = S.delivery_scope || "Delivery available across Uganda";
+    if (scope) scope.textContent = S.delivery_scope || "Adonai-managed delivery available across Uganda — from order confirmation to customer handoff.";
     const pickupAddress = $("#storePickupAddress");
     if (pickupAddress) pickupAddress.textContent = address;
     const copyright = $("#footCopyright");
     if (copyright) copyright.textContent = `© 2026 ${storeName} · All prices in Ugandan Shillings (UGX)`;
-    document.title = `${storeName} | Quality Apparel & Thrift Fashion in Kampala`;
+    document.title = `${storeName} — Brand-New & Curated Vintage Fashion`;
   }
 
   renderStoreProfile();
@@ -104,12 +104,24 @@
   /* ---------- cart ---------- */
   let cart = [];
   try { cart = JSON.parse(localStorage.getItem(CART_KEY)) || []; } catch (e) { cart = []; }
+  const WEB_LOCK_KEY = "adonai-web-reservation-owner-v1";
+  let webLockOwner = "";
+  try {
+    webLockOwner = localStorage.getItem(WEB_LOCK_KEY) || "";
+    if (!/^WEB-[A-Z0-9-]{8,}$/i.test(webLockOwner)) {
+      webLockOwner = `WEB-${Date.now()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+      localStorage.setItem(WEB_LOCK_KEY, webLockOwner);
+    }
+  } catch (e) {
+    webLockOwner = `WEB-${Date.now()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  }
+  window.__ADONAI_WEB_LOCK_OWNER__ = webLockOwner;
   const saveCart = () => localStorage.setItem(CART_KEY, JSON.stringify(cart));
   let orderResult = null;
 
   /* ---------- filter state ---------- */
   let products = [];
-  let fDemo = "All", fCat = "All", fSize = "All", fCond = "All", fMax = 200000, term = "";
+  let fDemo = "All", fCat = "All", fSize = "All", fCond = "All", fInventory = "All", fMax = 200000, term = "";
 
   function getProductImages(p) {
     if (!p) return [];
@@ -130,7 +142,12 @@
     let changed = false;
     cart = cart.reduce((acc, l) => {
       const p = products.find(x => x.id === l.product_id);
-      if (!p || p.in_stock_count <= 0) { changed = true; if (p) toast(`"${p.name}" was just claimed in the shop`); return acc; }
+      if (!p || p.in_stock_count <= 0) {
+        changed = true;
+        DB.releaseInventoryLock(l.product_id, webLockOwner, l.qty).catch(() => {});
+        if (p) toast(`"${p.name}" was just claimed in the shop`);
+        return acc;
+      }
       if (l.qty > p.in_stock_count) { l.qty = p.in_stock_count; changed = true; }
       acc.push(l); return acc;
     }, []);
@@ -168,17 +185,23 @@
       const v = c === "All Types" ? "All" : c;
       return `<button class="fchip rust-target ${fCat === v ? "active rust" : ""}" data-catv="${esc(v)}">${esc(c)}</button>`;
     }).join("");
+    const inventoryOpts = [["All", "All Items"], ["BRAND_NEW", "Brand New"], ["PRE_LOVED", "Vintage / Pre-Loved"]];
+    $("#conditionChips").innerHTML = inventoryOpts.map(([value, label]) =>
+      `<button class="fchip ${fInventory === value ? "active rust" : ""}" data-inventory="${value}">${label}</button>`
+    ).join("");
   }
 
   function updateDynamicSEO() {
-    const storeName = S.store_name || "Adonai Thrift Store";
-    let title = `${storeName} | Quality Apparel & Thrift Fashion in Kampala`;
+    const storeName = S.store_name || "Adonai Store";
+    let title = `${storeName} — Brand-New & Curated Vintage Fashion`;
+    if (fInventory === "BRAND_NEW") title = `Brand-New Apparel | ${storeName} Kampala`;
+    if (fInventory === "PRE_LOVED") title = `Curated Vintage / Pre-Loved | ${storeName} Kampala`;
     if (fCat !== "All" && fDemo !== "All") {
-      title = `${fDemo}'s ${fCat} | Curated Vintage | ${storeName} Kampala`;
+      title = `${fDemo}'s ${fCat} | ${storeName} Kampala`;
     } else if (fCat !== "All") {
-      title = `Curated Vintage ${fCat} | ${storeName} Kampala`;
+      title = `${fCat} | ${storeName} Kampala`;
     } else if (fDemo !== "All") {
-      title = `${fDemo}'s Vintage Fashion | ${storeName} Kampala`;
+      title = `${fDemo}'s Fashion | ${storeName} Kampala`;
     }
     document.title = title;
   }
@@ -229,6 +252,15 @@
     const b = e.target.closest("[data-catv]");
     if (!b) return;
     fCat = b.dataset.catv;
+    renderChips();
+    renderGrid();
+    updateDynamicSEO();
+  });
+
+  $("#conditionChips").addEventListener("click", e => {
+    const b = e.target.closest("[data-inventory]");
+    if (!b) return;
+    fInventory = b.dataset.inventory;
     renderChips();
     renderGrid();
     updateDynamicSEO();
@@ -293,6 +325,7 @@
     return `
       <div class="pmedia">
         ${disc > 0 ? `<span class="discount-badge">${disc}% OFF</span>` : ""}
+        <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE"}</span>
         ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
         ${dots}
       </div>`;
@@ -311,7 +344,7 @@
           <span class="psku">${esc(p.sku || p.id)}</span>
         </div>
         <h3 class="pname">${esc(p.name)}</h3>
-        <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : "", p.condition].filter(Boolean).join(" · "))}</p>
+        <p class="pmeta">${esc([p.brand, p.size !== "-" ? "Size: " + p.size : "", p.color ? "Color: " + p.color : "", p.item_condition === "BRAND_NEW" ? "Factory tagged" : "1-of-1 piece"].filter(Boolean).join(" · "))}</p>
         ${ratingHTML(p)}
         <div class="price-row">
           <span class="pprice">${DB.ugx(displayPrice(p))}</span>
@@ -336,6 +369,7 @@
     const list = products
       .filter(p => fDemo === "All" || p.demographic === fDemo)
       .filter(p => fCat === "All" || p.category === fCat)
+      .filter(p => fInventory === "All" || (p.item_condition || "PRE_LOVED") === fInventory)
       .filter(p => fSize === "All" || p.size === fSize)
       .filter(p => fCond === "All" || p.condition === fCond)
       .filter(p => displayPrice(p) <= fMax)
@@ -396,7 +430,7 @@
     if (window.AdonaiAnalytics) {
       window.AdonaiAnalytics.trackViewItem(p);
     }
-    document.title = `${p.name} — ${DB.ugx(displayPrice(p))} | Adonai Thrift Store Kampala`;
+    document.title = `${p.name} — ${DB.ugx(displayPrice(p))} | Adonai Store Kampala`;
   }
 
   function closeProductModal() {
@@ -421,7 +455,12 @@
     const ANGLE_NAMES = ["1. Front View", "2. Back View", "3. Fabric / Texture", "4. Tag & Authenticity"];
     const angleLabel = totalPhotos > 0
       ? (ANGLE_NAMES[activeModalPhotoIdx] || `Angle ${activeModalPhotoIdx + 1}`)
-      : "Curated piece";
+      : "Product view";
+    const isBrandNew = p.item_condition === "BRAND_NEW";
+    const availableSizes = (Array.isArray(p.size_variants) && p.size_variants.length ? p.size_variants : [p.size || "Standard"]);
+    const availableColors = (Array.isArray(p.color_variants) && p.color_variants.length ? p.color_variants : [p.color || "Standard"]);
+    const measurements = p.measurements && typeof p.measurements === "object" ? p.measurements : {};
+    const measurementText = Object.entries(measurements).map(([key, value]) => `${key}: ${value}`).join(" · ");
 
     const modalBox = $("#prodModal");
     modalBox.innerHTML = `
@@ -456,7 +495,7 @@
       <!-- Right column: Item details & checkout -->
       <div class="pmodal-info">
         <div class="pmodal-kicker">
-          <span>${esc(p.demographic || "Vintage")}</span> · <span>${esc(p.category)}</span>
+          <span>${isBrandNew ? "Brand-New Apparel" : "Curated Vintage / Pre-Loved"}</span> · <span>${esc(p.category)}</span>
           <code>${esc(p.sku || p.barcode_id || p.id)}</code>
         </div>
         <h2 class="pmodal-title" id="pmodalTitle">${esc(p.name)}</h2>
@@ -465,29 +504,37 @@
           <span class="pmodal-price">${DB.ugx(displayPrice(p))}</span>
           ${p.compare_price > displayPrice(p) ? `<span class="pmodal-compare">${DB.ugx(p.compare_price)}</span><span class="pmodal-disc">-${disc}% OFF</span>` : ""}
           <span class="pmodal-stock ${sold ? "out" : "in"}">
-            ${sold ? "● SOLD OUT" : (p.in_stock_count === 1 ? "✓ 1-of-1 Piece on Rail" : `✓ ${p.in_stock_count} in stock`)}
+            ${sold ? "● OUT OF STOCK" : (isBrandNew ? `✓ ${p.in_stock_count} units in stock` : "✓ 1-of-1 Piece on Rail")}
           </span>
         </div>
 
         <div class="pmodal-specs">
-          <div class="pmodal-spec-row"><span class="pmodal-spec-k">Brand / Label</span><span class="pmodal-spec-v">${esc(p.brand || "Vintage / Unbranded")}</span></div>
-          <div class="pmodal-spec-row"><span class="pmodal-spec-k">Size &amp; Fit</span><span class="pmodal-spec-v">${esc(p.size && p.size !== "-" ? p.size : "Standard")}</span></div>
-          <div class="pmodal-spec-row"><span class="pmodal-spec-k">Condition Grade</span><span class="pmodal-spec-v">${esc(p.condition || "Grade A — Excellent")}</span></div>
-          <div class="pmodal-spec-row"><span class="pmodal-spec-k">Colour / Wash</span><span class="pmodal-spec-v">${esc(p.color || "Standard")}</span></div>
+          <div class="pmodal-spec-row"><span class="pmodal-spec-k">Brand / Label</span><span class="pmodal-spec-v">${esc(p.brand || "Adonai Store")}</span></div>
+          ${isBrandNew ? `
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Available sizes</span><span class="pmodal-spec-v">${availableSizes.map(size => `<button type="button" class="size-option">${esc(size)}</button>`).join(" ")}</span></div>
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Colour variants</span><span class="pmodal-spec-v">${esc(availableColors.join(" · "))}</span></div>
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Factory notes</span><span class="pmodal-spec-v">${esc(p.factory_tag_notes || "Intact factory tags")}</span></div>
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Inner packaging</span><span class="pmodal-spec-v">${esc(p.inner_packaging || "Original packaging")}</span></div>
+          ` : `
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">1-of-1 notice</span><span class="pmodal-spec-v">Single quantity · hand-inspected and laundered</span></div>
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Exact measurements</span><span class="pmodal-spec-v">${esc(measurementText || "See item description or ask our concierge")}</span></div>
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Fabric grading</span><span class="pmodal-spec-v">${esc(p.fabric_grading_notes || p.condition || "Inspected condition disclosed in the description")}</span></div>
+            <div class="pmodal-spec-row"><span class="pmodal-spec-k">Size / Fit</span><span class="pmodal-spec-v">${esc(p.size && p.size !== "-" ? p.size : "Standard")}</span></div>
+          `}
         </div>
 
         ${p.desc ? `<p class="pmodal-story">${esc(p.desc)}</p>` : ""}
         ${p.staff_notes ? `<div class="pmodal-store-notes"><strong>Store note:</strong> ${esc(p.staff_notes)}</div>` : ""}
 
         <div class="pmodal-assurance">
-          📍 ${esc(S.address || "Kampala, Uganda")} · 🛵 Same-Day Kampala Boda Delivery · 📱 MTN MoMo / Airtel Money / Cash
+          📍 ${esc(S.address || "Kampala, Uganda")} · ✦ Adonai-managed delivery across Kampala & Uganda · 📱 MTN MoMo / Airtel Money / Cash
         </div>
 
         <div class="pmodal-actions">
           <button class="pmodal-claim-btn" id="pmodalClaimBtn" data-modal-claim="${esc(p.id)}" ${sold ? "disabled" : ""}>
             ${sold ? "Sold" : `${ICONS.message.replace("<svg ", "<svg width='18' height='18' ")} Add Piece to Cart`}
           </button>
-          <a class="pmodal-wa-btn" href="https://wa.me/${esc(S.whatsapp)}?text=${encodeURIComponent(`Hello Adonai Thrift Store, I would like to ask about: ${p.name} (${p.sku || p.barcode_id}, ${DB.ugx(displayPrice(p))}, Size: ${p.size}). Is it still on the shelf?`)}" target="_blank" rel="noopener">
+          <a class="pmodal-wa-btn" href="https://wa.me/${esc(S.whatsapp)}?text=${encodeURIComponent(`Hello Adonai Store, I would like to ask about: ${p.name} (${p.sku || p.barcode_id}, ${DB.ugx(displayPrice(p))}, Size: ${p.size}). Is it still on the shelf?`)}" target="_blank" rel="noopener">
             ${ICONS.message.replace("<svg ", "<svg width='16' height='16' ")} Inquire on WhatsApp directly
           </a>
         </div>
@@ -542,18 +589,27 @@
     }
   });
 
-  function addToCart(id) {
+  async function addToCart(id) {
     const p = products.find(x => x.id === id);
-    if (!p || p.in_stock_count <= 0) return toast("That piece has already been claimed");
+    if (!p || p.in_stock_count <= 0) return toast("That item is currently unavailable");
     const line = cart.find(l => l.product_id === id);
     if ((line ? line.qty : 0) + 1 > p.in_stock_count) return toast(`Only ${p.in_stock_count} in stock`);
-    if (line) line.qty++; else cart.push({ product_id: id, qty: 1 });
-    saveCart(); renderCart();
-    toast(`${p.name} added to your cart`);
-    if (window.AdonaiAnalytics) {
-      window.AdonaiAnalytics.trackAddToCart(p, 1);
+    try {
+      // A web reservation is short-lived (five minutes server-side) and is
+      // subtracted from public availability. It prevents the same 1-of-1
+      // piece from being checked out simultaneously by POS or another buyer.
+      await DB.acquireInventoryLock(id, webLockOwner, 1);
+      if (line) line.qty++; else cart.push({ product_id: id, qty: 1 });
+      saveCart(); renderCart();
+      toast(`${p.name} added to your cart`);
+      if (window.AdonaiAnalytics) {
+        window.AdonaiAnalytics.trackAddToCart(p, 1);
+      }
+      openCart();
+    } catch (error) {
+      toast(error.message || "That item was just reserved elsewhere");
+      await DB.pullProducts(true);
     }
-    openCart();
   }
 
   /* ---------- cart drawer ---------- */
@@ -756,11 +812,12 @@
         <input class="claim-input" id="coPhone" placeholder="Phone Number (e.g. 0758873398) *" autocomplete="tel" value="${esc(formState.phone)}" required />
 
         <div class="delivery-toggle-row">
-          <button type="button" class="deliv-toggle-btn ${deliveryType === 'boda' ? 'active' : ''}" id="btnDelivBoda">Boda Delivery</button>
+          <button type="button" class="deliv-toggle-btn ${deliveryType === 'boda' ? 'active' : ''}" id="btnDelivBoda">Adonai Delivery</button>
           <button type="button" class="deliv-toggle-btn ${deliveryType === 'pickup' ? 'active' : ''}" id="btnDelivPickup">Store Pickup (Free)</button>
         </div>
 
         <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
+          <p class="delivery-service-note">Adonai Store manages confirmation, careful packaging, route coordination, customer updates, and the final handoff. A boda or courier partner is simply one part of the delivery journey.</p>
           <label class="claim-field-label">Destination Area:</label>
           <select class="claim-select" id="coArea">
             ${DELIVERY_AREAS.map((a, idx) => `<option value="${idx}" ${idx === selectedAreaIndex ? 'selected' : ''}>${esc(a.name)}</option>`).join("")}
@@ -812,9 +869,11 @@
     const rm = e.target.closest("[data-rm]");
     if (rm) {
       const p = products.find(x => x.id === rm.dataset.rm);
+      const line = cart.find(x => x.product_id === rm.dataset.rm);
       cart = cart.filter(x => x.product_id !== rm.dataset.rm);
       saveCart();
       renderCart();
+      if (line) DB.releaseInventoryLock(rm.dataset.rm, webLockOwner, line.qty).catch(() => {});
       if (p && window.AdonaiAnalytics) {
         window.AdonaiAnalytics.trackRemoveFromCart(p);
       }
@@ -892,6 +951,7 @@
         delivery_address: deliveryAddress,
         delivery_fee: deliveryFee,
         delivery_notes: deliveryNotes,
+        lock_owner: webLockOwner,
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
 
@@ -915,6 +975,14 @@
       renderCart();
     }
   }
+
+  /* Keep browser cart reservations alive while the shopper is active. The
+     database remains authoritative and expires abandoned holds automatically. */
+  window.setInterval(() => {
+    if (cart.length && !document.hidden) {
+      DB.heartbeatInventoryLocks(webLockOwner).catch(() => {});
+    }
+  }, 120000);
 
   /* ---------- real-time stock & System Parameters sync ---------- */
   DB.on("products", () => {

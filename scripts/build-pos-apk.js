@@ -88,7 +88,7 @@ function ensureKeystore() {
       '-keyalg', 'RSA', '-keysize', '2048',
       '-validity', '10000',
       '-storepass', pass, '-keypass', pass,
-      '-dname', 'CN=Adonai Thrift Store, OU=POS, O=Adonai, L=Kampala, C=UG'
+      '-dname', 'CN=Adonai Store, OU=POS, O=Adonai, L=Kampala, C=UG'
     ], { stdio: 'inherit' });
   }
   process.env.ADONAI_KEYSTORE_FILE = keystore;

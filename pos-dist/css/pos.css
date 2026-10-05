@@ -204,6 +204,9 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .tile .tile-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tile .tile-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .tile .t-name { font-weight: 700; font-size: 13.5px; line-height: 1.25; color: var(--ink); }
+.pos-condition-tag { display: inline-block; padding: 2px 5px; margin-right: 3px; border-radius: 4px; color: #fff; font: 800 9px/1 var(--font-text); letter-spacing: .04em; vertical-align: 2px; }
+.pos-condition-tag.new { background: #B45309; }
+.pos-condition-tag.vintage { background: #047857; }
 .tile .t-meta { font-size: 11.5px; color: var(--muted); }
 .tile .t-row { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
 .tile .t-price { font: 700 17px var(--font-display); color: var(--accent); }
@@ -1175,6 +1178,99 @@ html[data-pointer="touch"] .qty button { width: 44px; height: 44px; }
 .pos-cart-sidebar .cart-line strong, .pos-cart-sidebar .cart-line small { color: #FFF; }
 .pos-cart-sidebar .charge-btn { background: #10B981; color: #FFF; }
 
+/* Compact professional checkout rail: the catalog remains the primary
+   workspace while the current sale stays visible as a focused summary. */
+@media screen and (min-width: 961px) {
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar {
+    width: min(290px, 24vw);
+    border: 1px solid #334155;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 14px 34px rgba(15, 23, 42, .16);
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-head {
+    padding: 14px 15px;
+    background: linear-gradient(135deg, #172554, #0f172a);
+    border-bottom: 1px solid #334155;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-head h3 {
+    font-size: 16px;
+    letter-spacing: .01em;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-lines {
+    padding: 10px;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-line {
+    border-radius: 10px;
+    margin-bottom: 8px;
+    padding: 10px;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .cart-summary {
+    padding: 14px 15px 16px;
+    background: #111c32;
+  }
+  .pos-dashboard-layout.has-cart-items .pos-cart-sidebar .charge-btn {
+    border-radius: 10px;
+    min-height: 44px;
+    font-weight: 800;
+    letter-spacing: .01em;
+  }
+}
+
+/* Light Current Sale surface: keeps the checkout actions and sale details
+   readable instead of blending into the previous dark drawer background. */
+.pos-cart-sidebar,
+.pos-cart-sidebar .cart-body,
+.pos-cart-sidebar .cart-lines {
+  background: #F8FAFC;
+  color: #0F172A;
+}
+.pos-cart-sidebar {
+  border-color: #CBD5E1;
+}
+.pos-cart-sidebar .cart-head {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: #E2E8F0;
+}
+.pos-cart-sidebar .cart-head h3,
+.pos-cart-sidebar .cart-lines,
+.pos-cart-sidebar .sum-row {
+  color: #0F172A;
+}
+.pos-cart-sidebar .cart-head-actions .btn {
+  background: #E2E8F0;
+  border: 1px solid #CBD5E1;
+  color: #0F172A;
+  border-radius: 8px;
+  font-weight: 700;
+}
+.pos-cart-sidebar .cart-head-actions .btn:hover {
+  background: #CBD5E1;
+}
+.pos-cart-sidebar .cart-line {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: #E2E8F0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .06);
+}
+.pos-cart-sidebar .cart-line strong,
+.pos-cart-sidebar .cart-line small {
+  color: #0F172A;
+}
+.pos-cart-sidebar .cart-empty {
+  color: #64748B;
+}
+.pos-cart-sidebar .cart-summary {
+  background: #FFFFFF;
+  color: #0F172A;
+  border-color: #E2E8F0;
+}
+.pos-cart-sidebar .charge-btn {
+  background: #16A34A;
+  color: #FFFFFF;
+}
+
 /* ======================================================================
    POS PRODUCT CARD DENSITY (93% / 7% reduction)
    Keep the catalog denser without changing the card's aspect ratio.  The
@@ -1186,19 +1282,21 @@ html[data-pointer="touch"] .qty button { width: 44px; height: 44px; }
 }
 
 /* Grid / item cards: the column width controls both the card and its square
-   thumbnail. Scaling the min/max column bounds scales the image container's
-   width and height together. */
+   thumbnail.  Scaling the min/max column bounds therefore scales the image
+   container's width and height together. */
 .tiles {
-  gap: 7.44px;
+  gap: 7.44px; /* 8px × .93 */
   grid-template-columns: repeat(auto-fill, minmax(clamp(115.32px, 31.62vw, 163.68px), 1fr));
 }
 .tile {
-  padding: clamp(6.51px, 1.116vw, 9.3px);
-  gap: 6.51px;
-  border-radius: 11.16px;
+  padding: clamp(6.51px, 1.116vw, 9.3px); /* 7/1.2vw/10px × .93 */
+  gap: 6.51px; /* 7px × .93 */
+  border-radius: 11.16px; /* 12px × .93 */
 }
-.tile .tile-img { border-radius: 9.3px; }
-.tile .tile-body { gap: 3.72px; }
+.tile .tile-img {
+  border-radius: 9.3px; /* 10px × .93 */
+}
+.tile .tile-body { gap: 3.72px; /* 4px × .93 */ }
 
 /* Responsive grid bounds use the same 93% scale as the base grid. */
 @media screen and (min-width: 768px) and (max-width: 960px) {
@@ -1211,20 +1309,24 @@ html[data-pointer="touch"] .qty button { width: 44px; height: 44px; }
 }
 
 /* List / row cards: .cline is the POS product row shown in the current-sale
-   drawer. Its spacing is reduced by 7%; touch controls remain comfortable. */
+   drawer.  Its padding, inter-column spacing, control spacing, and row gap
+   are reduced by 7%; the quantity/remove controls are not reduced so touch
+   interaction remains comfortable. */
 .cline {
-  gap: 3.72px 9.3px;
-  padding: 10.23px 12.09px;
-  border-radius: 11.16px;
-  margin-bottom: 7.44px;
+  gap: 3.72px 9.3px; /* 4px/10px × .93 */
+  padding: 10.23px 12.09px; /* 11px/13px × .93 */
+  border-radius: 11.16px; /* 12px × .93 */
+  margin-bottom: 7.44px; /* 8px × .93 */
 }
 .cline .c-controls {
-  gap: 7.44px;
-  margin-top: 3.72px;
+  gap: 7.44px; /* 8px × .93 */
+  margin-top: 3.72px; /* 4px × .93 */
 }
-.cart-lines { padding: 11.16px 13.02px; }
+
+/* The drawer's row-list inset is also scaled proportionally. */
+.cart-lines { padding: 11.16px 13.02px; /* 12px/14px × .93 */ }
 @media (max-width: 767px) {
-  .cart-lines { padding: 9.3px 11.16px; }
+  .cart-lines { padding: 9.3px 11.16px; /* 10px/12px × .93 */ }
 }
 
 /* Preserve the 44px minimum selection targets on touch hardware. */

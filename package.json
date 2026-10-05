@@ -1,7 +1,7 @@
 {
   "name": "adonai-store-pos-android",
   "version": "2.4.0",
-  "description": "Adonai Thrift Store \u2014 Android POS Cashier Terminal App & Hybrid Mobile Architecture",
+  "description": "Adonai Store \u2014 Android POS Cashier Terminal App & Hybrid Mobile Architecture",
   "main": "pos.html",
   "scripts": {
     "test": "node tests/mobile-scroll.test.js",
@@ -22,7 +22,7 @@
     "retail",
     "kampala"
   ],
-  "author": "Adonai Thrift Store",
+  "author": "Adonai Store",
   "license": "UNLICENSED",
   "dependencies": {
     "@capacitor/android": "^6.0.0",

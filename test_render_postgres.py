@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — Backend PostgreSQL & Render Hardening Test Suite
+Adonai Store — Backend PostgreSQL & Render Hardening Test Suite
 Verifies:
 1. DATABASE_URL dynamic formatting (postgres:// -> postgresql://)
 2. Credential masking in stdout logs

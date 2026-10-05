@@ -204,6 +204,9 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .tile .tile-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .tile .tile-body { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .tile .t-name { font-weight: 700; font-size: 13.5px; line-height: 1.25; color: var(--ink); }
+.pos-condition-tag { display: inline-block; padding: 2px 5px; margin-right: 3px; border-radius: 4px; color: #fff; font: 800 9px/1 var(--font-text); letter-spacing: .04em; vertical-align: 2px; }
+.pos-condition-tag.new { background: #B45309; }
+.pos-condition-tag.vintage { background: #047857; }
 .tile .t-meta { font-size: 11.5px; color: var(--muted); }
 .tile .t-row { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
 .tile .t-price { font: 700 17px var(--font-display); color: var(--accent); }

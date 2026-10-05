@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — REST API & Service Layer
+Adonai Store — REST API & Service Layer
 Dual-target architecture supporting Public Web Storefront & Native Android POS App.
 Provides RESTful JSON endpoints connected to PostgreSQL / SQLite database with
 atomic stock decrements, live synchronization, and JWT / Terminal Key authentication.
@@ -54,6 +54,8 @@ from models import (
     StockLot,
     StoreSetting,
     User,
+    ItemCondition,
+    QuantityType,
 )
 
 logger = logging.getLogger("adonai.api")
@@ -106,6 +108,43 @@ PUBLIC_STORE_SETTING_KEYS = {
 EDITABLE_STORE_SETTING_KEYS = PUBLIC_STORE_SETTING_KEYS | {
     "master_key", "admin_key"
 }
+
+ITEM_CONDITION_VALUES = {ItemCondition.BRAND_NEW.value, ItemCondition.PRE_LOVED.value}
+
+
+def normalize_item_condition(value, default=ItemCondition.BRAND_NEW.value):
+    """Normalize UI labels to the two canonical inventory policy values."""
+    raw = str(value or "").strip().upper().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "NEW": ItemCondition.BRAND_NEW.value,
+        "BRANDNEW": ItemCondition.BRAND_NEW.value,
+        "FACTORY": ItemCondition.BRAND_NEW.value,
+        "VINTAGE": ItemCondition.PRE_LOVED.value,
+        "PRELOVED": ItemCondition.PRE_LOVED.value,
+        "THRIFT": ItemCondition.PRE_LOVED.value,
+    }
+    normalized = aliases.get(raw, raw)
+    if normalized not in ITEM_CONDITION_VALUES:
+        if value in (None, ""):
+            return default
+        raise ValueError("item_condition must be BRAND_NEW or PRE_LOVED")
+    return normalized
+
+
+def normalize_quantity_type(value, item_condition):
+    """Quantity policy always follows item condition; clients cannot mix them."""
+    normalized = normalize_item_condition(value, item_condition)
+    if normalized != item_condition:
+        raise ValueError("quantity_type must match item_condition")
+    return normalized
+
+
+def stock_status_for(product, quantity=None):
+    """Keep channel status consistent with the authoritative remaining count."""
+    remaining = int(product.in_stock_count if quantity is None else quantity)
+    if remaining > 0:
+        return "AVAILABLE"
+    return "OUT_OF_STOCK"
 
 
 def public_store_settings(rows) -> dict:
@@ -549,7 +588,15 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if cat and cat != "All":
                     q = q.filter(Product.category == cat)
 
-                # Condition filter
+                # Inventory-stream filter (Brand New vs Vintage / Pre-Loved)
+                item_condition = query_params.get("item_condition", query_params.get("inventory_type", [""]))[0]
+                if item_condition and item_condition != "All":
+                    try:
+                        q = q.filter(Product.item_condition == normalize_item_condition(item_condition))
+                    except ValueError:
+                        return json_response({"ok": False, "error": "Unknown item_condition filter"}, status=400)
+
+                # Human-readable condition grade filter
                 cond = query_params.get("condition", [""])[0]
                 if cond and cond != "All":
                     q = q.filter(Product.condition == cond)
@@ -572,12 +619,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 products = q.all()
                 held = {}
                 if public_availability and products:
-                    rows = (
-                        session.query(InventoryLock.product_id, func.sum(InventoryLock.quantity))
-                        .filter(InventoryLock.expires_at > datetime.utcnow())
-                        .group_by(InventoryLock.product_id)
-                        .all()
+                    reservation_owner = str(query_params.get("reservation_owner", [""])[0] or "").strip()[:100]
+                    lock_query = session.query(InventoryLock.product_id, func.sum(InventoryLock.quantity)).filter(
+                        InventoryLock.expires_at > datetime.utcnow()
                     )
+                    if reservation_owner.startswith("WEB-"):
+                        lock_query = lock_query.filter(InventoryLock.lock_owner != reservation_owner)
+                    rows = lock_query.group_by(InventoryLock.product_id).all()
                     held = {product_id: int(quantity or 0) for product_id, quantity in rows}
                 # Social proof must come from real commerce data.  Never invent
                 # reviews or a five-star score: expose completed-unit counts and
@@ -620,6 +668,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 stock_count = parse_positive_int(body.get("in_stock_count", 1), "Stock quantity", allow_zero=True)
                 supplied_cost = parse_positive_int(body.get("cost_price", 0), "Cost price", allow_zero=True)
                 compare_price = parse_positive_int(body.get("compare_price", 0), "Compare price", allow_zero=True)
+                item_condition = normalize_item_condition(body.get("item_condition", body.get("inventory_type")))
+                quantity_type = normalize_quantity_type(body.get("quantity_type"), item_condition)
+                if item_condition == ItemCondition.PRE_LOVED.value and stock_count not in (0, 1):
+                    raise ValueError("PRE_LOVED inventory must have quantity 1 (or 0 after it is sold)")
+                size_variants = body.get("size_variants") if isinstance(body.get("size_variants"), list) else []
+                color_variants = body.get("color_variants") if isinstance(body.get("color_variants"), list) else []
+                measurements = body.get("measurements") if isinstance(body.get("measurements"), dict) else {}
             except ValueError as exc:
                 return json_response({"ok": False, "error": str(exc)}, status=400)
 
@@ -652,12 +707,20 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     sku=sku,
                     barcode_id=barcode_id,
                     name=clean_text(body.get("name", "Untitled Piece"), 255) or "Untitled Piece",
-                    brand=clean_text(body.get("brand", "Vintage"), 100),
+                    brand=clean_text(body.get("brand", "Adonai Basics" if item_condition == ItemCondition.BRAND_NEW.value else "Curated"), 100),
                     color=clean_text(body.get("color", ""), 50),
                     demographic=clean_text(body.get("demographic", "Men"), 50),
                     category=clean_text(body.get("category", "Outerwear & Jackets"), 100),
                     size=clean_text(body.get("size", "-"), 20),
-                    condition=clean_text(body.get("condition", "Grade A — Excellent"), 100),
+                    item_condition=item_condition,
+                    quantity_type=quantity_type,
+                    condition=clean_text(body.get("condition", "Factory Fresh" if item_condition == ItemCondition.BRAND_NEW.value else "Grade A — Excellent"), 100),
+                    size_variants_json=json.dumps([clean_text(v, 20) for v in size_variants[:20]]),
+                    color_variants_json=json.dumps([clean_text(v, 50) for v in color_variants[:20]]),
+                    factory_tag_notes=clean_multiline_text(body.get("factory_tag_notes", ""), 1000),
+                    inner_packaging=clean_text(body.get("inner_packaging", ""), 30),
+                    measurements_json=json.dumps({str(k)[:40]: clean_text(v, 80) for k, v in measurements.items()}),
+                    fabric_grading_notes=clean_multiline_text(body.get("fabric_grading_notes", ""), 1000),
                     cost_price=supplied_cost,
                     base_price=allocation["base_price"],
                     total_transport_cost=allocation["total_transport_cost"],
@@ -669,7 +732,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     images=[safe_image_url(u) for u in (body.get("images") or []) if safe_image_url(u)][:12] if isinstance(body.get("images"), list) else [],
                     rack_location=clean_text(body.get("rack_location", "Rail A-1"), 50),
                     stock_lot_id=lot_id,
-                    inventory_status="AVAILABLE",
+                    inventory_status=("AVAILABLE" if stock_count > 0 else "OUT_OF_STOCK"),
                 )
                 session.add(prod)
 
@@ -704,12 +767,35 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 text_fields = {
                     "name": 255, "brand": 100, "color": 50, "demographic": 50,
                     "category": 100, "size": 20, "condition": 100,
-                    "rack_location": 50, "inventory_status": 30,
+                    "rack_location": 50,
                 }
                 integer_fields = {"cost_price", "selling_price", "compare_price", "in_stock_count"}
                 for key, max_len in text_fields.items():
                     if key in body:
                         setattr(prod, key, clean_text(body[key], max_len))
+                try:
+                    if "item_condition" in body or "inventory_type" in body:
+                        current_condition = prod.item_condition.value if isinstance(prod.item_condition, ItemCondition) else (prod.item_condition or ItemCondition.PRE_LOVED.value)
+                        prod.item_condition = normalize_item_condition(body.get("item_condition", body.get("inventory_type")), current_condition)
+                    if "quantity_type" in body:
+                        prod.quantity_type = normalize_quantity_type(body.get("quantity_type"), prod.item_condition.value if isinstance(prod.item_condition, ItemCondition) else str(prod.item_condition))
+                    else:
+                        prod.quantity_type = prod.item_condition.value if isinstance(prod.item_condition, ItemCondition) else str(prod.item_condition)
+                except ValueError as exc:
+                    return json_response({"ok": False, "error": str(exc)}, status=400)
+                if "size_variants" in body:
+                    prod.size_variants = [clean_text(v, 20) for v in (body.get("size_variants") or [])[:20]] if isinstance(body.get("size_variants"), list) else []
+                if "color_variants" in body:
+                    prod.color_variants = [clean_text(v, 50) for v in (body.get("color_variants") or [])[:20]] if isinstance(body.get("color_variants"), list) else []
+                if "factory_tag_notes" in body:
+                    prod.factory_tag_notes = clean_multiline_text(body["factory_tag_notes"], 1000)
+                if "inner_packaging" in body:
+                    prod.inner_packaging = clean_text(body["inner_packaging"], 30)
+                if "measurements" in body:
+                    values = body.get("measurements") if isinstance(body.get("measurements"), dict) else {}
+                    prod.measurements = {str(k)[:40]: clean_text(v, 80) for k, v in values.items()}
+                if "fabric_grading_notes" in body:
+                    prod.fabric_grading_notes = clean_multiline_text(body["fabric_grading_notes"], 1000)
                 if "desc" in body:
                     prod.desc = clean_multiline_text(body["desc"], 4000)
                 if "image_url" in body:
@@ -736,8 +822,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     prod.base_price = allocation["base_price"]
                     prod.total_transport_cost = allocation["total_transport_cost"]
                     prod.selling_price = whole_money(allocation["final_selling_price"])
-                if prod.in_stock_count > 0 and prod.inventory_status == "SOLD":
-                    prod.inventory_status = "AVAILABLE"
+                condition_value = prod.item_condition.value if isinstance(prod.item_condition, ItemCondition) else str(prod.item_condition or ItemCondition.PRE_LOVED.value)
+                if condition_value == ItemCondition.PRE_LOVED.value and prod.in_stock_count not in (0, 1):
+                    return json_response({"ok": False, "error": "PRE_LOVED inventory must have quantity 1 (or 0 after it is sold)"}, status=400)
+                prod.quantity_type = condition_value
+                if prod.inventory_status not in {"ARCHIVED", "WRITTEN_OFF"}:
+                    prod.inventory_status = "AVAILABLE" if prod.in_stock_count > 0 else "OUT_OF_STOCK"
                 session.flush()
                 return json_response({"ok": True, "status": "updated", "product": prod.to_dict()})
 
@@ -753,11 +843,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
         # 3. Real-time POS inventory locks (Protected)
         # ----------------------------------------------------
         if clean_path.startswith("/api/inventory-locks/") and method in ("GET", "POST"):
-            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
-            if auth_error:
-                return auth_error
             action = clean_path.split("/")[-1]
             owner = str(body.get("lock_owner") or query_params.get("lock_owner", [""])[0]).strip()[:100]
+            # Public cart reservations use short-lived WEB-* owners. They are
+            # deliberately quantity-limited and expire automatically; staff
+            # operations and POS holds still require their normal auth token.
+            is_public_reservation = owner.startswith("WEB-") and len(owner) >= 12
+            staff_info = None
+            if not is_public_reservation:
+                staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+                if auth_error:
+                    return auth_error
             if not owner:
                 return json_response({"ok": False, "error": "lock_owner is required"}, status=400)
             now = datetime.utcnow()
@@ -792,12 +888,15 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         quantity = parse_positive_int(body.get("quantity", 1), "Lock quantity")
                     except ValueError as exc:
                         return json_response({"ok": False, "error": str(exc)}, status=400)
+                    item_condition = product.item_condition.value if isinstance(product.item_condition, ItemCondition) else (product.item_condition or ItemCondition.PRE_LOVED.value)
+                    current = int(lock.quantity if lock else 0)
+                    if item_condition == ItemCondition.PRE_LOVED.value and current + quantity > 1:
+                        return json_response({"ok": False, "error": "PRE_LOVED pieces can only be reserved one at a time"}, status=409)
                     held_by_others = int(session.query(func.coalesce(func.sum(InventoryLock.quantity), 0)).filter(
                         InventoryLock.product_id == product_id,
                         InventoryLock.lock_owner != owner,
                         InventoryLock.expires_at > now,
                     ).scalar() or 0)
-                    current = int(lock.quantity if lock else 0)
                     if current + quantity > max(0, int(product.in_stock_count or 0) - held_by_others):
                         return json_response({
                             "ok": False,
@@ -899,7 +998,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             product = session.query(Product).filter_by(id=item.product_id).with_for_update().first()
                             if product:
                                 product.in_stock_count = int(product.in_stock_count or 0) + int(item.qty or 0)
-                                if product.inventory_status == "SOLD":
+                                if product.inventory_status == "OUT_OF_STOCK":
                                     product.inventory_status = "AVAILABLE"
                     order.dispatch_status = next_stage
                     order.status = (
@@ -1007,13 +1106,15 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     prod.in_stock_count -= qty
                     if prod.in_stock_count <= 0:
                         prod.in_stock_count = 0
-                        prod.inventory_status = "SOLD"
+                        prod.inventory_status = "OUT_OF_STOCK"
                     order_items_objs.append(OrderItem(
                         id=f"ITEM-{order_id}-{len(order_items_objs) + 1}",
                         order_id=order_id,
                         product_id=prod.id,
                         barcode_id=prod.barcode_id,
                         name=prod.name,
+                        item_condition=(prod.item_condition.value if isinstance(prod.item_condition, ItemCondition) else (prod.item_condition or ItemCondition.PRE_LOVED.value)),
+                        quantity_type=(prod.quantity_type.value if isinstance(prod.quantity_type, QuantityType) else (prod.quantity_type or QuantityType.PRE_LOVED.value)),
                         unit_price=unit_price,
                         unit_cost=unit_cost,
                         category=prod.category,

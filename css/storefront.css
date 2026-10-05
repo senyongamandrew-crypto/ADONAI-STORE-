@@ -73,7 +73,7 @@ img, svg, video, canvas, iframe { max-width: 100%; }
 input, select, textarea { max-width: 100%; }
 
 /* ======================================================================
-   ADONAI THRIFT STORE — storefront design system v2
+   ADONAI STORE — unified storefront design system v2
    (matched to the approved product screenshots)
    Type:      Playfair Display (display) · Plus Jakarta Sans (text)
    Palette:   canvas #F9FAFB · slate #111827 · emerald #16A34A
@@ -108,7 +108,39 @@ html { scroll-behavior: smooth; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
-body { background: var(--page); color: var(--body); font: 400 15px/1.6 var(--font-text); -webkit-font-smoothing: antialiased; }
+body {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse 32rem 25rem at 100% 6%, rgba(111, 135, 104, .14), transparent 72%),
+    radial-gradient(ellipse 28rem 23rem at 0% 78%, rgba(196, 116, 67, .10), transparent 70%),
+    linear-gradient(180deg, #f8f5ef 0%, #fbfaf7 52%, #f3efe8 100%);
+  color: var(--body);
+  font: 400 15px/1.6 var(--font-text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A barely-there linen weave keeps the photo-led storefront tactile without
+   adding visual noise behind the catalogue. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+body::before {
+  opacity: .22;
+  background-image: repeating-linear-gradient(90deg, rgba(91, 72, 50, .08) 0 1px, transparent 1px 34px);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, .25) 64%, transparent 100%);
+}
+body::after {
+  opacity: .6;
+  background:
+    radial-gradient(circle at 92% 12%, transparent 0 82px, rgba(111, 135, 104, .11) 83px 84px, transparent 85px 140px, rgba(196, 116, 67, .08) 141px 142px, transparent 143px),
+    radial-gradient(ellipse 25rem 20rem at 4% 76%, rgba(196, 116, 67, .10), transparent 72%);
+}
 .wrap { max-width: 1180px; margin: 0 auto; padding: 0 22px; }
 svg { width: 24px; height: 24px; flex-shrink: 0; }
 img { display: block; }
@@ -159,12 +191,68 @@ h1, h2, h3, .brand-word, .section-title {
 .cart-count { background: var(--rust); border-radius: 999px; min-width: 20px; text-align: center; padding: 1px 6px; font-size: 11.5px; font-weight: 700; }
 
 /* ============ MASTHEAD ============ */
-.masthead { padding: 36px 22px 18px; }
-.masthead h1 { font-size: clamp(28px, 4.2vw, 48px); line-height: 1.1; margin: 8px 0 12px; max-width: 18ch; }
-.lede { font-size: 15px; color: var(--muted); max-width: 62ch; line-height: 1.5; }
+.masthead {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  margin-top: 18px;
+  padding: 50px 42px 46px;
+  border: 1px solid rgba(128, 105, 81, .2);
+  border-radius: 30px;
+  color: var(--ink);
+  background:
+    linear-gradient(90deg, rgba(255, 253, 248, .97) 0%, rgba(255, 253, 248, .9) 40%, rgba(255, 253, 248, .16) 78%, rgba(255, 253, 248, .03) 100%),
+    url("../assets/storefront-editorial-bg.jpg") center / cover no-repeat;
+  box-shadow: 0 22px 52px rgba(91, 72, 50, .16);
+}
+.masthead::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 190px;
+  height: 190px;
+  right: -58px;
+  bottom: -90px;
+  border: 1px solid rgba(111, 135, 104, .55);
+  border-radius: 50%;
+  box-shadow: 0 0 0 18px rgba(111, 135, 104, .08), 0 0 0 36px rgba(196, 116, 67, .08);
+}
+.masthead::after {
+  content: "KAMPALA  /  CURATED DAILY";
+  position: absolute;
+  right: 28px;
+  bottom: 24px;
+  color: rgba(47, 107, 70, .66);
+  font: 700 clamp(10px, 1.8vw, 14px)/1 var(--font-text);
+  letter-spacing: .14em;
+  transform: rotate(-90deg) translateX(50%);
+  transform-origin: right bottom;
+}
+.masthead .eyebrow { color: #2F6B46; }
+.masthead h1 {
+  max-width: 16ch;
+  margin: 8px 0 12px;
+  color: var(--ink);
+  font-size: clamp(30px, 4.2vw, 52px);
+  line-height: 1.06;
+}
+.masthead .lede { max-width: 65ch; color: #4B5563; line-height: 1.6; }
+
+/* Let the inventory feel like a curated collection sitting on the textured
+   canvas rather than another unbroken white block. */
+.rail {
+  position: relative;
+  margin-top: 26px;
+  padding-top: 30px;
+  border: 1px solid rgba(128, 105, 81, .2);
+  border-radius: 30px;
+  background: rgba(255, 253, 248, .74);
+  box-shadow: 0 16px 42px rgba(91, 72, 50, .09);
+  backdrop-filter: blur(10px);
+}
 
 /* ============ RAIL / FILTER CARD ============ */
-.rail { padding: 24px 22px 32px; }
+.rail { padding: 30px 22px 32px; }
 .rail-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; flex-wrap: wrap; margin-bottom: 8px; }
 .search-wrap {
   display: flex; align-items: center; background: var(--card);
@@ -289,6 +377,17 @@ h1, h2, h3, .brand-word, .section-title {
 .pcard:hover .pmedia img { transform: scale(1.05); }
 .pmedia .media-icon { position: absolute; inset: 0; display: grid; place-items: center; color: #D1D5DB; }
 .pmedia .media-icon svg { width: 54px; height: 54px; }
+
+/* Small condition badge keeps the dual-inventory model visible without
+   competing with product photography on the mobile grid. */
+.inventory-badge {
+  position: absolute; top: 10px; right: 10px; z-index: 5;
+  padding: 5px 8px; border-radius: 999px;
+  color: #fff; font: 800 10px/1 var(--font-text); letter-spacing: .08em;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, .16); pointer-events: none;
+}
+.inventory-badge.new { background: #b45309; }
+.inventory-badge.vintage { background: #047857; }
 
 /* Top-Left Calculated Discount Badge (#DC2626) */
 .discount-badge {
@@ -507,6 +606,7 @@ h1, h2, h3, .brand-word, .section-title {
 .pmodal-spec-row { display: flex; flex-direction: column; gap: 1px; }
 .pmodal-spec-k { font-size: 10.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
 .pmodal-spec-v { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.size-option { border: 1px solid #D1FAE5; border-radius: 5px; padding: 3px 7px; background: #ECFDF5; color: #047857; font: 700 11px var(--font-text); }
 
 .pmodal-story { font-size: 13.5px; color: var(--body); line-height: 1.5; }
 .pmodal-assurance {
@@ -611,6 +711,7 @@ body.cart-open .drawer-backdrop, .drawer-backdrop.is-active { opacity: 1; pointe
 }
 .deliv-toggle-btn.active { background: var(--ink); color: #fff; border-color: var(--ink); }
 .claim-field-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 8px 0 4px; display: block; }
+.delivery-service-note { margin: 12px 0 10px; padding: 10px 12px; border-left: 3px solid var(--rust); border-radius: 0 9px 9px 0; background: rgba(22, 163, 74, .06); color: var(--body); font-size: 11.5px; line-height: 1.45; }
 .location-allocation-status {
   margin: 0 0 8px; padding: 8px 10px; border-radius: 8px;
   background: #F3F4F6; color: #92400E; font-size: 11.5px; line-height: 1.4;
@@ -689,6 +790,17 @@ body.cart-open .drawer-backdrop, .drawer-backdrop.is-active { opacity: 1; pointe
   .pmodal-info { padding: 20px 18px; }
 }
 @media (max-width: 640px) {
+  .masthead {
+    margin-top: 12px;
+    padding: 34px 24px 32px;
+    border-radius: 24px;
+  }
+  .masthead h1 { font-size: clamp(29px, 10vw, 42px); }
+  .rail {
+    margin-top: 18px;
+    padding: 24px 14px 28px;
+    border-radius: 22px;
+  }
   .head-pill { padding: 9px 13px; font-size: 12.5px; }
   .head-row { gap: 10px; }
   .brand-txt { display: none; }

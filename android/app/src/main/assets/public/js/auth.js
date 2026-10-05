@@ -1,5 +1,5 @@
 /* ============================================================
-   ADONAI THRIFT STORE — AUTH & POS SESSION LAYER
+   ADONAI STORE — AUTH & POS SESSION LAYER
    Coordinated authentication for Cashier Terminal & Admin Console.
    Persists active staff session & JWT token across tabs via localStorage.
    ============================================================ */

@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — Database Engine & Connection Pooling
+Adonai Store — Database Engine & Connection Pooling
 Handles Render Managed PostgreSQL connections, dynamic URL formatting,
 connection resilience (pre-ping, recycling), and development fallbacks.
 """
