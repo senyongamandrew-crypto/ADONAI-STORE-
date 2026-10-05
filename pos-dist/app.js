@@ -669,6 +669,44 @@
     if (b2) b2.addEventListener("click", doPrint);
   }
 
+  function orderCustomerPhone(value) {
+    const raw = String(value || "").replace(/\D/g, "");
+    if (!raw) return "";
+    if (raw.startsWith("0")) return "256" + raw.slice(1);
+    if (raw.startsWith("256")) return raw;
+    return raw;
+  }
+
+  function sendOrderConfirmation(s) {
+    const phone = orderCustomerPhone(s.customer_phone);
+    if (!phone) return toast("This order has no customer phone number", false);
+    const settings = DB.getSettings();
+    const storeName = settings.store_name || "Adonai Thrift Store";
+    const location = s.customer_location || s.delivery_area || "the agreed delivery address";
+    const itemLines = (s.items || []).map(it => `• ${it.qty || 1} × ${it.name} — ${ugx(it.line_total || 0)}`).join("\n");
+    const payment = s.tender && s.tender.paid ? `${DB.TENDER_LABEL(s.tender)} — PAID` : "Payment pending / to be confirmed";
+    const message = `Hello ${s.customer_name || "there"},
+
+This is ${storeName}. We have received and reviewed your order ${s.order_number || s.id}.
+
+Order details:
+${itemLines || "• Your selected item(s)"}
+
+Total: ${ugx(s.total || 0)}
+Payment: ${payment}
+Delivery: ${location}${s.delivery_notes ? `\nDelivery notes: ${s.delivery_notes}` : ""}
+
+We will keep you updated on dispatch and delivery. Please reply here if any detail needs to be corrected. Thank you for shopping with ${storeName}.`;
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      const link = document.createElement("a");
+      link.href = url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      link.click();
+    }
+    toast("WhatsApp confirmation prepared — tap Send to deliver it");
+  }
+
   function orderDetailModal(id) {
     const s = DB.getSale(id);
     if (!s) return toast("Order not found", false);
@@ -769,6 +807,7 @@
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Completed">✓ Complete Order</button>
         ` : ""}
 
+        <button class="btn primary btn-full" id="btnSendOrderConfirmation">${Icons.svg("message-circle", "ico-14")} Send WhatsApp Confirmation</button>
         <button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel Order &amp; Release Item to Rack</button>
         <button class="btn light btn-full" id="btnPrintReceiptModal">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
@@ -821,6 +860,9 @@
         }
       });
     }
+
+    const btnConfirm = $("#btnSendOrderConfirmation");
+    if (btnConfirm) btnConfirm.addEventListener("click", () => sendOrderConfirmation(s));
 
     const btnPr = $("#btnPrintReceiptModal");
     if (btnPr) {
