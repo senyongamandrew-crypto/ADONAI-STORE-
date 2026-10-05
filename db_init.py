@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — Database Initialization & Auto-Migration
+Adonai Store — Database Initialization & Auto-Migration
 Creates all required tables if missing and seeds initial default datasets.
 """
 from datetime import datetime, timedelta
@@ -35,10 +35,93 @@ def hash_pin(pin: str) -> str:
     return pbkdf2_hash_pin(pin)
 
 
+def _postgres_column_types(connection, table_name: str) -> dict[str, str]:
+    """Return PostgreSQL type names for a table's real (non-dropped) columns.
+
+    SQLAlchemy's inspector normalises some PostgreSQL types, which makes it
+    unsuitable for deciding whether a pre-existing live column is a native
+    enum or a legacy VARCHAR.  The dual-inventory backfill must know that
+    distinction because PostgreSQL will not implicitly assign a `text` CASE
+    expression to a native enum, nor one enum type to a different enum type.
+    """
+    rows = connection.execute(text("""
+        SELECT attribute.attname, type.typname
+        FROM pg_attribute AS attribute
+        JOIN pg_type AS type ON type.oid = attribute.atttypid
+        WHERE attribute.attrelid = CAST(:table_name AS regclass)
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+    """), {"table_name": table_name})
+    return {name: type_name for name, type_name in rows}
+
+
+def _dual_inventory_backfill_statements(
+    *,
+    postgres: bool,
+    item_condition_is_enum: bool = False,
+    quantity_type_is_enum: bool = False,
+) -> tuple[str, str, str]:
+    """Build portable, correctly typed dual-inventory repair statements.
+
+    Older Render databases can have VARCHAR policy columns; new databases use
+    two *different* native enum types.  Casting through text is intentional:
+    PostgreSQL has no implicit cast from `item_condition_enum` to
+    `quantity_type_enum`, and a CASE made only of string literals resolves to
+    text rather than to the destination enum.
+    """
+    item_value = lambda value: (
+        f"'{value}'::item_condition_enum" if item_condition_is_enum else f"'{value}'"
+    )
+    item_as_text = "item_condition::text" if postgres else "item_condition"
+    quantity_value = (
+        "item_condition::text::quantity_type_enum"
+        if quantity_type_is_enum
+        else ("item_condition::text" if postgres else "item_condition")
+    )
+    quantity_as_text = "quantity_type::text" if postgres else "quantity_type"
+
+    return (
+        f"""
+            UPDATE products
+            SET item_condition = CASE
+                    WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
+                      OR lower(coalesce(condition, '')) LIKE '%factory%'
+                    THEN {item_value('BRAND_NEW')}
+                    ELSE {item_value('PRE_LOVED')}
+                END
+            WHERE item_condition IS NULL
+               OR {item_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED')
+        """,
+        f"""
+            UPDATE products
+            SET quantity_type = {quantity_value}
+            WHERE quantity_type IS NULL
+               OR {quantity_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED')
+        """,
+        f"""
+            UPDATE products
+            SET quantity_type = {quantity_value}
+            WHERE {quantity_as_text} = 'PRE_LOVED'
+              AND {item_as_text} = 'BRAND_NEW'
+        """,
+    )
+
+
 def apply_additive_schema_migrations():
     """Add columns create_all cannot add, without changing or dropping live data."""
     additions = {
         "products": [
+            # These columns are backed by native PostgreSQL enums in the
+            # explicit migration. SQLite uses VARCHAR + checks for local POS
+            # development, while the ORM keeps one shared vocabulary.
+            ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
+            ("quantity_type", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
+            ("size_variants_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("color_variants_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("factory_tag_notes", "TEXT"),
+            ("inner_packaging", "VARCHAR(30)"),
+            ("measurements_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("fabric_grading_notes", "TEXT"),
             ("stock_lot_id", "VARCHAR(64)"),
             ("inventory_status", "VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE'"),
             ("base_price", "NUMERIC(14,2) NOT NULL DEFAULT 0"),
@@ -56,13 +139,39 @@ def apply_additive_schema_migrations():
             ("staff_notes", "TEXT"),
         ],
         "order_items": [
+            ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
+            ("quantity_type", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
             ("category", "VARCHAR(100)"),
         ],
     }
     with engine.begin() as connection:
+        # Existing PostgreSQL installations need the enum types created before
+        # the additive ALTER TABLE below. SQLAlchemy creates them automatically
+        # for a brand-new database; this branch covers live databases safely.
+        if IS_POSTGRES:
+            connection.execute(text("""
+                DO $$ BEGIN
+                    CREATE TYPE item_condition_enum AS ENUM ('BRAND_NEW', 'PRE_LOVED');
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+            """))
+            connection.execute(text("""
+                DO $$ BEGIN
+                    CREATE TYPE quantity_type_enum AS ENUM ('BRAND_NEW', 'PRE_LOVED');
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+            """))
         schema = inspect(connection)
         for table_name, columns in additions.items():
+            if IS_POSTGRES and table_name == "products":
+                columns = [
+                    (name, {
+                        "item_condition": "item_condition_enum NOT NULL DEFAULT 'PRE_LOVED'",
+                        "quantity_type": "quantity_type_enum NOT NULL DEFAULT 'PRE_LOVED'",
+                    }.get(name, declaration))
+                    for name, declaration in columns
+                ]
             existing = {column["name"] for column in schema.get_columns(table_name)}
             for name, declaration in columns:
                 if name not in existing:
@@ -70,8 +179,37 @@ def apply_additive_schema_migrations():
                         text(f"ALTER TABLE {table_name} ADD COLUMN {name} {declaration}")
                     )
                     logger.info("Added safe column %s.%s", table_name, name)
+        # Existing catalog rows are the legacy curated stream. Backfill the
+        # explicit policy fields before any new dual-inventory intake arrives.
+        #
+        # IMPORTANT: item_condition_enum and quantity_type_enum are distinct
+        # PostgreSQL enum types. A text CASE cannot be assigned to the former,
+        # and one enum cannot be assigned to the other without casting through
+        # text. This used to make Render boot fail with SQLSTATE 42804
+        # ("You will need to rewrite or cast the expression").
+        postgres_types = _postgres_column_types(connection, "products") if IS_POSTGRES else {}
+        item_condition_is_enum = postgres_types.get("item_condition") == "item_condition_enum"
+        quantity_type_is_enum = postgres_types.get("quantity_type") == "quantity_type_enum"
+        for statement in _dual_inventory_backfill_statements(
+            postgres=IS_POSTGRES,
+            item_condition_is_enum=item_condition_is_enum,
+            quantity_type_is_enum=quantity_type_is_enum,
+        ):
+            connection.execute(text(statement))
+        connection.execute(text("UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF')"))
+        if IS_POSTGRES:
+            for statement in (
+                "ALTER TABLE products ADD CONSTRAINT ck_products_item_condition CHECK (item_condition IN ('BRAND_NEW', 'PRE_LOVED')) NOT VALID",
+                "ALTER TABLE products ADD CONSTRAINT ck_products_quantity_type CHECK (quantity_type::text = item_condition::text) NOT VALID",
+                "ALTER TABLE products ADD CONSTRAINT ck_products_stock_policy CHECK ((item_condition = 'PRE_LOVED' AND in_stock_count IN (0, 1)) OR (item_condition = 'BRAND_NEW' AND in_stock_count >= 0)) NOT VALID",
+            ):
+                try:
+                    connection.execute(text(statement))
+                except Exception as exc:
+                    if "already exists" not in str(exc).lower():
+                        raise
         # Existing catalog prices predate transport allocation: preserve them as
-        # the base price and start with a zero transport allocation.
+        # the base price and start with a zero transport allocation."}
         connection.execute(text("UPDATE products SET base_price = selling_price WHERE base_price = 0 AND selling_price > 0"))
         for statement in (
             "CREATE INDEX IF NOT EXISTS ix_products_stock_lot_id ON products(stock_lot_id)",
@@ -242,6 +380,16 @@ def seed_products(session):
         ("Retro Running Trainers", "Nike", "White / Gum", "Men", "Shoes", "44", "Grade B — Good", 30000, 55000, 98000, 1, "Retro runner on a gum sole. Cleaned and disinfected.", "Shelf S-5"),
         ("Floral Summer Blouse", "Unbranded", "Floral", "Women", "Tops & Shirts", "S", "Grade A — Excellent", 14000, 28000, 50000, 1, "Airy rayon blouse with covered buttons. Zero pilling.", "Rail C-2")
     ]
+    # Existing seed rows remain the curated stream. These factory rows prove
+    # both inventory policies are available from first boot in a clean database.
+    raw_products.extend([
+        ("Essential Cotton Crew Tee", "Adonai Basics", "Optic White", "Unisex", "Tops & Shirts", "S / M / L / XL", "Factory Fresh", 18000, 32000, 42000, 12, "Factory-fresh heavyweight cotton tee with an easy unisex fit and intact brand tags.", "Rail N-1", "BRAND_NEW", ["S", "M", "L", "XL"], ["Optic White", "Black"], "Factory tag attached; 100% cotton.", "intact" , {} , "New factory cotton; no wear or defects."),
+        ("Everyday Straight-Leg Denim", "Adonai Basics", "Dark Indigo", "Women", "Pants & Jeans", "26 / 28 / 30 / 32", "Factory Fresh", 42000, 72000, 85000, 8, "Brand-new straight-leg denim supplied in original inner packaging with factory sizing tags.", "Rail N-2", "BRAND_NEW", ["26", "28", "30", "32"], ["Dark Indigo"], "Factory sizing and care tags intact.", "intact", {}, "Factory-fresh denim grading: no marks, fading, or alterations."),
+    ])
+    raw_products = [
+        tuple(r) if len(r) >= 20 else tuple(r) + ("PRE_LOVED", [], [], "", "", {}, "Hand-inspected and laundered; disclosed wear is part of the item story.")
+        for r in raw_products
+    ]
 
     # Flat-lay measurements (INCHES), fabric composition, care and the
     # mandatory flaw disclosure rendered by the Product Detail Page.
@@ -341,6 +489,14 @@ def seed_products(session):
             category=r[4],
             size=r[5],
             condition=r[6],
+            item_condition=r[13],
+            quantity_type=r[13],
+            size_variants_json=json.dumps(r[14] if isinstance(r[14], list) else []),
+            color_variants_json=json.dumps(r[15] if isinstance(r[15], list) else []),
+            factory_tag_notes=r[16],
+            inner_packaging=r[17],
+            measurements_json=json.dumps(r[18] if isinstance(r[18], dict) else {}),
+            fabric_grading_notes=r[19],
             cost_price=r[7],
             # base_price must be seeded too: final_selling_price is a generated
             # column (base_price + 50% transport). Leaving it at 0 made a fresh
@@ -359,6 +515,7 @@ def seed_products(session):
             flaw_photo_index=details.get("flaw_photo", -1),
             care_notes=details.get("care", ""),
             rack_location=r[12],
+            inventory_status="AVAILABLE" if r[10] > 0 else "OUT_OF_STOCK",
             created_at=created
         )
         session.add(prod)
@@ -373,15 +530,15 @@ def seed_products(session):
             batch_reference="BATCH-2026-Q3-INIT",
             intake_date=created,
             intake_staff_id="STF-01",
-            notes="Initial curated inventory intake"
+            notes=("Initial brand-new factory intake" if r[13] == "BRAND_NEW" else "Initial curated pre-loved intake")
         ))
     logger.info("Seeded %d initial product catalog items and inventory records.", len(raw_products))
 
 
 def seed_settings(session):
     defaults = {
-        "store_name": "Adonai Thrift Store",
-        "tagline": "Curated pre-loved vintage · Laundered, graded and sold once",
+        "store_name": "Adonai Store",
+        "tagline": "Brand-new apparel + curated vintage pieces · Kampala, Uganda",
         "whatsapp": "256758873398",
         "whatsapp_display": "+256 758 873 398",
         "phone": "+256 758 873 398",
@@ -391,7 +548,7 @@ def seed_settings(session):
         "instagram": "@adonaithrift256",
         "address": "Plot 45 Salama Road / Kibuli, Kampala, Uganda",
         "hours": "Mon - Sat: 8:30 AM - 7:30 PM | Sun: 10:00 AM - 6:00 PM",
-        "delivery_scope": "Uganda (Central, Eastern, and Western regions)",
+        "delivery_scope": "Adonai-managed delivery across Uganda (Central, Eastern, Western, and regional routes)",
         "currency": "UGX",
         "base_delivery_fee": "7000",
         "boda_base_fee": "7000",
@@ -404,6 +561,11 @@ def seed_settings(session):
         existing = session.query(StoreSetting).filter_by(key=k).first()
         if not existing:
             session.add(StoreSetting(key=k, value=v))
+        elif k == "delivery_scope" and str(existing.value or "").strip().lower() in {
+            "uganda (central, eastern, and western regions)",
+            "delivery available across uganda",
+        }:
+            existing.value = v
 
     # Hardening migration: purge the retired, publicly known default key from
     # databases seeded by earlier releases so it can never authenticate again.
@@ -465,6 +627,8 @@ def seed_sample_sales(session):
         product_id="PRD-1001",
         barcode_id="ADT-10001",
         name="Indigo Type III Trucker Jacket",
+        item_condition="PRE_LOVED",
+        quantity_type="PRE_LOVED",
         unit_price=68000,
         qty=1,
         line_total=68000

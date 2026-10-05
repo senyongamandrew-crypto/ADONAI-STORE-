@@ -32,7 +32,7 @@ img, svg, video, canvas, iframe { max-width: 100%; }
 input, select, textarea { max-width: 100%; }
 
 /* ======================================================================
-   ADONAI THRIFT STORE — Ops console theme
+   ADONAI STORE — Unified retail operations console theme
    Warm dark sidebar + light warm workspace (matches approved screenshots)
    Type: Playfair Display (display) · Plus Jakarta Sans (text)
    ====================================================================== */
@@ -416,6 +416,9 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .ph-thumb { width: 64px; height: 64px; border-radius: 10px; overflow: hidden; background: var(--tint); border: 1px solid var(--line); display: grid; place-items: center; font-size: 26px; flex-shrink: 0; position: relative; }
 .ph-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .stock-main { flex: 1; min-width: 0; }
+.inventory-badge-inline { display: inline-block; padding: 3px 6px; border-radius: 4px; color: #fff; font: 800 9px/1 var(--font-text); letter-spacing: .04em; vertical-align: 2px; }
+.inventory-badge-inline.new { background: #B45309; }
+.inventory-badge-inline.vintage { background: #047857; }
 .stock-name { font: 700 18px var(--font-display); color: var(--ink); }
 .stock-sku { font-size: 12.5px; color: var(--rust); font-weight: 600; letter-spacing: .04em; }
 .stock-price { font: 800 20px var(--font-display); color: var(--rust); margin-top: 8px; }
@@ -429,6 +432,10 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 /* ---- catalog intake ---- */
 .sec { font: 700 15.5px var(--font-text); color: var(--ink); margin: 22px 0 10px; }
 .intake-card .field label, .flab { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; letter-spacing: .08em; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+.inventory-toggle { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 18px; }
+.inventory-toggle-btn { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--body); padding: 12px; font: 700 12px var(--font-text); cursor: pointer; text-align: left; }
+.inventory-toggle-btn.active { background: #ECFDF5; border-color: #16A34A; color: #047857; box-shadow: 0 0 0 2px rgba(22, 163, 74, .1); }
+@media (max-width: 560px) { .inventory-toggle { grid-template-columns: 1fr; } }
 .fhint { font-weight: 500; text-transform: none; letter-spacing: 0; opacity: .85; }
 .fgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 12px; }
 .fgrid.third { grid-template-columns: 1fr 1fr; }

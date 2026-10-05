@@ -1,4 +1,4 @@
-/* ============ Adonai POS — cashier terminal logic ============ */
+/* ============ Adonai Store POS — cashier terminal logic ============ */
 (function () {
   "use strict";
 
@@ -225,6 +225,7 @@
   let products = [];
   let activeCat = "All";
   let activeDemo = "All";
+  let activeInventory = "All";
   let term = "";
 
   function refreshProducts() {
@@ -257,7 +258,8 @@
     const list = products
       .filter(p => activeDemo === "All" || p.demographic === activeDemo)
       .filter(p => activeCat === "All" || p.category === activeCat)
-      .filter(p => !term || [p.name, p.brand, p.size, p.color, p.sku, p.barcode_id, p.condition].join(" ").toLowerCase().includes(term))
+      .filter(p => activeInventory === "All" || (p.item_condition || "PRE_LOVED") === activeInventory)
+      .filter(p => !term || [p.name, p.brand, p.size, p.color, p.sku, p.barcode_id, p.condition, p.item_condition].join(" ").toLowerCase().includes(term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#tileGrid").innerHTML = list.length ? list.map(p => {
       const out = p.in_stock_count <= 0;
@@ -266,8 +268,8 @@
       <button class="tile" data-tile="${esc(p.id)}" ${out ? "disabled" : ""}>
         <span class="tile-img">${img || (EMOJI[p.category] || Icons.svg("tag", "ico-cat"))}</span>
         <span class="tile-body">
-          <span class="t-name">${esc(p.name)}</span>
-          <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${esc(p.condition)}</span>
+          <span class="t-name"><span class="pos-condition-tag ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span> ${esc(p.name)}</span>
+          <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${p.item_condition === "BRAND_NEW" ? "Factory tagged" : "1-of-1 vintage"}</span>
           <span class="t-row">
             <span class="t-price">${DB.ugx(p.selling_price)}</span>
             <span class="stock-dot ${out ? "out" : ""}">${out ? "SOLD" : p.in_stock_count + " left"}</span>
@@ -405,7 +407,7 @@
     } else {
       box.innerHTML = det.map(({ l, p, amt }) => `
         <div class="cline">
-          <span class="c-name">${esc(p.name)}</span>
+          <span class="c-name"><span class="pos-condition-tag ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span> ${esc(p.name)}</span>
           <span class="c-amt">${DB.ugx(amt)}</span>
           <span class="c-unit">${DB.ugx(p.selling_price)} each · ${esc(p.barcode_id)}</span>
           <span class="c-controls">
@@ -658,7 +660,7 @@
       <div class="receipt-paper">
         <div class="rc-brand">
           <img src="assets/adonai-logo-stacked.svg" alt="Adonai Store" class="rc-logo-img" style="width:115px;max-width:48mm;height:auto;margin:0 auto 4px;display:block;" />
-          <div class="rc-sub">CURATED VINTAGE · KAMPALA</div>
+          <div class="rc-sub">BRAND-NEW APPAREL · CURATED VINTAGE · KAMPALA</div>
         </div>
         <div class="rc-meta-top">
           <strong>${esc(S.store_name || "Adonai Store")}</strong><br/>
@@ -698,7 +700,7 @@
             ${sale.items.map(it => `
               <tr>
                 <td style="text-align:left">
-                  <div class="rc-it-name">${esc(it.name)}</div>
+                  <div class="rc-it-name">[${it.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}] ${esc(it.name)}</div>
                   <div class="rc-it-sku">${esc(it.sku || it.barcode_id || "")}</div>
                 </td>
                 <td style="text-align:center">${it.qty}</td>
@@ -716,7 +718,7 @@
           </div>
           ${sale.delivery_fee > 0 ? `
             <div class="rc-sum-row">
-              <span>Rider Delivery Fee</span>
+              <span>Delivery Coordination Fee</span>
               <span>${DB.ugx(sale.delivery_fee)}</span>
             </div>
           ` : ""}

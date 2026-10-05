@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — WSGI Entrypoint for Gunicorn on Render
+Adonai Store — WSGI Entrypoint for Gunicorn on Render
 Executes database initialization and auto-migrations, then serves WSGI requests.
 """
 import logging

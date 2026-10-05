@@ -39,7 +39,7 @@
       <button class="nav-item" data-view="inventory"><span class="nav-ico"><i data-icon="boxes"></i></span><span>Inventory Rack</span><span class="badge warn" id="navStockBadge"></span></button>
       <button class="nav-item" data-view="intake"><span class="nav-ico"><i data-icon="plus-circle"></i></span><span>Catalog Intake</span></button>
       <button class="nav-item" data-view="customers"><span class="nav-ico"><i data-icon="printer"></i></span><span>Posting Audit Logs</span></button>
-      <button class="nav-item" data-view="dispatch"><span class="nav-ico"><i data-icon="truck"></i></span><span>Boda Riders &amp; Dispatch</span></button>
+      <button class="nav-item" data-view="dispatch"><span class="nav-ico"><i data-icon="truck"></i></span><span>Delivery Partners &amp; Dispatch</span></button>
       <button class="nav-item active" data-view="overview"><span class="nav-ico"><i data-icon="bar-chart-3"></i></span><span>Sales Analytics</span></button>
       <button class="nav-item" data-view="payments"><span class="nav-ico"><i data-icon="book-open"></i></span><span>Financial Ledgers</span></button>
       <button class="nav-item" data-view="staff"><span class="nav-ico"><i data-icon="key-round" class="ico-lime"></i></span><span>Staff &amp; Permissions</span></button>
@@ -87,6 +87,11 @@
       </div>
       <div class="kpis" id="kpiCards"></div>
 
+      <div class="card dashboard-products-card" style="margin-top:18px">
+        <div class="card-head"><div><h3>Product Cards</h3><p class="muted small">Latest available pieces on the rack</p></div><button class="btn ghost sm" data-goto="inventory">View inventory →</button></div>
+        <div class="dashboard-products-grid" id="dashboardProductCards"></div>
+      </div>
+
       <div class="dash-grid-top">
         <div class="card">
           <div class="card-head">
@@ -120,7 +125,7 @@
         </div>
 
         <div class="card">
-          <div class="card-head"><h3>Boda Dispatch Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
+          <div class="card-head"><h3>Delivery Partner Pool</h3><button class="btn ghost sm" data-goto="dispatch">Manage riders →</button></div>
           <div id="riderPool"></div>
         </div>
       </div>
@@ -152,7 +157,7 @@
       <div class="page-head">
         <p class="kicker">INVENTORY &amp; STOCK MANAGEMENT</p>
         <h1>The Rack &amp; Stock Room (UGX)</h1>
-        <p class="muted">Full management of all existing thrift apparel, pricing, stock statuses, editing, and deletion.</p>
+        <p class="muted">Manage Brand-New Apparel and Curated Pre-Loved / Vintage inventory, pricing, stock status, variants, and product records.</p>
         <div class="head-actions">
           <button class="btn primary" data-goto="intake">+ Tag New Intake</button>
         </div>
@@ -183,7 +188,7 @@
       <div class="page-head">
         <p class="kicker">POS INTAKE &amp; BARCODE MANAGEMENT</p>
         <h1>Catalog Intake</h1>
-        <p class="muted">Register new one-of-one thrift pieces with demographic categorization, multi-angle photos, and UGX pricing.</p>
+        <p class="muted">Register factory-fresh multi-quantity products or curated 1-of-1 vintage pieces with barcode tags, variants, photos, and UGX pricing.</p>
       </div>
 
       <div class="card intake-card">
@@ -196,12 +201,23 @@
         </div>
 
         <h4 class="sec">2. Item Details &amp; Barcode</h4>
-        <div class="field"><label>Item title / name</label><input class="sel-full" id="inTitle" placeholder="e.g. 1990s Washed Denim Trucker Jacket" /></div>
+        <div class="inventory-toggle" role="group" aria-label="Inventory type">
+          <button type="button" class="inventory-toggle-btn" data-intake-condition="PRE_LOVED">Curated Pre-Loved / Vintage · 1-of-1</button>
+          <button type="button" class="inventory-toggle-btn active" data-intake-condition="BRAND_NEW">Brand-New Apparel · Multi-Quantity</button>
+        </div>
+        <input type="hidden" id="inItemCondition" value="BRAND_NEW" />
+        <div class="field"><label>Item title / name</label><input class="sel-full" id="inTitle" placeholder="e.g. Factory Cotton Crew Tee or 1990s Denim Jacket" /></div>
         <div class="fgrid third">
           <div class="field"><label>Barcode / SKU</label>
             <div class="sku-row"><input class="sel-full" id="inSku" /><button class="btn sm ghost" id="btnRollSku" type="button">Roll</button></div>
           </div>
           <div class="field"><label>Condition grade</label><select id="inCond" class="sel-full"></select></div>
+        </div>
+        <div class="fgrid dual-inventory-fields">
+          <div class="field" id="inSizeVariantsField"><label>Brand-new size variants<span class="fhint">Use S, M, L, XL for multi-quantity stock</span></label><input class="sel-full" id="inSizeVariants" placeholder="S, M, L, XL" /></div>
+          <div class="field" id="inFactoryNotesField"><label>Factory tag notes<span class="fhint">Tags, packaging, and partner details</span></label><input class="sel-full" id="inFactoryNotes" placeholder="Intact factory tags; original packaging" /></div>
+          <div class="field" id="inMeasurementsField"><label>Exact garment measurements<span class="fhint">Pre-loved: chest, length, waist, inseam</span></label><input class="sel-full" id="inMeasurements" placeholder="Chest 42in; Length 28in" /></div>
+          <div class="field" id="inFabricNotesField"><label>Fabric grading notes</label><input class="sel-full" id="inFabricNotes" placeholder="Hand-inspected condition notes" /></div>
         </div>
         <div class="fgrid">
           <div class="field"><label>Size</label>
@@ -211,6 +227,8 @@
           <div class="field"><label>Color / wash</label><input class="sel-full" id="inColor" placeholder="e.g. Indigo, Olive, Terracotta" /></div>
         </div>
         <div class="fgrid">
+          <div class="field"><label>Quantity / units received<span class="fhint" id="inQtyHint">Pre-loved must be 1 · brand-new supports multi-stock</span></label>
+            <input id="inQty" class="sel-full" type="number" min="0" step="1" value="1" placeholder="1" /></div>
           <div class="field"><label>Stock status</label>
             <select id="inStatus" class="sel-full"><option value="1">Available</option><option value="0">Sold</option></select></div>
           <div class="field full"><label>Channel visibility</label>
@@ -231,7 +249,7 @@
         <h4 class="sec">4. Item Photos (4 Angles)</h4>
         <div class="photos-head">
           <div><label class="flab">Multi-angle item photography (gallery &amp; local files)</label>
-            <p class="muted small">Upload high-resolution thrift photos from your gallery or local files</p></div>
+            <p class="muted small">Upload high-resolution product photos from your gallery or local files</p></div>
           <span class="muted small" id="angleCount">0 / 4 angles</span>
         </div>
         <div class="photo-row" id="photoRow"></div>
@@ -289,14 +307,14 @@
 
       <!-- print-style tag preview -->
       <div class="card tag-card">
-        <div class="card-head"><span class="flab">Print tag preview</span><span class="chip-gold">1-OF-1 THRIFT</span></div>
+        <div class="card-head"><span class="flab">Print tag preview</span><span class="chip-gold" id="tagCondition">1-OF-1 VINTAGE</span></div>
         <p class="kicker" id="tagKicker">MEN · TOPS &amp; SHIRTS</p>
         <h3 class="tag-title" id="tagTitle">Item Title</h3>
         <p class="muted small" id="tagMeta">Brand: Unbranded | Size: L | Color: Standard</p>
         <p class="tag-price"><span id="tagPrice">UGX 0</span> <s id="tagStrike"></s></p>
         <div class="tag-bars" id="tagBars"></div>
         <p class="tag-code" id="tagCode">ADN-XXX-0000</p>
-        <p class="tag-store">ADONAI THRIFT STORE · KAMPALA, UGANDA</p>
+        <p class="tag-store">ADONAI STORE · BRAND-NEW + CURATED VINTAGE · KAMPALA, UGANDA</p>
       </div>
 
       <div class="card">
@@ -314,8 +332,18 @@
           <p class="muted">Review completed sales, print receipts, and export posted records for documentation.</p>
         </div>
         <div class="row audit-actions">
-          <button class="btn ghost" id="btnExportAudit">Export CSV</button>
-          <button class="btn primary" id="btnPrintAudit">Print summary</button>
+          <details class="export-menu-wrap" id="auditExportDetails">
+            <summary class="btn ghost" id="btnExportAudit">Export CSV <span aria-hidden="true">⌄</span></summary>
+            <div class="export-menu" id="auditExportMenu">
+              <button type="button" data-export-audit="sales"><span>▣</span><span><strong>Sales records</strong><small>Posted transactions</small></span></button>
+              <button type="button" data-export-audit="stock"><span>▤</span><span><strong>Stock inventory</strong><small>Catalog and quantities</small></span></button>
+              <button type="button" data-export-audit="ledger"><span>▥</span><span><strong>Financial ledger</strong><small>Payment and value summary</small></span></button>
+              <button type="button" data-export-audit="staff"><span>♙</span><span><strong>Staff directory</strong><small>Cashier and role records</small></span></button>
+              <button type="button" data-export-audit="demo"><span>✦</span><span><strong>Demo examples</strong><small>Safe sample rows — delete anytime</small></span></button>
+            </div>
+          </details>
+          <button class="btn primary" id="btnPrintAudit" type="button">Print summary</button>
+          <a class="audit-download-fallback" id="auditDownloadFallback" hidden download>Download file</a>
         </div>
       </div>
       <input class="search-wide" id="auditSearch" type="search" placeholder="Search receipt, customer, cashier or payment method" />
@@ -323,12 +351,12 @@
       <div class="guest-list" id="auditList"></div>
     </section>
 
-    <!-- ==================== BODA RIDERS & DISPATCH ==================== -->
+    <!-- ==================== DELIVERY PARTNERS & DISPATCH ==================== -->
     <section class="view" id="view-dispatch">
       <div class="page-head">
         <p class="kicker">DISPATCH</p>
-        <h1>Riders</h1>
-        <p class="muted">Available riders can be assigned from an order. Duty flips to on delivery the moment a route is confirmed.</p>
+        <h1>Delivery Partners</h1>
+        <p class="muted">Assign an authorized boda rider or courier from an order. Adonai owns the customer communication and delivery handoff throughout the route.</p>
       </div>
       <div class="rider-list" id="riderList"></div>
     </section>
@@ -434,7 +462,7 @@
         <div>
           <p class="kicker">SECURITY &amp; ROLE PERMISSIONS</p>
           <h1>Floor Team &amp; Keys</h1>
-          <p class="muted">Manage cashier accounts, manager authority, and boda dispatch personnel.</p>
+          <p class="muted">Manage cashier accounts, manager authority, and authorized delivery partners.</p>
         </div>
       </div>
 
@@ -457,7 +485,7 @@
           <option value="all">Role · All</option>
           <option value="admin">Admins &amp; Managers</option>
           <option value="cashier">Cashiers</option>
-          <option value="rider">Boda Riders</option>
+          <option value="rider">Delivery Partners</option>
         </select>
         <select class="sel-full team-filter" id="teamStatusFilter" title="Filter by duty status">
           <option value="all">Status · All</option>

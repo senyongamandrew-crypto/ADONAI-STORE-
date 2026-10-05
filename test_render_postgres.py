@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — Backend PostgreSQL & Render Hardening Test Suite
+Adonai Store — Backend PostgreSQL & Render Hardening Test Suite
 Verifies:
 1. DATABASE_URL dynamic formatting (postgres:// -> postgresql://)
 2. Credential masking in stdout logs
@@ -46,7 +46,7 @@ from models import (
     StockLot,
     StoreSetting,
 )
-from db_init import init_db
+from db_init import _dual_inventory_backfill_statements, init_db
 from serve import app, wsgi_app
 
 
@@ -107,6 +107,31 @@ class TestRenderPostgresHardening(unittest.TestCase):
             self.assertGreaterEqual(settings_count, 5, "Settings must be seeded")
 
             print(f"✅ PASS: Schema verification & seed complete ({prods_count} products, {cats_count} categories, {users_count} users).")
+
+    def test_02b_postgres_enum_backfill_uses_explicit_casts(self):
+        """Native PostgreSQL enum migrations must not rely on implicit casts."""
+        statements = _dual_inventory_backfill_statements(
+            postgres=True,
+            item_condition_is_enum=True,
+            quantity_type_is_enum=True,
+        )
+        item_backfill, invalid_quantity_backfill, mismatched_quantity_backfill = statements
+
+        self.assertIn("THEN 'BRAND_NEW'::item_condition_enum", item_backfill)
+        self.assertIn("ELSE 'PRE_LOVED'::item_condition_enum", item_backfill)
+        self.assertIn("item_condition::text NOT IN", item_backfill)
+        self.assertIn("SET quantity_type = item_condition::text::quantity_type_enum", invalid_quantity_backfill)
+        self.assertIn("SET quantity_type = item_condition::text::quantity_type_enum", mismatched_quantity_backfill)
+        self.assertIn("quantity_type::text = 'PRE_LOVED'", mismatched_quantity_backfill)
+
+        legacy_statements = _dual_inventory_backfill_statements(
+            postgres=True,
+            item_condition_is_enum=False,
+            quantity_type_is_enum=False,
+        )
+        self.assertNotIn("::item_condition_enum", legacy_statements[0])
+        self.assertIn("SET quantity_type = item_condition::text", legacy_statements[1])
+        print("✅ PASS: PostgreSQL enum backfill uses safe, explicit casts.")
 
     def test_03_concurrent_inventory_deduction(self):
         """Simulate high-concurrency order placement and verify atomic inventory safety."""

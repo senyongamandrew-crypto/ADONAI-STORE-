@@ -56,7 +56,7 @@
     {
       "name": "Catalog Intake",
       "short_name": "Intake",
-      "description": "Intake new vintage items & photos",
+      "description": "Intake brand-new apparel and curated vintage items with photos",
       "url": "/admin.html?view=intake",
       "icons": [
         {
@@ -69,7 +69,7 @@
     {
       "name": "Fulfillment & Orders",
       "short_name": "Orders",
-      "description": "Manage order fulfillment & boda riders",
+      "description": "Manage order fulfillment & delivery partners across Uganda",
       "url": "/admin.html?view=sales",
       "icons": [
         {

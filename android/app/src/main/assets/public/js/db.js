@@ -1,5 +1,5 @@
 /* ============================================================
-   ADONAI THRIFT STORE — CENTRAL REAL-TIME DB ENGINE (DB)
+   ADONAI STORE — CENTRAL REAL-TIME DB ENGINE (DB)
    The single source of truth for ALL interfaces:
      /           public storefront
      /pos        cashier register
@@ -15,7 +15,7 @@
 
   const LS_KEY   = "adonai-db-v6";   // v6: guest book, riders, ledger, staff roster, master-key
   const CHANNEL  = "adonai-db-v6-sync";
-  const LOCK     = "adonai-thrift-db-tx";
+  const LOCK     = "adonai-store-db-tx";
 
   /* ---------- storage (localStorage, in-memory fallback for tests) ---------- */
   const _mem = {};
@@ -27,6 +27,8 @@
 
   /* ---------- domain constants ---------- */
   const CATEGORIES    = ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear"];
+  const ITEM_CONDITIONS = ["BRAND_NEW", "PRE_LOVED"];
+  const QUANTITY_TYPES = ["BRAND_NEW", "PRE_LOVED"];
   const DEMO_CODES    = { "Men": "MEN", "Women": "WOM", "Children": "KID", "Unisex": "UNI" };
   const CONDITIONS    = ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"];
   // Unisex is a first-class demographic so it is available in inventory,
@@ -86,7 +88,9 @@
       ["Kids' Denim Jacket", "OshKosh", "Light wash", "Children", "Children Wear", "8y", B, 13000, 25000, 45000, 1, "Sturdy kids' denim with room to grow. All snaps working."],
       ["Silk Printed Scarf", "Unbranded", "Paisley", "Women", "Accessories", "-", V, 13000, 26000, 48000, 1, "Hand-rolled 70s silk square. No pulls, no stains."],
       ["Retro Running Trainers", "Nike", "White / Gum", "Men", "Shoes", "44", B, 30000, 55000, 98000, 1, "Retro runner on a gum sole. Cleaned and disinfected."],
-      ["Floral Summer Blouse", "Unbranded", "Floral", "Women", "Tops & Shirts", "S", A, 14000, 28000, 50000, 1, "Airy rayon blouse with covered buttons. Zero pilling."]
+      ["Floral Summer Blouse", "Unbranded", "Floral", "Women", "Tops & Shirts", "S", A, 14000, 28000, 50000, 1, "Airy rayon blouse with covered buttons. Zero pilling."],
+      ["Essential Cotton Crew Tee", "Adonai Basics", "Optic White", "Unisex", "Tops & Shirts", "S / M / L / XL", "Factory Fresh", 18000, 32000, 42000, 12, "Factory-fresh heavyweight cotton tee with intact brand tags.", "BRAND_NEW", ["S", "M", "L", "XL"], ["Optic White", "Black"], "Factory tag attached; 100% cotton.", "intact", {}, "New factory cotton; no wear or defects."],
+      ["Everyday Straight-Leg Denim", "Adonai Basics", "Dark Indigo", "Women", "Pants & Jeans", "26 / 28 / 30 / 32", "Factory Fresh", 42000, 72000, 85000, 8, "Brand-new straight-leg denim with factory sizing tags and original inner packaging.", "BRAND_NEW", ["26", "28", "30", "32"], ["Dark Indigo"], "Factory sizing and care tags intact.", "intact", {}, "Factory-fresh denim; no marks, fading, or alterations."]
     ];
     /* Flat-lay measurements (inches), fabric, care and mandatory flaw
        disclosure — mirrors db_init.py so the offline seed matches the API. */
@@ -196,8 +200,8 @@
     return {
       version: 3,
       settings: {
-        store_name: "Adonai Thrift Store",
-        tagline: "Curated pre-loved vintage · Laundered, graded and sold once",
+        store_name: "Adonai Store",
+        tagline: "Brand-new apparel + curated vintage pieces · Kampala, Uganda",
         address: "Plot 45 Salama Road / kibuli Kampala, Uganda",
         whatsapp: "256758893398",
         whatsapp_display: "+256 7588 73398",
@@ -206,7 +210,7 @@
         tiktok: "@adonai.thrift256",
         instagram: "@adonaithrift256",
         hours: "Mon - Sat: 8:30 AM - 7:30 PM | Sun: 10:00 AM - 6:00 PM",
-        delivery_scope: "Uganda (Central, Eastern, and Western regions)",
+        delivery_scope: "Adonai-managed delivery across Uganda (Central, Eastern, Western, and regional routes)",
         base_delivery_fee: 7000,
         currency: "UGX",
         access_locked: false,               // OPEN ACCESS MODE until admin sets a key crew & flips the lock
@@ -218,13 +222,27 @@
       guests: seedGuests(),
       riders: seedRiders(),
       staff: seedStaff(),
-      counters: { product: 1016, sale_seq: 1861, sale_pos: posN, sale_web: webN, guest: 1004, rider: 1003, ledger: 1002 }
+      counters: { product: 1018, sale_seq: 1861, sale_pos: posN, sale_web: webN, guest: 1004, rider: 1003, ledger: 1002 }
     };
   }
 
   /* ---------- state & realtime plumbing ---------- */
   let state = null;
   const subs = []; // {table, cb}
+
+  function normalizeProductPolicy(product) {
+    const condition = String(product.item_condition || "").toUpperCase();
+    product.item_condition = condition === "BRAND_NEW" ? "BRAND_NEW" : "PRE_LOVED";
+    product.quantity_type = product.item_condition;
+    product.size_variants = Array.isArray(product.size_variants) ? product.size_variants : [];
+    product.color_variants = Array.isArray(product.color_variants) ? product.color_variants : [];
+    product.measurements = product.measurements && typeof product.measurements === "object" ? product.measurements : {};
+    product.factory_tag_notes = product.factory_tag_notes || "";
+    product.inner_packaging = product.inner_packaging || "";
+    product.fabric_grading_notes = product.fabric_grading_notes || (product.item_condition === "BRAND_NEW" ? "Factory-fresh condition." : "Hand-inspected and laundered.");
+    product.inventory_status = Number(product.in_stock_count || 0) > 0 ? "AVAILABLE" : "OUT_OF_STOCK";
+    return product;
+  }
 
   function reload() {
     if (state) return;
@@ -233,6 +251,19 @@
     let ok = true;
     if (raw) { try { state = JSON.parse(raw); ok = valid(state); } catch (e) { ok = false; } }
     if (!raw || !ok) { state = seedState(); save(); }
+    if (state && Array.isArray(state.products)) {
+      state.products.forEach(normalizeProductPolicy);
+      if (state.settings) {
+        if (/Adonai Thrift Store/i.test(String(state.settings.store_name || ""))) state.settings.store_name = "Adonai Store";
+        if (!state.settings.tagline || /only|curated pre-loved vintage/i.test(String(state.settings.tagline))) {
+          state.settings.tagline = "Brand-new apparel + curated vintage pieces · Kampala, Uganda";
+        }
+        if (!state.settings.delivery_scope || /^Uganda \(Central, Eastern, and Western regions\)$/i.test(String(state.settings.delivery_scope))) {
+          state.settings.delivery_scope = "Adonai-managed delivery across Uganda (Central, Eastern, Western, and regional routes)";
+        }
+      }
+      save();
+    }
   }
   function save() {
     try { storage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { /* quota — ignore */ }
@@ -312,10 +343,12 @@
   }
 
   let productSyncInFlight = null;
-  function pullProducts(publicAvailability) {
+  function pullProducts(publicAvailability, reservationOwner) {
     if (productSyncInFlight || typeof fetch === "undefined") return productSyncInFlight || Promise.resolve(false);
     const isPublic = publicAvailability === true || (typeof window !== "undefined" && window.__ADONAI_STOREFRONT__ === true);
-    const endpoint = "/api/products" + (isPublic ? "?availability=public" : "");
+    const owner = reservationOwner || (typeof window !== "undefined" ? window.__ADONAI_WEB_LOCK_OWNER__ : "");
+    const query = isPublic ? `?availability=public${owner ? `&reservation_owner=${encodeURIComponent(owner)}` : ""}` : "";
+    const endpoint = "/api/products" + query;
     productSyncInFlight = fetch(apiUrl(endpoint), { method: "GET", cache: "no-store" })
       .then(async response => {
         let data = null;
@@ -398,7 +431,7 @@
           if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
           else pullOperationalData();
         }
-      }, 5000);
+      }, 2000);
 
       // Defer one tick so auth.js can restore the JWT after this module loads.
       // Staff consoles hydrate the full operational state; the storefront only
@@ -461,6 +494,7 @@
     lines.forEach(({ p, qty }) => { p.in_stock_count -= qty; });
     const finalItems = lines.map(({ p, qty }) => ({
       product_id: p.id, sku: p.sku || "", barcode_id: p.barcode_id, name: p.name, size: p.size || "-", qty,
+      item_condition: p.item_condition || "PRE_LOVED", quantity_type: p.quantity_type || p.item_condition || "PRE_LOVED",
       unit_price: p.selling_price, line_total: p.selling_price * qty
     }));
     return { items: finalItems, total: finalItems.reduce((s, l) => s + l.line_total, 0) };
@@ -616,7 +650,7 @@
 
   /* ---------- public API ---------- */
   global.DB = {
-    CATEGORIES, CONDITIONS, DEMOGRAPHICS, CAT_CODES, TENDER_TYPES, DISPATCH_STATUSES,
+    CATEGORIES, CONDITIONS, ITEM_CONDITIONS, QUANTITY_TYPES, DEMOGRAPHICS, CAT_CODES, TENDER_TYPES, DISPATCH_STATUSES,
     RIDER_STATUSES, STAFF_ROLES, ROLE_LABELS, LEDGER_KINDS, LEDGER_KIND_LABELS,
     ORDER_LANES: orderLanes, DEFAULT_MASTER_KEY, TENDER_LABEL: tenderLabel,
 
@@ -798,20 +832,11 @@
 
     /* ----- sales (POS + web storefront, unified) ----- */
     async processPosSale({ items, tender, cashier, customer_name, customer_phone, customer_location, customer_email, customer_notes, lock_owner }) {
-      // The POS intentionally supports open access while the local access lock
-      // is off. In that mode there is no JWT to use for the protected server
-      // checkout, so complete the sale against the same local DB used by the
-      // catalogue. Once a cashier signs in, the existing atomic API path below
-      // remains the source of truth for shared stock and accounting.
-      const token = (typeof Auth !== "undefined" && Auth.token) ? Auth.token() : "";
-      const accessLocked = (typeof Auth !== "undefined" && Auth.locked) ? Auth.locked() : false;
-      if (!token && !accessLocked) {
-        return processLocalPosSale({
-          items, tender, cashier, customer_name, customer_phone,
-          customer_location, customer_email, customer_notes
-        });
-      }
-
+      // Every POS sale goes through the authenticated API. This is intentional:
+      // a local-only fallback would let a browser terminal change a private
+      // copy of stock without synchronizing the public storefront or another
+      // cashier. The server remains the atomic source of truth for stock,
+      // reservations, accounting, and printed receipts.
       const payload = {
         channel: "pos",
         lock_owner: String(lock_owner || ""),
@@ -872,12 +897,13 @@
         return JSON.parse(JSON.stringify(sale));
       });
     },
-    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items }) {
+    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items, lock_owner }) {
       const fee = delivery_type === "pickup" ? 0 : Number(delivery_fee != null ? delivery_fee : 7000);
       const data = await apiRequest("/api/orders", {
         method: "POST",
         body: JSON.stringify({
           channel: "web",
+          lock_owner: String(lock_owner || ""),
           items: (items || []).map(item => ({ product_id: item.product_id, qty: item.qty })),
           customer_name: String(customer_name || "Web customer").trim(),
           customer_phone: String(customer_phone || "").trim(),
@@ -1038,29 +1064,33 @@
       return apiRequest("/api/finance/" + suffix, options || { method: "GET" }, true);
     },
     acquireInventoryLock(productId, lockOwner, quantity = 1) {
+      const publicReservation = String(lockOwner || "").startsWith("WEB-");
       return apiRequest("/api/inventory-locks/acquire", {
         method: "POST",
         body: JSON.stringify({ product_id: productId, lock_owner: lockOwner, quantity })
-      }, true);
+      }, !publicReservation);
     },
     releaseInventoryLock(productId, lockOwner, quantity = 1) {
+      const publicReservation = String(lockOwner || "").startsWith("WEB-");
       return apiRequest("/api/inventory-locks/release", {
         method: "POST",
         body: JSON.stringify({ product_id: productId, lock_owner: lockOwner, quantity })
-      }, true);
+      }, !publicReservation);
     },
     releaseInventoryLockOwner(lockOwner, keepalive = false) {
+      const publicReservation = String(lockOwner || "").startsWith("WEB-");
       return apiRequest("/api/inventory-locks/release-owner", {
         method: "POST",
         keepalive: !!keepalive,
         body: JSON.stringify({ lock_owner: lockOwner })
-      }, true);
+      }, !publicReservation);
     },
     heartbeatInventoryLocks(lockOwner) {
+      const publicReservation = String(lockOwner || "").startsWith("WEB-");
       return apiRequest("/api/inventory-locks/heartbeat", {
         method: "POST",
         body: JSON.stringify({ lock_owner: lockOwner })
-      }, true);
+      }, !publicReservation);
     },
 
     /* ----- legacy financial ledger compatibility ----- */

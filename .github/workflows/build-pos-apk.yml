@@ -178,7 +178,7 @@ jobs:
             dist/adonai-pos-v2.apk
             dist/adonai-pos-v2-debug.apk
           body: |
-            ## Adonai Thrift Store — Android POS APK Release
+            ## Adonai Store — Android POS APK Release
 
             ### 📦 Download & Installation
             - **Direct APK**: `adonai-pos-v2.apk` (signed release build)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Adonai Thrift Store — Production Server & WSGI Gateway for Render
+Adonai Store — Production Server & WSGI Gateway for Render
 - PostgreSQL Database integration & auto-migration on boot
 - Full REST API endpoints under /api/*
 - High-concurrency static routing & Gzip compression
@@ -891,7 +891,7 @@ def run_standalone_server():
     socketserver.ThreadingTCPServer.allow_reuse_address = True
 
     with socketserver.ThreadingTCPServer(("0.0.0.0", port), ProductionHandler) as srv:
-        print(f"Adonai Thrift Store Server listening on 0.0.0.0:{port}")
+        print(f"Adonai Store Server listening on 0.0.0.0:{port}")
         print(f"  Storefront        : http://0.0.0.0:{port}/")
         print(f"  API Health Check  : http://0.0.0.0:{port}/api/health")
         print(f"  POS Terminal      : http://0.0.0.0:{port}/pos")
