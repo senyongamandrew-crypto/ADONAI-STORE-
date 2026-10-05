@@ -1,5 +1,5 @@
 /**
- * Adonai Thrift Store — High-Performance E-Commerce Analytics Engine
+ * Adonai Store — Unified E-Commerce Analytics Engine
  * Supports Google Analytics 4 (GA4), Meta Pixel hooks, and privacy-first local event queue.
  */
 (function(window) {

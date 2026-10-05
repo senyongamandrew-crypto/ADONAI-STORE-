@@ -569,7 +569,7 @@
       <div class="receipt-paper">
         <div class="rc-brand">
           <img src="assets/adonai-logo-stacked.svg" alt="Adonai Store" class="rc-logo-img" style="width:115px;max-width:48mm;height:auto;margin:0 auto 4px;display:block;" />
-          <div class="rc-sub">CURATED VINTAGE · KAMPALA</div>
+          <div class="rc-sub">BRAND-NEW APPAREL · CURATED VINTAGE · KAMPALA</div>
         </div>
         <div class="rc-meta-top">
           <strong>${esc(S.store_name || "Adonai Store")}</strong><br/>
@@ -609,7 +609,7 @@
             ${s.items.map(it => `
               <tr>
                 <td style="text-align:left">
-                  <div class="rc-it-name">${esc(it.name)}</div>
+                  <div class="rc-it-name">[${it.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}] ${esc(it.name)}</div>
                   <div class="rc-it-sku">${esc(it.sku || it.barcode_id || "")}</div>
                 </td>
                 <td style="text-align:center">${it.qty}</td>
@@ -627,7 +627,7 @@
           </div>
           ${s.delivery_fee > 0 ? `
             <div class="rc-sum-row">
-              <span>Rider Delivery Fee</span>
+              <span>Delivery Coordination Fee</span>
               <span>${ugx(s.delivery_fee)}</span>
             </div>
           ` : ""}
@@ -691,7 +691,7 @@
     const phone = orderCustomerPhone(s.customer_phone);
     if (!phone) return toast("This order has no customer phone number", false);
     const settings = DB.getSettings();
-    const storeName = settings.store_name || "Adonai Thrift Store";
+    const storeName = settings.store_name || "Adonai Store";
     const location = s.customer_location || s.delivery_area || "the agreed delivery address";
     const itemLines = (s.items || []).map(it => `• ${it.qty || 1} × ${it.name} — ${ugx(it.line_total || 0)}`).join("\n");
     const payment = s.tender && s.tender.paid ? `${DB.TENDER_LABEL(s.tender)} — PAID` : "Payment pending / to be confirmed";
@@ -742,7 +742,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       </div>
 
       <div class="odm-section">
-        <div class="odm-section-label">Order Items (1-of-1 Thrift)</div>
+        <div class="odm-section-label">Order Items · Dual Inventory</div>
         ${s.items.map(it => `
           <div class="odm-item-row">
             <div>
@@ -758,7 +758,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
           <strong>${ugx(subtotal)}</strong>
         </div>
         <div class="odm-sum-row">
-          <span>Rider Delivery Fee</span>
+          <span>Delivery Coordination Fee</span>
           <strong>${ugx(s.delivery_fee || 0)}</strong>
         </div>
         <div class="odm-divider"></div>
@@ -799,7 +799,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       <div class="odm-dispatch-box">
         <div class="odm-dispatch-title">Workflow Dispatch &amp; Closure</div>
         <div class="field">
-          <label>ASSIGN BODA RIDER</label>
+          <label>ASSIGN DELIVERY PARTNER</label>
           <select id="modalRiderSel" class="sel-full">
             ${riders.map(r => `
               <option value="${r.id}" ${s.assigned_rider_id === r.id ? "selected" : ""}>
@@ -920,10 +920,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div class="stock-main">
           <div class="stock-title-row">
             <div class="grow">
-              <div class="stock-name">${esc(p.name)}</div>
+              <div class="stock-name"><span class="inventory-badge-inline ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span> ${esc(p.name)}</div>
               <div class="stock-sku">${esc(p.sku || p.barcode_id || "")}</div>
             </div>
-            ${inStock ? `<span class="stat-chip ok">AVAILABLE</span>` : `<span class="stat-chip bad">SOLD</span>`}
+            ${inStock ? `<span class="stat-chip ok">AVAILABLE</span>` : `<span class="stat-chip bad">OUT OF STOCK</span>`}
           </div>
           <div class="stock-tags">
             <span class="itag">${esc(p.demographic)}</span>
@@ -959,6 +959,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>${p ? "Edit item" : "New item"}</h3>
+      <div class="field"><label>Inventory policy</label><select id="mpItemCondition" class="sel-full"><option value="PRE_LOVED" ${!p || p.item_condition !== "BRAND_NEW" ? "selected" : ""}>Curated Pre-Loved / Vintage · 1-of-1</option><option value="BRAND_NEW" ${p && p.item_condition === "BRAND_NEW" ? "selected" : ""}>Brand-New Apparel · Multi-Quantity</option></select></div>
       <div class="field"><label>Name</label><input id="mpName" class="sel-full" value="${v("name")}" /></div>
       <div class="fgrid">
         <div class="field"><label>Brand</label><input id="mpBrand" class="sel-full" value="${v("brand", "Unbranded")}" /></div>
@@ -1018,7 +1019,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   /* ============================================================
      CATALOG INTAKE (with print tag preview)
      ============================================================ */
-  const DEMO_CODES = { Men: "MEN", Women: "WOM", Children: "KID" };
+  const DEMO_CODES = { Men: "MEN", Women: "WOM", Children: "KID", Unisex: "UNI" };
+  const INTAKE_CONDITIONS = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"];
   const GROUPS = { "Apparel": ["Tops & Shirts", "Dresses & Skirts", "Pants & Jeans"], "Outerwear": ["Outerwear & Jackets"], "Footwear": ["Shoes"], "Accessories": ["Accessories"], "Kids": ["Children Wear"] };
   const intakePhotos = ["", "", "", ""];   // front, back, fabric, tag
   let intakeBound = false;
@@ -1040,10 +1042,31 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       select.innerHTML = `<option value="">Sign in to load registered lots</option>`;
     }
   }
+  function intakeCondition() {
+    return $("#inItemCondition") ? $("#inItemCondition").value : "BRAND_NEW";
+  }
+  function setIntakeCondition(value) {
+    const condition = value === "BRAND_NEW" ? "BRAND_NEW" : "PRE_LOVED";
+    $("#inItemCondition").value = condition;
+    $$('[data-intake-condition]').forEach(button => button.classList.toggle("active", button.dataset.intakeCondition === condition));
+    const isNew = condition === "BRAND_NEW";
+    const qty = $("#inQty");
+    if (qty) { qty.min = isNew ? "0" : "1"; if (!isNew && Number(qty.value) !== 1) qty.value = "1"; }
+    const hint = $("#inQtyHint");
+    if (hint) hint.textContent = isNew ? "Brand-new apparel supports multi-quantity stock" : "Pre-loved pieces are single-quantity 1-of-1 items";
+    const cond = $("#inCond");
+    if (cond) {
+      cond.value = isNew ? "Factory Fresh" : (cond.value === "Factory Fresh" ? "Grade A — Excellent" : cond.value);
+    }
+    const tag = $("#tagCondition");
+    if (tag) tag.textContent = isNew ? "BRAND-NEW APPAREL" : "1-OF-1 VINTAGE";
+    paintTag();
+  }
+
   function initIntakeForm() {
     $("#inDemo").innerHTML = DB.DEMOGRAPHICS.map(d => `<option>${d}</option>`).join("");
     $("#inCat").innerHTML = DB.CATEGORIES.map(c => `<option>${c}</option>`).join("");
-    $("#inCond").innerHTML = DB.CONDITIONS.map(c => `<option>${c}</option>`).join("");
+    $("#inCond").innerHTML = INTAKE_CONDITIONS.map(c => `<option>${c}</option>`).join("");
     $("#inGroup").innerHTML = Object.keys(GROUPS).map(g => `<option>${g}</option>`).join("");
     $("#inSizePreset").innerHTML = `<option value="">Preset</option>` + ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"].map(s => `<option value="${s}">${s}</option>`).join("");
     $("#inSku").value = demoSku();
@@ -1051,6 +1074,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
     if (intakeBound) return;
     intakeBound = true;
+    $$('[data-intake-condition]').forEach(button => button.addEventListener("click", () => setIntakeCondition(button.dataset.intakeCondition)));
     $("#btnRollSku").addEventListener("click", () => { $("#inSku").value = demoSku(); paintTag(); });
     $("#inDemo").addEventListener("change", () => { $("#inSku").value = demoSku(); paintTag(); });
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
@@ -1065,10 +1089,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (g) $("#inGroup").value = g;
       paintTag();
     });
-    ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inTransport", "inRrp", "inSku"].forEach(id => $("#" + id).addEventListener("input", paintTag));
+    ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inTransport", "inRrp", "inSku", "inSizeVariants", "inFactoryNotes", "inMeasurements", "inFabricNotes"].forEach(id => {
+      const element = $("#" + id); if (element) element.addEventListener("input", paintTag);
+    });
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
     buildPhotoRow();
+    setIntakeCondition($("#inItemCondition").value || "BRAND_NEW");
     paintTag();
   }
 
@@ -1138,7 +1165,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       color: $("#inColor").value.trim(),
       demographic: $("#inDemo").value, category: $("#inCat").value,
       size: $("#inSize").value.trim() || "-",
+      item_condition: intakeCondition(),
+      quantity_type: intakeCondition(),
       condition: $("#inCond").value,
+      size_variants: $("#inSizeVariants").value.split(",").map(value => value.trim()).filter(Boolean),
+      factory_tag_notes: $("#inFactoryNotes").value.trim(),
+      measurements: $("#inMeasurements").value.split(";").reduce((out, pair) => {
+        const parts = pair.split(":"); if (parts[0] && parts[1]) out[parts[0].trim()] = parts.slice(1).join(":").trim(); return out;
+      }, {}),
+      fabric_grading_notes: $("#inFabricNotes").value.trim(),
       cost_price: Number($("#inCost").value) || 0,
       stock_lot_id: $("#inStockLot").value,
       base_price: Number($("#inSell").value) || 0,
@@ -1150,6 +1185,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       visibility: $("#inVis").value,
       in_stock_count: Number($("#inStatus").value) ? Math.max(0, Math.floor(Number($("#inQty").value) || 0)) : 0,
       sku: $("#inSku").value.trim(),
+      barcode_id: (() => {
+        const sku = $("#inSku").value.trim().slice(0, 50);
+        return intakeCondition() === "PRE_LOVED" ? `${sku.slice(0, 45)}-1OF1` : sku;
+      })(),
       images: intakePhotos.filter(Boolean),
       image_url: intakePhotos[0] || intakePhotos.find(Boolean) || ""
     };
@@ -1159,7 +1198,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const p = await DB.addProduct(vals);
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
-        ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes"].forEach(id => $("#" + id).value = "");
+        ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes", "inSizeVariants", "inFactoryNotes", "inMeasurements", "inFabricNotes"].forEach(id => $("#" + id).value = "");
         $("#inQty").value = "1";
         intakePhotos.fill(""); paintAngles();
         $("#inStockLot").value = "";
@@ -1333,7 +1372,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   }
 
   /* ============================================================
-     BODA RIDERS & DISPATCH
+     DELIVERY PARTNERS & DISPATCH
      ============================================================ */
   function renderRiders() {
     const all = allSales();
@@ -1752,7 +1791,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       sub: "Master access keys, ledger privileges & system configuration.", roles: ["admin", "manager"] },
     { key: "pos",  icon: Icons.svg("credit-card", "ico-16"), title: "Cashiers & POS Operators",
       sub: "Terminal billing, cash drawer sync & customer contacts on the floor.", roles: ["cashier"] },
-    { key: "boda", icon: Icons.svg("bike", "ico-16"), title: "Boda Dispatch & Logistics",
+    { key: "boda", icon: Icons.svg("bike", "ico-16"), title: "Delivery Partners & Logistics",
       sub: "Local order fulfilment & drop-offs across Kampala.", roles: ["rider"] }
   ];
   const teamFilters = { q: "", role: "all", status: "all", load: "all" };
@@ -1802,7 +1841,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         p.pct = Math.min(100, Math.round((done / target) * 100));
         p.metric = `${done} / ${target} orders fulfilled`;
         p.metricShort = `${done}/${target}`;
-        p.title = rc && rc.id === "RDR-1001" ? "Lead Dispatch Rider" : "Boda Courier";
+        p.title = rc && rc.id === "RDR-1001" ? "Lead Delivery Partner" : "Boda Delivery Partner";
         const zone = rc ? rc.zone : "Kampala";
         if (!s.active)                              p.badge = { tone: "gray", text: "Deactivated" };
         else if (delivering)                        p.badge = { tone: "blue", text: `Delivering Order #${delivering.id} (${delivering.customer_location || delivering.neighborhood || zone})` };
@@ -2154,7 +2193,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const savedImages = (modalBox._images || []).filter(Boolean);
       if (savedImages.length < 4) return toast("Upload all 4 product views before saving", false);
       const vals = {
-        name: $("#mpName").value.trim(), brand: $("#mpBrand").value.trim() || "Unbranded",
+        name: $("#mpName").value.trim(),
+        item_condition: $("#mpItemCondition").value,
+        quantity_type: $("#mpItemCondition").value,
+        brand: $("#mpBrand").value.trim() || "Unbranded",
         color: $("#mpColor").value.trim(), demographic: $("#mpDemo").value, category: $("#mpCat").value,
         size: $("#mpSize").value.trim() || "-", condition: $("#mpCond").value,
         cost_price: Number($("#mpCost").value) || 0,

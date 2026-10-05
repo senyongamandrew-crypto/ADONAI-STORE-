@@ -1,5 +1,13 @@
 # Render PostgreSQL migrations
 
+## Dual inventory architecture — 2026-10-03
+
+Run `20261003_dual_inventory.sql` after the financial and transport migrations. It creates the native `item_condition_enum` and `quantity_type_enum` values (`BRAND_NEW` and `PRE_LOVED`), adds variant/specification fields, snapshots the policy on order items, and installs database enforcement plus `pg_notify('adonai_inventory', ...)` triggers. `PRE_LOVED` rows are constrained to quantity 1 (or 0 after sale); `BRAND_NEW` rows support multi-quantity stock. The API and browser/POS polling layer consume the same authoritative stock and expiring cart/POS reservations.
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20261003_dual_inventory.sql
+```
+
 ## 50/50 transport allocation — 2026-10-02
 
 Run `20261002_transport_allocation.sql` on Render after deploying this version. It adds generated PostgreSQL columns for the embedded and checkout portions and preserves existing catalog prices as `base_price`. Inventory entry and order checkout also recalculate these values server-side, so client-supplied delivery fees are not trusted.

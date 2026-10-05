@@ -79,7 +79,7 @@ Both the Web Storefront and the Android POS App synchronize with the backend dat
 | **Web Storefront** | `POST /api/orders` (`channel="web"`) | Public | Atomically decrements database stock |
 | **Android POS** | `POST /api/auth/verify` | Staff Key / PIN | Returns signed JWT Bearer Token |
 | **Android POS** | `POST /api/orders` (`channel="pos"`) | **JWT / Terminal Key** | Atomically decrements database stock & logs tender |
-| **Android POS** | `POST /api/products` (Intake) | **JWT / Terminal Key** | Adds new vintage piece to shared database & inventory |
+| **Android POS** | `POST /api/products` (Intake) | **JWT / Terminal Key** | Adds Brand-New Apparel or Curated Pre-Loved / Vintage stock to shared database & inventory |
 | **Android POS** | `POST /api/sync/pull` | **JWT / Terminal Key** | Full operational state sync (sales, inventory, ledger) |
 
 ### Environment Variables on Render:

@@ -1,5 +1,5 @@
 """
-Adonai Thrift Store — Security Primitives
+Adonai Store — Security Primitives
 Centralizes credential hashing (PBKDF2), constant-time comparisons,
 JWT signing-secret management, request rate limiting, and input sanitization.
 

@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useId } from "react";
-import Image from "next/image";
 
 /* ============================================================================
    Types & Interfaces
@@ -23,7 +22,15 @@ export interface Product {
   demographic: "Men" | "Women" | "Unisex" | "Kids" | string;
   size: string;
   color: string;
-  conditionGrade: "Grade A — Excellent" | "Grade B — Good" | "Grade C — Fair" | string;
+  conditionGrade: "Grade A — Excellent" | "Grade B — Good" | "Grade C — Fair" | "Factory Fresh" | string;
+  itemCondition: "BRAND_NEW" | "PRE_LOVED";
+  quantityType: "BRAND_NEW" | "PRE_LOVED";
+  sizeVariants?: string[];
+  colorVariants?: string[];
+  factoryTagNotes?: string;
+  innerPackaging?: string;
+  measurements?: Record<string, string>;
+  fabricGradingNotes?: string;
   sellingPrice: number; // in UGX (e.g., 45000)
   costPrice: number; // original reference/cost price (e.g., 65000)
   rating?: number; // populated only from verified customer reviews
@@ -171,6 +178,10 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
 
   const currentPhoto = product.photos[activePhotoIndex] || product.photos[0];
   const discountPercent = calculateDiscount(product.sellingPrice, product.costPrice);
+  const isBrandNew = product.itemCondition === "BRAND_NEW";
+  const sizes = product.sizeVariants?.length ? product.sizeVariants : [product.size];
+  const colors = product.colorVariants?.length ? product.colorVariants : [product.color];
+  const measurements = Object.entries(product.measurements || {}).map(([key, value]) => `${key}: ${value}`).join(" · ");
 
   const handleModalAddToCart = () => {
     if (onAddToCart) onAddToCart(product);
@@ -179,7 +190,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   };
 
   const handleWhatsAppClaim = () => {
-    const message = `Hello Adonai Thrift Store, I would like to order:\n- Item: ${product.name}\n- SKU: ${product.sku}\n- Size: ${product.size}\n- Price: ${formatUGX(product.sellingPrice)}\nIs this piece still available for delivery?`;
+    const message = `Hello Adonai Store, I would like to order:\n- Item: ${product.name}\n- Inventory: ${product.itemCondition === "BRAND_NEW" ? "Brand-New Apparel" : "Curated Pre-Loved / Vintage"}\n- SKU: ${product.sku}\n- Size: ${product.size}\n- Price: ${formatUGX(product.sellingPrice)}\nIs this item still available for delivery?`;
     window.open(`https://wa.me/256758893398?text=${encodeURIComponent(message)}`, "_blank");
   };
 
@@ -275,7 +286,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
           </div>
 
           <p className="mt-4 text-center text-xs text-stone-500 font-medium">
-            📷 Authentic 1-of-1 photograph · Inspected &amp; cleaned in Kampala
+            {isBrandNew ? "🏷️ Factory-fresh product · Original tags and packaging" : "📷 Authentic 1-of-1 photograph · Inspected & cleaned in Kampala"}
           </p>
         </div>
 
@@ -285,7 +296,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             {/* Header info */}
             <div>
               <div className="flex items-center justify-between text-xs font-semibold text-[#C24E2B] tracking-wider uppercase">
-                <span>{product.demographic} · {product.category}</span>
+                <span>{isBrandNew ? "Brand-New Apparel" : "Curated Vintage / Pre-Loved"} · {product.category}</span>
                 <span className="text-stone-400 font-mono text-[11px]">{product.sku}</span>
               </div>
               <h2 id={titleId} className="text-xl sm:text-2xl font-bold font-serif text-stone-900 mt-1 leading-tight">
@@ -319,14 +330,24 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <span className="text-stone-500 font-medium">Brand / Label</span>
                 <span className="text-stone-900 font-semibold">{product.brand || "Vintage"}</span>
               </div>
-              <div className="flex justify-between px-3.5 py-2.5">
-                <span className="text-stone-500 font-medium">Size &amp; Fit</span>
-                <span className="text-stone-900 font-semibold">{product.size}</span>
-              </div>
-              <div className="flex justify-between px-3.5 py-2.5 bg-stone-50/50">
-                <span className="text-stone-500 font-medium">Condition Grade</span>
-                <span className="text-emerald-700 font-semibold">{product.conditionGrade}</span>
-              </div>
+              {isBrandNew ? (
+                <>
+                  <div className="flex justify-between px-3.5 py-2.5">
+                    <span className="text-stone-500 font-medium">Available sizes</span>
+                    <span className="text-stone-900 font-semibold flex flex-wrap justify-end gap-1">{sizes.map((size) => <span key={size} className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">{size}</span>)}</span>
+                  </div>
+                  <div className="flex justify-between px-3.5 py-2.5 bg-stone-50/50"><span className="text-stone-500 font-medium">Stock</span><span className="text-stone-900 font-semibold">{product.inStockCount} units available</span></div>
+                  <div className="flex justify-between px-3.5 py-2.5"><span className="text-stone-500 font-medium">Factory tags</span><span className="text-stone-900 font-semibold text-right">{product.factoryTagNotes || "Intact factory tags"}</span></div>
+                  <div className="flex justify-between px-3.5 py-2.5 bg-stone-50/50"><span className="text-stone-500 font-medium">Packaging</span><span className="text-stone-900 font-semibold">{product.innerPackaging || "Original packaging"}</span></div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between px-3.5 py-2.5"><span className="text-stone-500 font-medium">1-of-1 status</span><span className="text-emerald-700 font-semibold">Single piece on rail</span></div>
+                  <div className="flex justify-between px-3.5 py-2.5 bg-stone-50/50"><span className="text-stone-500 font-medium">Exact measurements</span><span className="text-stone-900 font-semibold text-right">{measurements || "See description"}</span></div>
+                  <div className="flex justify-between px-3.5 py-2.5"><span className="text-stone-500 font-medium">Fabric grading</span><span className="text-stone-900 font-semibold text-right">{product.fabricGradingNotes || product.conditionGrade}</span></div>
+                  <div className="flex justify-between px-3.5 py-2.5 bg-stone-50/50"><span className="text-stone-500 font-medium">Size &amp; Fit</span><span className="text-stone-900 font-semibold">{product.size}</span></div>
+                </>
+              )}
               <div className="flex justify-between px-3.5 py-2.5">
                 <span className="text-stone-500 font-medium">Color / Wash</span>
                 <span className="text-stone-900 font-semibold">{product.color}</span>
@@ -448,6 +469,9 @@ export const AdonaiProductCard: React.FC<ProductCardProps> = ({
                 {discountPercent}% OFF
               </span>
             )}
+            <span className={`absolute top-2.5 right-2.5 z-10 text-white text-[10px] font-extrabold tracking-wider px-2 py-1 rounded-full shadow-sm ${product.itemCondition === "BRAND_NEW" ? "bg-amber-700" : "bg-emerald-700"}`}>
+              {product.itemCondition === "BRAND_NEW" ? "NEW" : "VINTAGE"}
+            </span>
 
             {/* Product Image with Subtle Hover Zoom */}
             {primaryPhoto ? (
@@ -472,7 +496,7 @@ export const AdonaiProductCard: React.FC<ProductCardProps> = ({
           <div className="mt-3.5 space-y-1.5">
             {/* Category / Brand metadata */}
             <div className="flex items-center justify-between text-[11px] font-medium text-stone-500">
-              <span className="truncate">{product.brand || "Vintage"}</span>
+              <span className="truncate">{product.brand || "Adonai Store"}</span>
               <span className="text-stone-400 font-mono text-[10px]">{product.sku}</span>
             </div>
 
@@ -557,6 +581,7 @@ export const SAMPLE_PRODUCTS: Product[] = [
     size: "Medium (40R)",
     color: "Faded Stonewash Indigo",
     conditionGrade: "Grade A — Excellent",
+    itemCondition: "PRE_LOVED", quantityType: "PRE_LOVED", measurements: { Chest: "40in", Length: "25in" }, fabricGradingNotes: "Excellent vintage denim; natural fade disclosed.",
     sellingPrice: 45000,
     costPrice: 65000,
     inStockCount: 1,
@@ -579,6 +604,7 @@ export const SAMPLE_PRODUCTS: Product[] = [
     size: "Large",
     color: "Olive / Army Khaki",
     conditionGrade: "Grade A — Excellent",
+    itemCondition: "BRAND_NEW", quantityType: "BRAND_NEW", sizeVariants: ["S", "M", "L", "XL"], colorVariants: ["Olive", "Black"], factoryTagNotes: "Factory tags intact; sourced from brand partner.", innerPackaging: "intact",
     sellingPrice: 38000,
     costPrice: 50000,
     inStockCount: 1,
@@ -600,6 +626,7 @@ export const SAMPLE_PRODUCTS: Product[] = [
     size: "UK 10 / Small",
     color: "Terracotta & Cream",
     conditionGrade: "Grade B — Good",
+    itemCondition: "PRE_LOVED", quantityType: "PRE_LOVED", measurements: { Bust: "36in", Length: "46in" }, fabricGradingNotes: "Good vintage condition; freshly cleaned.",
     sellingPrice: 32000,
     costPrice: 42000,
     inStockCount: 1,
@@ -620,6 +647,7 @@ export const SAMPLE_PRODUCTS: Product[] = [
     size: "Large",
     color: "Oatmeal Heather",
     conditionGrade: "Grade A — Excellent",
+    itemCondition: "PRE_LOVED", quantityType: "PRE_LOVED", measurements: { Chest: "42in", Length: "27in" }, fabricGradingNotes: "Excellent vintage knit; no pulls or stains.",
     sellingPrice: 55000,
     costPrice: 55000, // No discount example
     inStockCount: 1,
@@ -633,10 +661,12 @@ export const SAMPLE_PRODUCTS: Product[] = [
 
 export const AdonaiProductGrid: React.FC = () => {
   const [cartCount, setCartCount] = useState(0);
+  const [inventoryFilter, setInventoryFilter] = useState<"ALL" | "BRAND_NEW" | "PRE_LOVED">("ALL");
 
   const handleAddToCart = (product: Product) => {
     setCartCount((prev) => prev + 1);
   };
+  const visibleProducts = SAMPLE_PRODUCTS.filter((product) => inventoryFilter === "ALL" || product.itemCondition === inventoryFilter);
 
   return (
     <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -644,7 +674,7 @@ export const AdonaiProductGrid: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 pb-4 border-b border-stone-200 gap-4">
         <div>
           <span className="text-xs font-bold tracking-widest text-[#C24E2B] uppercase">
-            Curated 1-of-1 Thrift · Kampala
+            Brand-New Apparel + Curated Vintage · Kampala
           </span>
           <h2 className="text-2xl sm:text-3xl font-extrabold font-serif text-stone-900 mt-1">
             Featured Rail Drops
@@ -657,9 +687,22 @@ export const AdonaiProductGrid: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 mb-6" aria-label="Filter inventory">
+        {(["ALL", "BRAND_NEW", "PRE_LOVED"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setInventoryFilter(value)}
+            className={`rounded-full border px-3.5 py-2 text-xs font-bold transition-colors ${inventoryFilter === value ? "border-emerald-700 bg-emerald-700 text-white" : "border-stone-200 bg-white text-stone-700 hover:border-emerald-500"}`}
+          >
+            {value === "ALL" ? "All Items" : value === "BRAND_NEW" ? "Brand New" : "Vintage / Pre-Loved"}
+          </button>
+        ))}
+      </div>
+
       {/* Responsive Grid: 2-column mobile, 3-col tablet, 4-column desktop */}
       <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5 sm:gap-5 lg:gap-6">
-        {SAMPLE_PRODUCTS.map((product, idx) => (
+        {visibleProducts.map((product, idx) => (
           <AdonaiProductCard
             key={product.id}
             product={product}
