@@ -43,7 +43,10 @@ SET item_condition = CASE
 END
 WHERE item_condition = 'PRE_LOVED'::item_condition_enum;
 
-UPDATE products SET quantity_type = item_condition;
+-- item_condition_enum and quantity_type_enum are separate PostgreSQL enum
+-- types. Cast through text rather than relying on a non-existent implicit enum
+-- to enum conversion.
+UPDATE products SET quantity_type = item_condition::text::quantity_type_enum;
 UPDATE order_items oi
 SET item_condition = p.item_condition::text,
     quantity_type = p.quantity_type::text

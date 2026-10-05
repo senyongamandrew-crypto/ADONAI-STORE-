@@ -35,6 +35,78 @@ def hash_pin(pin: str) -> str:
     return pbkdf2_hash_pin(pin)
 
 
+def _postgres_column_types(connection, table_name: str) -> dict[str, str]:
+    """Return PostgreSQL type names for a table's real (non-dropped) columns.
+
+    SQLAlchemy's inspector normalises some PostgreSQL types, which makes it
+    unsuitable for deciding whether a pre-existing live column is a native
+    enum or a legacy VARCHAR.  The dual-inventory backfill must know that
+    distinction because PostgreSQL will not implicitly assign a `text` CASE
+    expression to a native enum, nor one enum type to a different enum type.
+    """
+    rows = connection.execute(text("""
+        SELECT attribute.attname, type.typname
+        FROM pg_attribute AS attribute
+        JOIN pg_type AS type ON type.oid = attribute.atttypid
+        WHERE attribute.attrelid = CAST(:table_name AS regclass)
+          AND attribute.attnum > 0
+          AND NOT attribute.attisdropped
+    """), {"table_name": table_name})
+    return {name: type_name for name, type_name in rows}
+
+
+def _dual_inventory_backfill_statements(
+    *,
+    postgres: bool,
+    item_condition_is_enum: bool = False,
+    quantity_type_is_enum: bool = False,
+) -> tuple[str, str, str]:
+    """Build portable, correctly typed dual-inventory repair statements.
+
+    Older Render databases can have VARCHAR policy columns; new databases use
+    two *different* native enum types.  Casting through text is intentional:
+    PostgreSQL has no implicit cast from `item_condition_enum` to
+    `quantity_type_enum`, and a CASE made only of string literals resolves to
+    text rather than to the destination enum.
+    """
+    item_value = lambda value: (
+        f"'{value}'::item_condition_enum" if item_condition_is_enum else f"'{value}'"
+    )
+    item_as_text = "item_condition::text" if postgres else "item_condition"
+    quantity_value = (
+        "item_condition::text::quantity_type_enum"
+        if quantity_type_is_enum
+        else ("item_condition::text" if postgres else "item_condition")
+    )
+    quantity_as_text = "quantity_type::text" if postgres else "quantity_type"
+
+    return (
+        f"""
+            UPDATE products
+            SET item_condition = CASE
+                    WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
+                      OR lower(coalesce(condition, '')) LIKE '%factory%'
+                    THEN {item_value('BRAND_NEW')}
+                    ELSE {item_value('PRE_LOVED')}
+                END
+            WHERE item_condition IS NULL
+               OR {item_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED')
+        """,
+        f"""
+            UPDATE products
+            SET quantity_type = {quantity_value}
+            WHERE quantity_type IS NULL
+               OR {quantity_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED')
+        """,
+        f"""
+            UPDATE products
+            SET quantity_type = {quantity_value}
+            WHERE {quantity_as_text} = 'PRE_LOVED'
+              AND {item_as_text} = 'BRAND_NEW'
+        """,
+    )
+
+
 def apply_additive_schema_migrations():
     """Add columns create_all cannot add, without changing or dropping live data."""
     additions = {
@@ -101,18 +173,21 @@ def apply_additive_schema_migrations():
                     logger.info("Added safe column %s.%s", table_name, name)
         # Existing catalog rows are the legacy curated stream. Backfill the
         # explicit policy fields before any new dual-inventory intake arrives.
-        connection.execute(text("""
-            UPDATE products
-            SET item_condition = CASE
-                    WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
-                      OR lower(coalesce(condition, '')) LIKE '%factory%'
-                    THEN 'BRAND_NEW'
-                    ELSE 'PRE_LOVED'
-                END
-            WHERE item_condition IS NULL OR item_condition NOT IN ('BRAND_NEW', 'PRE_LOVED')
-        """))
-        connection.execute(text("UPDATE products SET quantity_type = item_condition WHERE quantity_type IS NULL OR quantity_type NOT IN ('BRAND_NEW', 'PRE_LOVED')"))
-        connection.execute(text("UPDATE products SET quantity_type = item_condition WHERE quantity_type = 'PRE_LOVED' AND item_condition = 'BRAND_NEW'"))
+        #
+        # IMPORTANT: item_condition_enum and quantity_type_enum are distinct
+        # PostgreSQL enum types. A text CASE cannot be assigned to the former,
+        # and one enum cannot be assigned to the other without casting through
+        # text. This used to make Render boot fail with SQLSTATE 42804
+        # ("You will need to rewrite or cast the expression").
+        postgres_types = _postgres_column_types(connection, "products") if IS_POSTGRES else {}
+        item_condition_is_enum = postgres_types.get("item_condition") == "item_condition_enum"
+        quantity_type_is_enum = postgres_types.get("quantity_type") == "quantity_type_enum"
+        for statement in _dual_inventory_backfill_statements(
+            postgres=IS_POSTGRES,
+            item_condition_is_enum=item_condition_is_enum,
+            quantity_type_is_enum=quantity_type_is_enum,
+        ):
+            connection.execute(text(statement))
         connection.execute(text("UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF')"))
         if IS_POSTGRES:
             for statement in (
