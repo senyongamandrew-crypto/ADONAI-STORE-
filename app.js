@@ -55,12 +55,20 @@
       }
       paintUnlockChip();
     },
-    require(cb) { if (this.unlocked()) return cb(masterCredential); renderMasterModal(cb); },
+    require(cb) {
+      // One unlock rules everything: suite-unlocked sessions skip every gate.
+      if (this.unlocked()) return cb(masterCredential);
+      if (typeof Auth !== "undefined" && Auth.suiteUnlocked && Auth.suiteUnlocked()) {
+        return cb(masterCredential || Auth.token());
+      }
+      renderMasterModal(cb);
+    },
     requireRemote(cb) {
       if (masterCredential) return cb(masterCredential);
       const active = Auth.me();
       const token = Auth.token();
       if (active && active.role === "admin" && token) return cb(token);
+      if (typeof Auth !== "undefined" && Auth.suiteUnlocked && Auth.suiteUnlocked() && token) return cb(token);
       renderMasterModal(cb);
     }
   };
@@ -95,22 +103,17 @@
       const val = input.value.trim();
       if (!val) return;
       if (DB.verifyMasterKey(val)) {
-        Keys.set(true, val); closeModal(); toast("Master Key unlocked for this session");
+        applySuiteUnlock(val, { name: "Admin Suite" });
+        closeModal(); toast("Admin Suite unlocked — every dashboard is open");
         if (after) after(val);
         return;
       }
       try {
-        const authEndpoint = (typeof DB !== "undefined" && DB.apiUrl) ? DB.apiUrl("/api/auth/verify") : "/api/auth/verify";
-        const r = await fetch(authEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin: val, key: val, terminal_key: val })
-        });
-        const data = await r.json();
-        if (data && data.ok && data.staff && data.staff.role === "admin") {
-          const credential = data.token || val;
-          Keys.set(true, credential); closeModal(); toast("Master Key unlocked via Server / Environment");
-          if (after) after(credential);
+        const result = await suiteUnlockAttempt(val);
+        if (result.ok) {
+          applySuiteUnlock(result.credential, result.staff);
+          closeModal(); toast("Admin Suite unlocked — every dashboard is open");
+          if (after) after(result.credential);
           return;
         }
       } catch (err) {}
@@ -129,6 +132,85 @@
     Keys.require(() => {});
   });
   paintUnlockChip();
+
+  /* =============== ADMIN SUITE — one gate, one passkey ===============
+     A single passkey unlocks every dashboard in the suite (analytics,
+     inventory, intake, audit, dispatch, ledgers & strategy, staff,
+     settings). After that, no task asks for another key — the session
+     carries admin-grade authorization everywhere.
+     =================================================================== */
+
+  /** Verify a passkey (local master key, then server). Resolves {ok, message, credential, staff}. */
+  async function suiteUnlockAttempt(value) {
+    const val = String(value || "").trim();
+    if (!val) return { ok: false, message: "Enter the passkey first" };
+    if (typeof DB !== "undefined" && DB.verifyMasterKey && DB.verifyMasterKey(val)) {
+      return { ok: true, credential: val, staff: { name: "Admin Suite" } };
+    }
+    try {
+      const endpoint = (typeof DB !== "undefined" && DB.apiUrl) ? DB.apiUrl("/api/auth/verify") : "/api/auth/verify";
+      const r = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: val, key: val, terminal_key: val })
+      });
+      const data = await r.json();
+      if (data && data.ok && data.staff) {
+        if (String(data.staff.role || "").toLowerCase() === "admin") {
+          return { ok: true, credential: data.token || val, staff: data.staff };
+        }
+        return {
+          ok: false,
+          message: `That PIN belongs to ${data.staff.name || "a staff member"} (${data.staff.role || "staff"}) — the Admin Suite requires the store master passkey.`
+        };
+      }
+      return { ok: false, message: "Incorrect passkey — try again." };
+    } catch (e) {
+      return { ok: false, message: "Could not verify right now — check your connection." };
+    }
+  }
+
+  /** Every successful unlock ends the same way: full suite access, chips painted. */
+  function applySuiteUnlock(credential, staff) {
+    Auth.unlockSuite(credential, staff);
+    Keys.set(true, credential);
+  }
+
+  function installSuiteGate() {
+    const gate = $("#suiteGate");
+    if (!gate) return;
+    if (Auth.suiteUnlocked()) { gate.hidden = true; return; }
+    gate.hidden = false;
+    document.body.classList.add("suite-locked");
+    const input = $("#suiteKeyInput"), go = $("#suiteGateGo"), err = $("#suiteGateError");
+    setTimeout(() => input && input.focus(), 60);
+    if (!input || !go) return;
+    const attempt = async () => {
+      err.textContent = "";
+      go.disabled = true;
+      go.textContent = "Verifying passkey…";
+      const result = await suiteUnlockAttempt(input.value);
+      go.disabled = false;
+      go.textContent = "Unlock Admin Suite";
+      if (!result.ok) {
+        err.textContent = result.message;
+        input.classList.add("err");
+        setTimeout(() => input.classList.remove("err"), 700);
+        input.select();
+        return;
+      }
+      applySuiteUnlock(result.credential, result.staff);
+      toast("Admin Suite unlocked — every dashboard is open");
+      location.reload(); // boot the suite with full authorization
+    };
+    go.addEventListener("click", attempt);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") attempt(); });
+    const show = $("#suiteKeyShow");
+    if (show) show.addEventListener("click", () => {
+      input.type = input.type === "password" ? "text" : "password";
+      show.textContent = input.type === "password" ? "Show" : "Hide";
+    });
+  }
+  installSuiteGate();
 
   /* =============== console chrome =============== */
   const shell = $("#shell");
@@ -172,7 +254,7 @@
   const btnAdminExit = $("#btnAdminExit");
   if (btnAdminExit) {
     btnAdminExit.addEventListener("click", () => {
-      Auth.signOut();
+      if (Auth.lockSuite) Auth.lockSuite(); else Auth.signOut();
       location.href = "login.html";
     });
   }
@@ -974,6 +1056,48 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return out;
   }
 
+  /* ---- rack removal: archive (soft) or delete permanently (manager-gated) ---- */
+  function openProductDelete(p) {
+    if (!p) return;
+    const qty = Math.max(0, Number(p.in_stock_count) || 0);
+    const lossValue = qty * (Number(p.cost_price) || 0);
+    openModal(`
+      <button class="modal-x" data-close>×</button>
+      <p class="kicker">RACK REMOVAL</p>
+      <h3>Remove &ldquo;${esc(p.name)}&rdquo;?</h3>
+      <p class="muted small"><strong>${esc(p.sku)}</strong> · ${esc(p.category || "Uncategorised")} · ${qty} unit${qty === 1 ? "" : "s"} on hand${lossValue ? ` · ${ugx(lossValue)} at cost` : ""}</p>
+      <div class="del-options">
+        <button type="button" class="del-option" id="delArchive">
+          <strong>Archive it <span class="del-tag">Recommended</span></strong>
+          <span>Hides the piece from the rack and storefront immediately. Sales history, receipts, and financial reports stay complete.</span>
+        </button>
+        <button type="button" class="del-option danger" id="delPurge">
+          <strong>Delete permanently</strong>
+          <span>Erases the product record forever — <b>this cannot be undone</b>.<br/>
+          • Past order lines keep the item name, price, and totals, so old receipts and reports stay truthful.<br/>
+          ${lossValue ? `• The ${ugx(lossValue)} stock value is posted as an inventory write-off in the ledgers.` : "• No stock on hand, so no write-off is posted."}<br/>
+          • Manager authority required — enforced by the server.</span>
+        </button>
+      </div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button></div>`);
+    const run = async (mode) => {
+      const button = mode === "permanent" ? $("#delPurge") : $("#delArchive");
+      setButtonBusy(button, true, mode === "permanent" ? "Deleting permanently…" : "Archiving…");
+      try {
+        await DB.removeProduct(p.id, mode);
+        closeModal();
+        toast(mode === "permanent"
+          ? `${p.name} permanently deleted — stock value written off, order history preserved`
+          : `${p.name} archived — hidden from rack and storefront`);
+      } catch (error) {
+        setButtonBusy(button, false);
+        toast(error.message, false);
+      }
+    };
+    $("#delArchive").addEventListener("click", () => run("archive"));
+    $("#delPurge").addEventListener("click", () => run("permanent"));
+  }
+
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
@@ -1520,7 +1644,20 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const financeError = error => {
     const status = Number(error && error.status);
     const message = (error && error.message) || "Financial data could not be loaded";
-    return `<div class="finance-error"><div><strong>${status === 401 ? "Staff sign-in required" : status === 403 ? "Manager authorization required" : "Could not load this workspace"}</strong><p class="small">${esc(message)}</p>${status === 401 ? `<a class="btn primary sm" href="login.html">Sign in to terminal</a>` : ""}</div></div>`;
+    const action = status === 403
+      // never a dead end: the passkey input is right here
+      ? `<div class="fin-inline-unlock">
+           <label class="flab">Admin Suite passkey</label>
+           <div class="sku-row">
+             <input type="password" class="sel-full" data-unlock-input placeholder="Store master passkey…" autocomplete="off" />
+             <button class="btn primary sm" data-finance-unlock type="button">Unlock</button>
+           </div>
+           <small class="muted">One unlock opens every dashboard in the suite for this session.</small>
+         </div>`
+      : status === 401
+        ? `<a class="btn primary sm" href="login.html">Sign in to terminal</a>`
+        : `<button type="button" class="btn primary sm" data-finance-retry>Try again</button>`;
+    return `<div class="finance-error"><div><strong>${status === 401 ? "Staff sign-in required" : status === 403 ? "Admin Suite passkey required" : "Could not load this workspace"}</strong><p class="small">${esc(message)}</p><div class="finance-error-actions">${action}</div></div></div>`;
   };
   const setFinanceUpdated = text => {
     const target = $("#financeUpdated");
@@ -1539,7 +1676,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   };
 
   function switchFinanceTab(tab, force = false) {
-    if (!["expenses", "lots", "dashboard", "aging", "journal"].includes(tab)) return;
+    if (!["expenses", "lots", "dashboard", "aging", "journal", "insights"].includes(tab)) return;
     financeTab = tab;
     $$("[data-finance-tab]").forEach(button => {
       const active = button.dataset.financeTab === tab;
@@ -1563,6 +1700,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       else if (tab === "dashboard") await loadDashboard();
       else if (tab === "aging") await loadAging();
       else if (tab === "journal") await loadJournal();
+      else if (tab === "insights") await loadInsights();
       financeLoadedAt = Date.now();
       setFinanceUpdated();
     } finally {
@@ -1716,6 +1854,427 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     } catch (error) { host.innerHTML = financeError(error); }
   }
 
+  /* ============================================================
+     STRATEGY & MARKETING INSIGHTS — decision-ready reporting
+     Turns posted, audited records into plain-language guidance
+     for strategy management and day-to-day marketing.
+     ============================================================ */
+  let insightsDays = 30;
+  let insightsCache = null;
+
+  const ugxCompact = value => {
+    const n = Number(value) || 0;
+    const abs = Math.abs(n);
+    if (abs >= 10000000) return "UGX " + Math.round(n / 1000000) + "M";
+    if (abs >= 1000000) return "UGX " + (Math.round(n / 100000) / 10) + "M";
+    if (abs >= 1000) return "UGX " + Math.round(n / 1000) + "k";
+    return ugx(n);
+  };
+  const csvCell = value => {
+    const s = String(value == null ? "" : value);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const toCsv = rows => rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+  function downloadFile(name, content, mime = "text/csv;charset=utf-8") {
+    try {
+      const blob = new Blob(["﻿" + content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 500);
+    } catch (e) { toast("Download failed in this browser", false); }
+  }
+  const pctLabel = value => (value === null || value === undefined) ? "—" : `${value > 0 ? "+" : ""}${value}%`;
+
+  async function loadInsights() {
+    const kpisHost = $("#insightsKpis");
+    if (!kpisHost) return;
+    kpisHost.innerHTML = `<div class="finance-empty" style="grid-column:1/-1">Compiling strategy report from posted records…</div>`;
+    $("#insightsTrend").innerHTML = "";
+    ["#insightsChannels", "#insightsCategories", "#insightsTopProducts", "#insightsCustomers", "#insightsQuality", "#insightsRecs"].forEach(sel => {
+      const node = $(sel);
+      if (node) node.innerHTML = "";
+    });
+    try {
+      const data = await DB.financeRequest("insights?days=" + insightsDays, { method: "GET" });
+      insightsCache = data;
+      renderInsightsKpis(data);
+      renderInsightsTrend(data);
+      renderInsightsChannels(data);
+      renderInsightsCategories(data);
+      renderInsightsTopProducts(data);
+      renderInsightsCustomers(data);
+      renderInsightsQuality(data);
+      renderInsightsRecs(data);
+      setFinanceUpdated();
+    } catch (error) {
+      kpisHost.innerHTML = `<div style="grid-column:1/-1">${financeError(error)}</div>`;
+    }
+  }
+
+  function renderInsightsKpis(data) {
+    const k = data.kpis || {};
+    const m = data.marketing || {};
+    $("#insightsKpis").innerHTML =
+      metricCard(`Revenue · ${data.days} days`, ugx(k.revenue),
+        (k.revenue_growth_pct === null || k.revenue_growth_pct === undefined)
+          ? `${k.orders} orders · ${k.units} units`
+          : `${pctLabel(k.revenue_growth_pct)} vs previous ${data.days} days · ${k.orders} orders`, "accent") +
+      metricCard("Net contribution", ugx(k.net_contribution),
+        `${k.gross_margin}% gross margin after ${ugxCompact(k.expenses)} expenses`, k.net_contribution >= 0 ? "" : "warn") +
+      metricCard("Avg order value", ugx(k.avg_order_value), "Bundle target: " + ugxCompact(Math.round((k.avg_order_value || 0) * 1.2))) +
+      metricCard("Repeat buyers", (data.customers.repeat_rate || 0) + "%",
+        `${data.customers.total} identified customers`) +
+      metricCard("Marketing ROI", m.revenue_per_shilling ? `${m.revenue_per_shilling}×` : "Not measured",
+        m.spend ? `${ugxCompact(m.spend)} spend · ${m.spend_ratio}% of revenue` : "No marketing expense posted", m.revenue_per_shilling && m.revenue_per_shilling >= 3 ? "" : "warn") +
+      metricCard("Data reliability", data.data_quality.score + "%",
+        data.data_quality.score >= 85 ? "Reports can be trusted" : "Clean up records below", data.data_quality.score >= 85 ? "" : "warn");
+  }
+
+  function renderInsightsTrend(data) {
+    const host = $("#insightsTrend");
+    const rows = data.daily_trend || [];
+    if (!rows.length || !rows.some(r => r.revenue || r.profit)) {
+      host.innerHTML = `<div class="finance-empty"><div><strong>No sales in this window yet</strong><p class="small">Ring orders through the POS or web storefront and the pulse appears here.</p></div></div>`;
+      return;
+    }
+    const W = 720, H = 218, pad = { l: 10, r: 12, t: 16, b: 22 };
+    const maxV = Math.max(1, ...rows.map(r => r.revenue));
+    const x = i => pad.l + (rows.length === 1 ? (W - pad.l - pad.r) / 2 : i / (rows.length - 1) * (W - pad.l - pad.r));
+    const y = v => H - pad.b - (v / maxV) * (H - pad.t - pad.b);
+    const line = key => rows.map((r, i) => `${x(i).toFixed(1)},${y(r[key]).toFixed(1)}`).join(" ");
+    const area = `${pad.l},${H - pad.b} ` + line("revenue") + ` ${(W - pad.r).toFixed(1)},${H - pad.b}`;
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const fmtDay = iso => { const d = new Date(iso + "T00:00:00"); return `${d.getDate()} ${monthNames[d.getMonth()]}`; };
+    const labelEvery = Math.max(1, Math.ceil(rows.length / 6));
+    host.innerHTML = `
+      <svg class="trend-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily revenue trend">
+        <defs>
+          <linearGradient id="trendFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#15803D" stop-opacity=".22"/><stop offset="100%" stop-color="#15803D" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        ${[0.25, 0.5, 0.75].map(f => {
+          const gy = y(maxV * f).toFixed(1);
+          return `<line class="trend-grid" x1="${pad.l}" y1="${gy}" x2="${W - pad.r}" y2="${gy}"/><text class="trend-grid-label" x="${W - pad.r}" y="${(gy - 4)}">${esc(ugxCompact(maxV * f))}</text>`;
+        }).join("")}
+        <polygon class="trend-area" points="${area}"/>
+        <polyline class="trend-line" points="${line("revenue")}"/>
+        <polyline class="trend-line profit" points="${line("profit")}"/>
+        ${rows.map((r, i) => `<circle class="trend-dot" data-trend-idx="${i}" cx="${x(i).toFixed(1)}" cy="${y(r.revenue).toFixed(1)}" r="${r.revenue ? 4 : 2.5}"/>`).join("")}
+        ${rows.map((r, i) => i % labelEvery === 0 ? `<text class="trend-x" x="${x(i).toFixed(1)}" y="${H - 6}">${esc(fmtDay(r.date))}</text>` : "").join("")}
+      </svg>
+      <div class="trend-tooltip" id="trendTooltip" hidden></div>
+      <div class="trend-legend"><span><i class="sw revenue"></i> Revenue</span><span><i class="sw profit"></i> Gross profit</span></div>`;
+    const tooltip = $("#trendTooltip");
+    host.onpointermove = event => {
+      const dot = event.target.closest("[data-trend-idx]");
+      if (!dot) { tooltip.hidden = true; return; }
+      const row = rows[Number(dot.dataset.trendIdx)];
+      tooltip.innerHTML = `<strong>${esc(fmtDay(row.date))}</strong><span>Revenue <b>${ugx(row.revenue)}</b></span><span>Orders <b>${row.orders}</b></span><span>Profit <b>${ugx(row.profit)}</b></span>`;
+      const rect = host.getBoundingClientRect();
+      const sx = rect.width / W;
+      tooltip.style.left = Math.min(rect.width - 148, Math.max(4, (Number(dot.getAttribute("cx")) * sx) + 12)) + "px";
+      tooltip.style.top = Math.max(2, (Number(dot.getAttribute("cy")) * (rect.height / H)) - 66) + "px";
+      tooltip.hidden = false;
+    };
+    host.onpointerleave = () => { tooltip.hidden = true; };
+  }
+
+  function renderInsightsChannels(data) {
+    const rows = data.channels || [];
+    if (!rows.length) { $("#insightsChannels").innerHTML = `<div class="finance-empty">No channel sales in this window.</div>`; return; }
+    $("#insightsChannels").innerHTML = `<div class="bar-chart">${rows.map(row => `
+      <div class="bar-row channel-row">
+        <span class="bar-label" title="${esc(row.channel)}">${esc(row.channel)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, row.share)}%"></span></span>
+        <span class="bar-value">${ugx(row.revenue)} · ${row.share}%</span>
+      </div>`).join("")}</div>
+      <p class="muted small" style="margin:12px 0 0">Orders per channel: ${rows.map(row => `${esc(row.channel)} ${row.orders}`).join(" · ")}</p>`;
+  }
+
+  function renderInsightsCategories(data) {
+    const rows = (data.categories || []).filter(row => row.revenue > 0);
+    if (!rows.length) { $("#insightsCategories").innerHTML = `<div class="finance-empty">No category sales in this window.</div>`; return; }
+    const max = Math.max(1, ...rows.map(row => row.revenue));
+    $("#insightsCategories").innerHTML = `<div class="bar-chart cat-chart">${rows.map(row => `
+      <button type="button" class="bar-row cat-row" data-insights-cat="${esc(row.category)}" title="Open ${esc(row.category)} pieces in the rack">
+        <span class="bar-label">${esc(row.category)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${Math.max(2, Math.round(row.revenue / max * 100))}%"></span></span>
+        <span class="bar-value">${ugxCompact(row.revenue)} · ${row.share}% · margin ${row.margin}%</span>
+      </button>`).join("")}</div>`;
+  }
+
+  function renderInsightsTopProducts(data) {
+    const rows = data.top_products || [];
+    if (!rows.length) { $("#insightsTopProducts").innerHTML = `<div class="finance-empty">No bestsellers to rank yet.</div>`; return; }
+    $("#insightsTopProducts").innerHTML = `<ol class="insights-rank">${rows.map((row, i) => `
+      <li class="insights-rank-row">
+        <span class="rank-no">${i + 1}</span>
+        <span class="rank-main"><strong>${esc(row.name)}</strong><small class="muted">${esc(row.category)} · ${row.units} unit${row.units === 1 ? "" : "s"}</small></span>
+        <span class="rank-side"><strong>${ugxCompact(row.revenue)}</strong><small class="${row.margin >= 40 ? "pos" : row.margin < 20 ? "neg" : "muted"}">${row.margin}% margin</small></span>
+      </li>`).join("")}</ol>`;
+  }
+
+  function renderInsightsCustomers(data) {
+    const c = data.customers || { total: 0, repeat: 0, repeat_rate: 0, top: [], identified_order_share: 0 };
+    const m = data.marketing || {};
+    const top = c.top || [];
+    $("#insightsCustomers").innerHTML = `
+      <div class="insights-crm-stats">
+        <div class="aging-stat"><span>Identified customers</span><strong>${c.total}</strong></div>
+        <div class="aging-stat"><span>Repeat buyers</span><strong>${c.repeat} (${c.repeat_rate}%)</strong></div>
+        <div class="aging-stat"><span>Orders with identity</span><strong>${c.identified_order_share}%</strong></div>
+      </div>
+      ${top.length ? `<p class="insights-subhead">Highest-value customers — greet by name &amp; reward</p>
+      <div class="fin-list">${top.map(row => `
+        <article class="fin-list-row">
+          <div><div class="fin-list-title">${esc(row.name)}</div>
+          <div class="fin-list-meta">${row.orders} order${row.orders === 1 ? "" : "s"} · ${row.phone ? "+" + esc(row.phone) : "no phone captured"}</div></div>
+          <div class="fin-list-side"><strong>${ugx(row.spend)}</strong>${row.phone ? `<a class="btn ghost sm" target="_blank" rel="noopener" href="https://wa.me/${esc(row.phone)}">WhatsApp ↗</a>` : ""}</div>
+        </article>`).join("")}</div>` : `<div class="finance-empty"><div><strong>No named customers yet</strong><p class="small">Capture name &amp; phone at checkout to build the marketing list.</p></div></div>`}
+      <div class="insights-marketing-chip">Marketing spend: <strong>${ugx(m.spend || 0)}</strong> (${(m.spend_ratio || 0)}% of revenue)${m.revenue_per_shilling ? ` · every shilling returned <strong>UGX ${m.revenue_per_shilling}</strong>` : ""}</div>`;
+  }
+
+  function renderInsightsQuality(data) {
+    const q = data.data_quality || { score: 0, checks: [] };
+    const score = q.score || 0;
+    const tone = score >= 85 ? "good" : score >= 65 ? "fair" : "poor";
+    const fixes = { "Inventory Rack": "inventory", "Bale Costs tab": "finance:lots", "Catalog Intake": "intake" };
+    $("#insightsQuality").innerHTML = `
+      <div class="quality-gauge-wrap">
+        <svg class="quality-gauge ${tone}" viewBox="0 0 88 88" role="img" aria-label="Data reliability score ${score}%">
+          <circle class="gauge-track" cx="44" cy="44" r="34" pathLength="100"/>
+          <circle class="gauge-fill" cx="44" cy="44" r="34" pathLength="100" stroke-dasharray="${score} 100"/>
+          <text x="44" y="42" class="gauge-num">${score}%</text>
+          <text x="44" y="56" class="gauge-sub">${tone === "good" ? "Trusted" : tone === "fair" ? "Fair" : "At risk"}</text>
+        </svg>
+        <ul class="quality-checks">${(q.checks || []).map(row => `
+          <li class="quality-check ${row.pass_rate >= 99.9 ? "pass" : "fail"}">
+            <span class="qc-icon">${row.pass_rate >= 99.9 ? "✓" : "⚠"}</span>
+            <span class="qc-main"><strong>${esc(row.label)}</strong><small>${row.pass_rate}% complete · affects ${esc(row.impact)}</small></span>
+            ${fixes[row.fix] && row.pass_rate < 99.9 ? `<button type="button" class="btn ghost sm qc-fix" data-insights-fix="${fixes[row.fix]}">Fix</button>` : ""}
+          </li>`).join("")}</ul>
+      </div>`;
+  }
+
+  function renderInsightsRecs(data) {
+    const rows = data.recommendations || [];
+    $("#insightsRecs").innerHTML = rows.length ? `<div class="rec-list">${rows.map(row => `
+      <article class="rec-card ${esc(row.tone)}">
+        <strong>${esc(row.title)}</strong>
+        <p>${esc(row.detail)}</p>
+      </article>`).join("")}</div>` : `<div class="finance-empty">Post sales and expenses to generate strategy guidance.</div>`;
+  }
+
+  function exportInsightsReport() {
+    if (!insightsCache) { toast("Load the strategy report first", false); return; }
+    const d = insightsCache;
+    const rows = [
+      ["ADONAI STORE — STRATEGY & MARKETING REPORT"],
+      [`Window: last ${d.days} days`, `Generated: ${new Date(d.generated_at).toLocaleString("en-UG")}`],
+      [],
+      ["KEY PERFORMANCE INDICATORS"],
+      ["Metric", "Value"],
+      ["Revenue (UGX)", d.kpis.revenue],
+      ["Orders", d.kpis.orders],
+      ["Units sold", d.kpis.units],
+      ["Average order value (UGX)", d.kpis.avg_order_value],
+      ["Gross profit (UGX)", d.kpis.gross_profit],
+      ["Gross margin (%)", d.kpis.gross_margin],
+      ["Operating expenses (UGX)", d.kpis.expenses],
+      ["Net contribution (UGX)", d.kpis.net_contribution],
+      ["Delivery fee revenue (UGX)", d.kpis.delivery_fee_revenue],
+      [],
+      ["DAILY TREND"],
+      ["Date", "Revenue (UGX)", "Orders", "Gross profit (UGX)"],
+      ...(d.daily_trend || []).map(r => [r.date, r.revenue, r.orders, r.profit]),
+      [],
+      ["CHANNELS"],
+      ["Channel", "Revenue (UGX)", "Orders", "Share (%)"],
+      ...(d.channels || []).map(r => [r.channel, r.revenue, r.orders, r.share]),
+      [],
+      ["CATEGORIES"],
+      ["Category", "Revenue (UGX)", "Units", "Profit (UGX)", "Margin (%)", "Share (%)"],
+      ...(d.categories || []).map(r => [r.category, r.revenue, r.units, r.profit, r.margin, r.share]),
+      [],
+      ["TOP PRODUCTS"],
+      ["Product", "Category", "Units", "Revenue (UGX)", "Margin (%)"],
+      ...(d.top_products || []).map(r => [r.name, r.category, r.units, r.revenue, r.margin]),
+      [],
+      ["TOP CUSTOMERS"],
+      ["Customer", "Phone", "Orders", "Spend (UGX)"],
+      ...((d.customers && d.customers.top) || []).map(r => [r.name, r.phone, r.orders, r.spend]),
+      [],
+      ["DATA RELIABILITY", `${d.data_quality.score}%`],
+      ["Check", "Completion (%)", "Affects"],
+      ...(d.data_quality.checks || []).map(r => [r.label, r.pass_rate, r.impact]),
+      [],
+      ["STRATEGY RECOMMENDATIONS"],
+      ...(d.recommendations || []).map(r => [r.title, r.detail]),
+    ];
+    downloadFile(`adonai-strategy-report-${d.days}d-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows));
+    toast("Strategy report downloaded — share with the team or open in Excel/Sheets");
+  }
+
+  function exportCrmList() {
+    const top = (insightsCache && insightsCache.customers && insightsCache.customers.top) || [];
+    if (!top.length) { toast("No customers captured yet — record name & phone at checkout", false); return; }
+    const rows = [["Customer", "Phone", "Orders", "Spend (UGX)"], ...top.map(r => [r.name, r.phone, r.orders, r.spend])];
+    downloadFile(`adonai-customers-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows));
+    toast("Customer list downloaded for your marketing campaign");
+  }
+
+  function openBroadcastModal() {
+    const template = "Hello {first name}! New arrivals just landed at Adonai Store — {top category} from UGX {entry price}. First come, first served (1-of-1 pieces). Reply RESERVE or visit us at the store. Delivery: same-day boda in Kampala.";
+    const d = insightsCache || {};
+    const topCat = ((d.categories || [])[0] || {}).category || "new pieces";
+    openModal(`
+      <button class="modal-x" data-close>×</button>
+      <p class="kicker">WHATSAPP CAMPAIGN</p><h3>Broadcast template</h3>
+      <p class="muted small">Copy this into your WhatsApp Business broadcast list. Bracketed fields are auto-suggested from the current report:</p>
+      <textarea class="sel-full" id="broadcastText" rows="6">${esc(template.replace("{top category}", topCat).replace("{entry price}", ugxCompact(((d.top_products || [])[0] || { revenue: 40000 }).revenue / Math.max(1, ((d.top_products || [])[0] || { units: 1 }).units))))}</textarea>
+      <p class="muted small">Personalise <strong>{first name}</strong> per customer — WhatsApp Business labels let you paste it once per tag.</p>
+      <div class="modal-actions"><button class="btn" data-close>Close</button><button class="btn primary" id="copyBroadcast">Copy message</button></div>`);
+    $("#copyBroadcast").addEventListener("click", async () => {
+      const text = $("#broadcastText").value;
+      try {
+        await navigator.clipboard.writeText(text);
+        toast("Broadcast copied — paste into WhatsApp Business");
+      } catch (e) {
+        $("#broadcastText").select();
+        document.execCommand("copy");
+        toast("Broadcast copied — paste into WhatsApp Business");
+      }
+    });
+  }
+
+  function jumpToInsightFix(target) {
+    if (target === "finance:lots") {
+      setView("payments");
+      switchFinanceTab("lots", true);
+      return;
+    }
+    setView(target);
+    if (target === "inventory") {
+      const search = $("#invSearch");
+      if (search) { search.focus(); }
+    }
+  }
+
+  /* -------- interactive bindings for the insights workspace -------- */
+  if ($("#insightsRange")) {
+    $("#insightsRange").addEventListener("click", event => {
+      const button = event.target.closest("[data-insights-days]");
+      if (!button) return;
+      insightsDays = Number(button.dataset.insightsDays);
+      $$("#insightsRange button").forEach(item => item.classList.toggle("active", item === button));
+      loadInsights();
+    });
+    $("#insightsRefresh").addEventListener("click", loadInsights);
+    $("#insightsExport").addEventListener("click", exportInsightsReport);
+    $("#insightsCrmCsv").addEventListener("click", exportCrmList);
+    $("#insightsBroadcast").addEventListener("click", openBroadcastModal);
+  }
+
+  /* ============================================================
+     FINANCE FORM RELIABILITY GUARDS
+     Inline, plain-language validation so the information staff
+     enter is trustworthy enough for reports, strategy and tax.
+     ============================================================ */
+  function setFieldError(input, message) {
+    const field = input.closest(".field");
+    if (!field) return;
+    field.classList.toggle("invalid", !!message);
+    let hint = field.querySelector(".field-error-text");
+    if (message) {
+      if (!hint) {
+        hint = document.createElement("small");
+        hint.className = "field-error-text";
+        field.appendChild(hint);
+      }
+      hint.textContent = message;
+    } else if (hint) {
+      hint.remove();
+    }
+  }
+  const asInt = value => {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(n) : 0;
+  };
+  const notFuture = (input, label) => {
+    const value = input.value;
+    if (value && new Date(value).getTime() > Date.now() + 60000) return `${label} cannot be in the future`;
+    return "";
+  };
+
+  function validateExpenseForm(show = true) {
+    let firstBad = null;
+    const rules = [
+      [$("#expenseCategory"), (() => $("#expenseCategory").value ? "" : "Choose a category — it drives strategy reporting")()],
+      [$("#expenseAmount"), (() => {
+        const amount = asInt($("#expenseAmount").value);
+        if (!$("#expenseAmount").value || amount <= 0) return "Enter an amount of at least UGX 1";
+        if (amount > 200000000) return "This looks unrealistically large — double-check before posting";
+        return "";
+      })()],
+      [$("#expenseVendor"), (() => {
+        const amount = asInt($("#expenseAmount").value);
+        const vendor = $("#expenseVendor").value.trim();
+        if (amount >= 500000 && !vendor) return "Record the vendor for cash outs of UGX 500,000+ (audit trail)";
+        return "";
+      })()],
+      [$("#expenseDate"), (() => {
+        if (!$("#expenseDate").value) return "Pick the date the money left";
+        return notFuture($("#expenseDate"), "Expense date");
+      })()],
+    ];
+    rules.forEach(([input, message]) => { if (show) setFieldError(input, message); if (message && !firstBad) firstBad = input; });
+    if (firstBad) firstBad.focus();
+    return !firstBad;
+  }
+
+  function validateLotForm(show = true) {
+    let firstBad = null;
+    const unitCost = ((asInt($("#lotAcquisition").value) + asInt($("#lotShipping").value)) / Math.max(1, asInt($("#lotItemCount").value)));
+    const rules = [
+      [$("#lotSupplier"), $("#lotSupplier").value.trim().length >= 3 ? "" : "Name the supplier or market (min 3 characters)"],
+      [$("#lotDescription"), $("#lotDescription").value.trim().length >= 3 ? "" : "Describe the bale contents so intake tags make sense"],
+      [$("#lotAcquisition"), asInt($("#lotAcquisition").value) >= 1 ? "" : "Acquisition cost must be at least UGX 1"],
+      [$("#lotShipping"), asInt($("#lotShipping").value) >= 0 ? "" : "Shipping cannot be negative"],
+      [$("#lotItemCount"), (() => {
+        const count = asInt($("#lotItemCount").value);
+        if (count < 1) return "A bale must contain at least 1 saleable item";
+        if (count > 10000) return "Count looks too high for one bale — verify before registering";
+        if (unitCost > 5000000) return `Unit cost of ${ugxCompact(unitCost)} per piece looks unrealistic — check cost and count`;
+        return "";
+      })()],
+      [$("#lotDate"), (() => {
+        if (!$("#lotDate").value) return "Pick the acquisition date";
+        return notFuture($("#lotDate"), "Acquisition date");
+      })()],
+    ];
+    rules.forEach(([input, message]) => { if (show) setFieldError(input, message); if (message && !firstBad) firstBad = input; });
+    if (firstBad) firstBad.focus();
+    return !firstBad;
+  }
+
+  function installFinanceFormGuards() {
+    const clearOn = (form, selectors) => {
+      if (!form) return;
+      selectors.forEach(sel => {
+        const input = form.querySelector(sel);
+        if (input) input.addEventListener("input", () => setFieldError(input, ""));
+      });
+    };
+    clearOn($("#expenseForm"), ["#expenseCategory", "#expenseAmount", "#expenseVendor", "#expenseDate"]);
+    clearOn($("#stockLotForm"), ["#lotSupplier", "#lotDescription", "#lotAcquisition", "#lotShipping", "#lotItemCount", "#lotDate"]);
+  }
+  installFinanceFormGuards();
+
   function renderLedger() {
     if (!$("#financeTabs")) return;
     if (!$("#expenseDate").value) $("#expenseDate").value = localISODateTime();
@@ -1730,6 +2289,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   });
   $("#expenseForm").addEventListener("submit", async event => {
     event.preventDefault();
+    if (!validateExpenseForm()) { toast("Fix the highlighted fields first — clean data keeps reports honest", false); return; }
     const button = $("#expenseSubmit"); setButtonBusy(button, true, "Posting atomically…");
     try {
       await DB.financeRequest("expenses", { method:"POST", body:JSON.stringify({
@@ -1750,7 +2310,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   };
   ["#lotAcquisition", "#lotShipping", "#lotItemCount"].forEach(selector => $(selector).addEventListener("input", updateLotUnitCost));
   $("#stockLotForm").addEventListener("submit", async event => {
-    event.preventDefault(); const button = $("#lotSubmit"); setButtonBusy(button, true, "Registering lot…");
+    event.preventDefault();
+    if (!validateLotForm()) { toast("Fix the highlighted fields first — clean data keeps reports honest", false); return; }
+    const button = $("#lotSubmit"); setButtonBusy(button, true, "Registering lot…");
     try {
       await DB.financeRequest("stock-lots", { method:"POST", body:JSON.stringify({
         supplier:$("#lotSupplier").value.trim(), description:$("#lotDescription").value.trim(),
@@ -1763,6 +2325,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     } catch (error) { toast(error.message, false); }
     finally { setButtonBusy(button, false); }
   });
+  $("#view-payments").addEventListener("keydown", event => {
+    const input = event.target.closest("[data-unlock-input]");
+    if (input && event.key === "Enter") {
+      event.preventDefault();
+      const btn = input.closest(".fin-inline-unlock") && input.closest(".fin-inline-unlock").querySelector("[data-finance-unlock]");
+      if (btn) btn.click();
+    }
+  });
   $("#dashboardDate").addEventListener("change", loadDashboard);
   $("#agingPills").addEventListener("click", event => {
     const button = event.target.closest("[data-aging-days]"); if (!button) return;
@@ -1772,6 +2342,41 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   let journalSearchTimer;
   $("#journalSearch").addEventListener("input", () => { clearTimeout(journalSearchTimer); journalSearchTimer = setTimeout(loadJournal, 350); });
   $("#view-payments").addEventListener("click", async event => {
+    const retry = event.target.closest("[data-finance-retry]");
+    if (retry) { switchFinanceTab(financeTab, true); return; }
+    const unlockBtn = event.target.closest("[data-finance-unlock]");
+    if (unlockBtn) {
+      const wrap = unlockBtn.closest(".fin-inline-unlock");
+      const input = wrap && wrap.querySelector("[data-unlock-input]");
+      if (!input || !input.value.trim()) { if (input) input.focus(); return; }
+      setButtonBusy(unlockBtn, true, "Verifying…");
+      const result = await suiteUnlockAttempt(input.value);
+      setButtonBusy(unlockBtn, false);
+      if (!result.ok) {
+        input.classList.add("err");
+        toast(result.message, false);
+        setTimeout(() => input.classList.remove("err"), 700);
+        input.select();
+        return;
+      }
+      applySuiteUnlock(result.credential, result.staff);
+      toast("Admin Suite unlocked — every dashboard is open");
+      switchFinanceTab(financeTab, true);
+      return;
+    }
+    const categoryDrill = event.target.closest("[data-insights-cat]");
+    if (categoryDrill) {
+      const search = $("#invSearch");
+      if (search) {
+        search.value = categoryDrill.dataset.insightsCat;
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      setView("inventory");
+      toast(`Rack filtered to ${categoryDrill.dataset.insightsCat}`);
+      return;
+    }
+    const insightFix = event.target.closest("[data-insights-fix]");
+    if (insightFix) { jumpToInsightFix(insightFix.dataset.insightsFix); return; }
     const edit = event.target.closest("[data-expense-edit]");
     if (edit) {
       const rows = $("#expenseList")._expenseRows || [];
@@ -2264,11 +2869,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const dp = t.closest("[data-delprod]");
     if (dp) {
       const p = DB.getProduct(dp.dataset.delprod); if (!p) return;
-      Keys.require(async () => {
-        if (confirm(`Permanently delete “${p.name}” (${p.sku})? This cannot be undone.`)) {
-          await DB.removeProduct(p.id); toast("Item deleted from the rack");
-        }
-      });
+      Keys.require(() => openProductDelete(p));
       return;
     }
     const btnSaveProd = t.closest("[data-save-prod]");

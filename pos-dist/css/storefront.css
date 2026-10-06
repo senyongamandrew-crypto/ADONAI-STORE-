@@ -374,8 +374,14 @@ h1, h2, h3, .brand-word, .section-title {
   background: rgba(17, 24, 39, .32);
 }
 
-/* The whole card body is one link to /product/<slug> */
-.pcard-link {
+/* The whole card body is one link to /product/<slug>.
+   Explicit link-state selectors prevent mobile browsers from restoring their
+   default underline after a link has been visited. */
+.pcard-link,
+.pcard-link:link,
+.pcard-link:visited,
+.pcard-link:hover,
+.pcard-link:active {
   display: flex; flex-direction: column; flex: 1;
   text-decoration: none; color: inherit; min-width: 0;
 }
@@ -463,7 +469,11 @@ h1, h2, h3, .brand-word, .section-title {
 .pcard-actions {
   margin-top: auto; padding: 0 16px 16px; display: grid; gap: 7px;
 }
-.view-detail-btn {
+.view-detail-btn,
+.view-detail-btn:link,
+.view-detail-btn:visited,
+.view-detail-btn:hover,
+.view-detail-btn:active {
   display: block; text-align: center; text-decoration: none;
   border: 1px solid var(--line); border-radius: 9px; padding: 9px 12px;
   font: 600 12.5px var(--font-text); color: var(--ink); background: #fff;
@@ -863,22 +873,28 @@ html, body { margin: 0; padding: 0; min-height: 100%; }
    (The admin console's styles.css DOES want overflow-y:auto on this id —
    there <main> is a bounded flex child. Different contract, same name.) */
 .catalog-dashboard-region {
-  /* Keep the document as the single vertical scroll surface. A nested
-     auto-scroller makes long product lists difficult to browse on mobile. */
-  overflow: visible;
+  overflow: visible !important;
   box-sizing: border-box;
   /* Explicitly opt back into native panning in case a stale
      `touch-action: none` is inherited from an older cached stylesheet. */
   touch-action: auto;
 }
 
-/* Scroll lock while the cart drawer is open. The lock lives on <body> via
-   !important and is released by removing the class — the "closed" state must
-   NEVER set overflow:auto on body: a body scroll container breaks the sticky
-   site header and (with the lock class mismatched) strands the page unable
-   to scroll. The viewport (<html>) stays the one page scroller. */
-body.cart-drawer-open { overflow: hidden !important; touch-action: none; }
-body.cart-drawer-closed { touch-action: auto !important; }
+/* Cart drawer state hooks.
+   REMOVED: `body.cart-drawer-open { overflow: hidden !important;
+   touch-action: none; }`. That pair was the freeze.
+     1. `overflow: hidden` on <body> never locked anything — the root owns
+        the viewport scrollport (see the scroll-lock note at the top).
+     2. `touch-action: none` on <body> is resolved against the whole
+        ancestor chain, so it disabled touch panning for the entire
+        document: the drawer's own item list could not be swiped, and any
+        close path that failed to strip the class left the catalog
+        permanently unscrollable — the reported "frozen page".
+   Both classes are kept as inert state hooks so existing JS/selectors
+   keep working; the real lock is `html.scroll-locked`, applied by
+   js/scrollLock.js, which is reference-counted and self-healing. */
+body.cart-drawer-open,
+body.cart-drawer-closed { touch-action: auto; }
 .cart-drawer {
   position: fixed; top: 0; right: 0; width: 100%; max-width: 420px;
   height: 100%; height: 100dvh; z-index: 1001;
