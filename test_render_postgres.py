@@ -46,11 +46,28 @@ from models import (
     StockLot,
     StoreSetting,
 )
-from db_init import _dual_inventory_backfill_statements, init_db
+from db_init import (
+    PRODUCT_POLICY_CONSTRAINTS,
+    _dual_inventory_backfill_statements,
+    init_db,
+)
 from serve import app, wsgi_app
 
 
 class TestRenderPostgresHardening(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        """Guarantee a migrated, seeded schema for every test.
+
+        Tests used to inherit the schema from whichever test happened to run
+        first (alphabetical ordering), so running a single test by name hit
+        "no such table: products". init_db() is idempotent, so calling it here
+        is free and makes each test independently runnable.
+        """
+        os.environ.pop("DATABASE_URL", None)
+        if not init_db():
+            raise RuntimeError("Test schema bootstrap failed — see the init_db log above.")
 
     def api_request(self, method, path, payload=None, terminal_key=None, query=""):
         raw = json.dumps(payload or {}).encode("utf-8") if payload is not None else b""
@@ -133,9 +150,147 @@ class TestRenderPostgresHardening(unittest.TestCase):
         self.assertIn("SET quantity_type = item_condition::text", legacy_statements[1])
         print("✅ PASS: PostgreSQL enum backfill uses safe, explicit casts.")
 
+    def test_02c_policy_constraints_are_redeploy_safe(self):
+        """Guard constraints must be added by name-check, never by error-swallowing.
+
+        REGRESSION: `ALTER TABLE ... ADD CONSTRAINT` has no IF NOT EXISTS form.
+        The old code ran all three blindly and ignored errors containing
+        "already exists" — but on PostgreSQL the swallowed DuplicateObject had
+        already poisoned the transaction, so the *next* statement died with
+        "current transaction is aborted, commands ignored until end of
+        transaction block" and every redeploy rolled back the migration and
+        the seeding with it.
+        """
+        import inspect as py_inspect
+
+        import db_init
+
+        names = [name for name, _aliases, _definition in PRODUCT_POLICY_CONSTRAINTS]
+        self.assertEqual(len(names), len(set(names)), "Constraint names must be unique")
+        for name, aliases, definition in PRODUCT_POLICY_CONSTRAINTS:
+            self.assertTrue(name.startswith("ck_products_"), name)
+            self.assertTrue(definition.startswith("CHECK ("), name)
+            self.assertIn("NOT VALID", definition, f"{name} must not rewrite live rows")
+            self.assertNotIn(name, aliases)
+
+        source = py_inspect.getsource(db_init.apply_additive_schema_migrations)
+        self.assertIn("_postgres_constraint_names(connection", source)
+
+        # Every write in the migration must go through the savepoint helper,
+        # so one failure can never poison the surrounding transaction. The
+        # helper's own `connection.execute` is the one legitimate call site —
+        # it already sits inside `with connection.begin_nested()`.
+        import ast
+        import textwrap
+
+        tree = ast.parse(textwrap.dedent(source))
+        helper = next(
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "run_isolated"
+        )
+        helper_lines = range(helper.lineno, (helper.end_lineno or helper.lineno) + 1)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "execute"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "connection"
+                and node.lineno not in helper_lines
+            ):
+                self.fail(
+                    "Un-isolated connection.execute() at line "
+                    f"{node.lineno} of apply_additive_schema_migrations — route it "
+                    "through run_isolated() so a failure cannot abort the transaction."
+                )
+
+        # No code path may decide "this error is harmless" by substring-matching
+        # the driver's message: by the time PostgreSQL reports "already exists"
+        # the transaction is already unusable. Only real string literals are
+        # inspected here, so explanatory comments stay allowed.
+        import io as _io
+        import tokenize
+
+        literals = [
+            token.string
+            for token in tokenize.generate_tokens(_io.StringIO(source).readline)
+            if token.type == tokenize.STRING and not token.string.lstrip("rbfu").startswith(('"""', "'''"))
+        ]
+        for literal in literals:
+            self.assertNotIn(
+                "already exists", literal.lower(),
+                "Swallowing 'already exists' leaves the PostgreSQL transaction aborted; "
+                "check pg_constraint up front instead.",
+            )
+
+        # The explicit SQL migration must stay in sync: any constraint it
+        # installs for the same rule has to be listed as an alias, otherwise a
+        # psql-migrated database ends up with two copies of the same CHECK.
+        migration_sql = open(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "migrations", "20261003_dual_inventory.sql")
+        ).read()
+        declared = {name for name, _a, _d in PRODUCT_POLICY_CONSTRAINTS}
+        for name, aliases, _definition in PRODUCT_POLICY_CONSTRAINTS:
+            declared.update(aliases)
+        for token in migration_sql.split():
+            if token.startswith("ck_products_"):
+                self.assertIn(
+                    token.strip(","), declared,
+                    f"{token} exists in the SQL migration but db_init does not know it — "
+                    "add it to PRODUCT_POLICY_CONSTRAINTS aliases.",
+                )
+        print(f"✅ PASS: {len(names)} policy constraints are idempotent and savepoint-isolated.")
+
+    def test_02d_seed_catalog_obeys_preloved_single_quantity(self):
+        """PRE_LOVED stock is one-of-a-kind — seeds must never ship quantity 2.
+
+        REGRESSION: three seeded pre-loved rows carried quantity 2, which the
+        API rejects (`api.py`), ck_products_stock_policy rejects, and the
+        dual-inventory trigger rejects. On a fresh PostgreSQL database that
+        aborted the entire seeding transaction, leaving the live store with no
+        categories, settings or riders at all.
+        """
+        with get_db() as session:
+            seeded = session.query(Product).filter(Product.id.like("PRD-10%")).all()
+            self.assertGreaterEqual(len(seeded), 16)
+            offenders = []
+            brand_new = 0
+            for product in seeded:
+                condition = getattr(product.item_condition, "value", product.item_condition)
+                quantity_type = getattr(product.quantity_type, "value", product.quantity_type)
+                self.assertEqual(
+                    condition, quantity_type,
+                    f"{product.id}: quantity_type must mirror item_condition",
+                )
+                if condition == "PRE_LOVED" and product.in_stock_count not in (0, 1):
+                    offenders.append(f"{product.id} ({product.name}) qty={product.in_stock_count}")
+                if condition == "BRAND_NEW":
+                    brand_new += 1
+            self.assertEqual(offenders, [], "PRE_LOVED seeds must hold quantity 0 or 1: " + "; ".join(offenders))
+            self.assertGreaterEqual(brand_new, 2, "Seed must prove the BRAND_NEW stream too")
+        print(f"✅ PASS: Seed catalog honours the dual-inventory quantity policy ({brand_new} brand-new lines).")
+
+    def test_02e_init_db_is_idempotent_across_redeploys(self):
+        """Every redeploy re-runs init_db(); it must stay green and keep seeds."""
+        with get_db() as session:
+            before = session.query(Category).count()
+        for attempt in (1, 2):
+            self.assertTrue(init_db(), f"init_db() must succeed on redeploy #{attempt}")
+        with get_db() as session:
+            after = session.query(Category).count()
+            self.assertEqual(before, after, "Re-running init_db must not duplicate seed rows")
+            self.assertGreaterEqual(after, 7, "Seed categories must survive redeploys")
+        print("✅ PASS: init_db() is idempotent across repeated redeploys.")
+
     def test_03_concurrent_inventory_deduction(self):
         """Simulate high-concurrency order placement and verify atomic inventory safety."""
-        target_product_id = "PRD-1005"  # White Oxford Button-Down
+        # Must be a BRAND_NEW line: PRE_LOVED pieces are one-of-a-kind, so
+        # ck_products_stock_policy on PostgreSQL rejects the quantity-2 reset
+        # below. Using a factory row keeps this test valid on both backends.
+        target_product_id = "PRD-1017"  # Essential Cotton Crew Tee (BRAND_NEW)
 
         # Reset stock to exactly 2 for isolated concurrency test
         with get_db() as session:

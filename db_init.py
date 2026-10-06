@@ -55,6 +55,50 @@ def _postgres_column_types(connection, table_name: str) -> dict[str, str]:
     return {name: type_name for name, type_name in rows}
 
 
+def _postgres_constraint_names(connection, table_name: str) -> set[str]:
+    """Return the constraint names already attached to a PostgreSQL table.
+
+    Checking first is the only safe way to make `ALTER TABLE ... ADD
+    CONSTRAINT` idempotent: PostgreSQL has no `IF NOT EXISTS` form for it, and
+    letting the duplicate error fire poisons the surrounding transaction.
+    `to_regclass` yields NULL instead of raising when the table is missing.
+    """
+    rows = connection.execute(text("""
+        SELECT constraint_entry.conname
+        FROM pg_constraint AS constraint_entry
+        WHERE constraint_entry.conrelid = to_regclass(:table_name)
+    """), {"table_name": table_name})
+    return {name for (name,) in rows}
+
+
+# PostgreSQL guard rails for the dual-inventory policy, as
+# (constraint_name, equivalent_names_already_in_the_wild, definition).
+#
+# `ALTER TABLE ... ADD CONSTRAINT` has no IF NOT EXISTS form, so these are
+# applied only after checking pg_constraint. The aliases are the names
+# migrations/20261003_dual_inventory.sql uses for the identical rules —
+# honouring them stops a psql-migrated database from stacking two copies of
+# the same CHECK.
+PRODUCT_POLICY_CONSTRAINTS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    (
+        "ck_products_item_condition",
+        (),
+        "CHECK (item_condition IN ('BRAND_NEW', 'PRE_LOVED')) NOT VALID",
+    ),
+    (
+        "ck_products_quantity_type",
+        ("ck_products_quantity_type_matches_condition",),
+        "CHECK (quantity_type::text = item_condition::text) NOT VALID",
+    ),
+    (
+        "ck_products_stock_policy",
+        ("ck_products_dual_inventory_quantity",),
+        "CHECK ((item_condition = 'PRE_LOVED' AND in_stock_count IN (0, 1))"
+        " OR (item_condition = 'BRAND_NEW' AND in_stock_count >= 0)) NOT VALID",
+    ),
+)
+
+
 def _dual_inventory_backfill_statements(
     *,
     postgres: bool,
@@ -132,7 +176,10 @@ def apply_additive_schema_migrations():
             # Product Detail Page (PDP) catalog fields
             ("slug", "VARCHAR(200)"),
             ("fabric", "VARCHAR(255)"),
-            ("measurements_json", "TEXT DEFAULT '{}'"),
+            # measurements_json is already declared above with the stricter
+            # NOT NULL shape. Listing it twice made the second ALTER TABLE
+            # fail noisily on every boot, because the existing-column set is
+            # snapshotted once before the loop starts.
             ("flaw_notes", "TEXT"),
             ("flaw_photo_index", "INTEGER DEFAULT -1"),
             ("care_notes", "TEXT"),
@@ -156,23 +203,6 @@ def apply_additive_schema_migrations():
         ],
     }
     with engine.begin() as connection:
-        # Existing PostgreSQL installations need the enum types created before
-        # the additive ALTER TABLE below. SQLAlchemy creates them automatically
-        # for a brand-new database; this branch covers live databases safely.
-        if IS_POSTGRES:
-            connection.execute(text("""
-                DO $$ BEGIN
-                    CREATE TYPE item_condition_enum AS ENUM ('BRAND_NEW', 'PRE_LOVED');
-                EXCEPTION WHEN duplicate_object THEN NULL;
-                END $$;
-            """))
-            connection.execute(text("""
-                DO $$ BEGIN
-                    CREATE TYPE quantity_type_enum AS ENUM ('BRAND_NEW', 'PRE_LOVED');
-                EXCEPTION WHEN duplicate_object THEN NULL;
-                END $$;
-            """))
-        schema = inspect(connection)
 
         def run_isolated(statement: str, label: str) -> bool:
             """Execute one additive step inside its own savepoint.
@@ -183,6 +213,11 @@ def apply_additive_schema_migrations():
             every boot, so a loud log + continue is the correct posture for
             repair work, while genuinely new-column adds stay all-or-nothing
             at the statement level only.
+
+            The savepoint is not cosmetic: on PostgreSQL a failed statement
+            poisons the entire transaction, so EVERY write in this function
+            must go through here. Rolling back to the savepoint is what
+            clears that aborted state and lets the migration carry on.
             Returns True when the statement committed.
             """
             try:
@@ -195,7 +230,31 @@ def apply_additive_schema_migrations():
                 )
                 return False
 
+        # Existing PostgreSQL installations need the enum types created before
+        # the additive ALTER TABLE below. SQLAlchemy creates them automatically
+        # for a brand-new database; this branch covers live databases safely.
+        if IS_POSTGRES:
+            run_isolated("""
+                DO $$ BEGIN
+                    CREATE TYPE item_condition_enum AS ENUM ('BRAND_NEW', 'PRE_LOVED');
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+            """, "create item_condition_enum")
+            run_isolated("""
+                DO $$ BEGIN
+                    CREATE TYPE quantity_type_enum AS ENUM ('BRAND_NEW', 'PRE_LOVED');
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$;
+            """, "create quantity_type_enum")
+        schema = inspect(connection)
+        live_tables = set(schema.get_table_names())
+
         for table_name, columns in additions.items():
+            if table_name not in live_tables:
+                logger.warning(
+                    "Skipping additive migration for missing table %s.", table_name
+                )
+                continue
             if IS_POSTGRES and table_name == "products":
                 columns = [
                     (name, {
@@ -237,16 +296,28 @@ def apply_additive_schema_migrations():
             "inventory_status refresh",
         )
         if IS_POSTGRES:
-            for statement in (
-                "ALTER TABLE products ADD CONSTRAINT ck_products_item_condition CHECK (item_condition IN ('BRAND_NEW', 'PRE_LOVED')) NOT VALID",
-                "ALTER TABLE products ADD CONSTRAINT ck_products_quantity_type CHECK (quantity_type::text = item_condition::text) NOT VALID",
-                "ALTER TABLE products ADD CONSTRAINT ck_products_stock_policy CHECK ((item_condition = 'PRE_LOVED' AND in_stock_count IN (0, 1)) OR (item_condition = 'BRAND_NEW' AND in_stock_count >= 0)) NOT VALID",
-            ):
-                try:
-                    connection.execute(text(statement))
-                except Exception as exc:
-                    if "already exists" not in str(exc).lower():
-                        raise
+            # PostgreSQL aborts the WHOLE transaction on any failed statement,
+            # so "run it and ignore the 'already exists' error" is unsafe here.
+            # On every redeploy the first ADD CONSTRAINT raised DuplicateObject,
+            # the handler swallowed it, and the still-poisoned transaction then
+            # killed the next statement with SQLSTATE 25P02 ("current
+            # transaction is aborted, commands ignored until end of transaction
+            # block"). That message does not say "already exists", so it was
+            # re-raised and rolled back every migration *and* seed step.
+            #
+            # Fix: skip constraints that already exist (ALTER TABLE ADD
+            # CONSTRAINT has no IF NOT EXISTS form), and still execute the
+            # remaining ones inside their own savepoint so a surprise never
+            # poisons the outer transaction again.
+            existing_constraints = _postgres_constraint_names(connection, "products")
+            for name, aliases, definition in PRODUCT_POLICY_CONSTRAINTS:
+                if name in existing_constraints or existing_constraints.intersection(aliases):
+                    continue
+                if run_isolated(
+                    f"ALTER TABLE products ADD CONSTRAINT {name} {definition}",
+                    f"add constraint {name}",
+                ):
+                    logger.info("Added dual-inventory guard constraint %s.", name)
         # Existing catalog prices predate transport allocation: preserve them as
         # the base price and start with a zero transport allocation."}
         run_isolated(
@@ -410,19 +481,24 @@ def seed_products(session):
         return
 
     DEMO_CODES = {"Men": "MEN", "Women": "WOM", "Children": "KID"}
+    # NOTE: every PRE_LOVED row below must carry quantity 1 — curated vintage is
+    # one-of-a-kind. That rule is enforced three times over (API intake,
+    # ck_products_stock_policy, and the dual-inventory trigger), so a seed row
+    # with quantity 2 aborts the whole seeding transaction on PostgreSQL.
+    # Only BRAND_NEW factory rows may carry a quantity above 1.
     raw_products = [
         ("Indigo Type III Trucker Jacket", "Levi's", "Indigo", "Men", "Outerwear & Jackets", "L", "Grade A — Excellent", 40000, 68000, 120000, 1, "1980s trucker jacket. Authentic vintage wash with whiskers and brass buttons intact.", "Rail A-1"),
         ("Olive Waxed Field Jacket", "Barbour Style", "Olive", "Men", "Outerwear & Jackets", "XL", "Grade B — Good", 55000, 85000, 150000, 1, "Matte waxed cotton with a corduroy collar. Windproof and rain-resistant.", "Rail A-2"),
         ("Cream Silk Slip Dress", "Unbranded", "Cream", "Women", "Dresses & Skirts", "S", "Vintage / Collector", 45000, 78000, 130000, 1, "Bias-cut silk slip from the 90s — fluid drape, adjustable straps.", "Rail B-1"),
         ("Black Leather Chelsea Boots", "Clarks", "Black", "Men", "Shoes", "43", "Grade B — Good", 60000, 95000, 170000, 1, "Polished leather uppers with elastic gussets. Resoled once — plenty of life left.", "Shelf S-1"),
-        ("White Oxford Button-Down", "Ralph Lauren", "White", "Men", "Tops & Shirts", "L", "Grade A — Excellent", 20000, 38000, 75000, 2, "Crisp cotton oxford with single-needle stitching. Lightly worn.", "Rail C-1"),
+        ("White Oxford Button-Down", "Ralph Lauren", "White", "Men", "Tops & Shirts", "L", "Grade A — Excellent", 20000, 38000, 75000, 1, "Crisp cotton oxford with single-needle stitching. Lightly worn.", "Rail C-1"),
         ("Emerald Velvet Tailored Blazer", "Vintage Boutique", "Emerald Green", "Women", "Outerwear & Jackets", "M", "Grade A — Excellent", 35000, 60000, 110000, 1, "Plush cotton-velvet tailored blazer in deep emerald with satin lapels and structured shoulders.", "Rail A-3"),
         ("Pleated Midi Skirt", "Unbranded", "Rust", "Women", "Dresses & Skirts", "M", "Grade A — Excellent", 18000, 35000, 65000, 1, "Satin pleats with a comfortable elastic waist — moves beautifully.", "Rail B-2"),
         ("Ankara Print Wrap Dress", "Hand-made", "Multi", "Women", "Dresses & Skirts", "M", "Grade A — Excellent", 32000, 55000, 95000, 1, "Kitenge wax-print wrap tailored in Kampala. Wears like new.", "Rail B-3"),
-        ("High-Waist 501 Jeans", "Levi's", "Mid-wash", "Women", "Pants & Jeans", "30", "Grade B — Good", 26000, 48000, 85000, 2, "Classic straight leg with button fly. Honest fade at the knees.", "Rail D-1"),
+        ("High-Waist 501 Jeans", "Levi's", "Mid-wash", "Women", "Pants & Jeans", "30", "Grade B — Good", 26000, 48000, 85000, 1, "Classic straight leg with button fly. Honest fade at the knees.", "Rail D-1"),
         ("Khaki Pleated Chinos", "Dockers", "Khaki", "Men", "Pants & Jeans", "32", "Grade B — Good", 15000, 30000, 55000, 1, "Relaxed pleat-front, freshly hemmed. Office-ready.", "Rail D-2"),
         ("Canvas Field Tote", "Unbranded", "Natural", "Women", "Accessories", "-", "Grade A — Excellent", 10000, 22000, 40000, 1, "Heavy canvas tote with leather handles and a spotless interior.", "Shelf S-2"),
-        ("Tan Leather Belt", "Unbranded", "Tan", "Men", "Accessories", "34", "Grade B — Good", 9000, 18000, 32000, 2, "Full-grain leather with a brass buckle — broken in just right.", "Shelf S-3"),
+        ("Tan Leather Belt", "Unbranded", "Tan", "Men", "Accessories", "34", "Grade B — Good", 9000, 18000, 32000, 1, "Full-grain leather with a brass buckle — broken in just right.", "Shelf S-3"),
         ("Kids' Denim Jacket", "OshKosh", "Light wash", "Children", "Children Wear", "8y", "Grade B — Good", 13000, 25000, 45000, 1, "Sturdy kids' denim with room to grow. All snaps working.", "Rail K-1"),
         ("Silk Printed Scarf", "Unbranded", "Paisley", "Women", "Accessories", "-", "Vintage / Collector", 13000, 26000, 48000, 1, "Hand-rolled 70s silk square. No pulls, no stains.", "Shelf S-4"),
         ("Retro Running Trainers", "Nike", "White / Gum", "Men", "Shoes", "44", "Grade B — Good", 30000, 55000, 98000, 1, "Retro runner on a gum sole. Cleaned and disinfected.", "Shelf S-5"),
@@ -708,7 +784,17 @@ def init_db() -> bool:
         # Create all declared tables if they do not exist
         logger.info("Verifying and auto-migrating database schema tables...")
         Base.metadata.create_all(bind=engine)
-        apply_additive_schema_migrations()
+        try:
+            apply_additive_schema_migrations()
+        except Exception as exc:
+            # Additive repairs are retried on every boot, so a failure here
+            # must not also cancel the seeding below (which is what left the
+            # live store without its default categories, settings and riders).
+            logger.error(
+                "[Schema Migration Error] %s — continuing with seed verification.",
+                exc,
+                exc_info=True,
+            )
 
         inspector = inspect(engine)
         tables = inspector.get_table_names()
