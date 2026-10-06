@@ -840,10 +840,10 @@
       if (!product) throw new Error("Product not found");
       return this.updateProduct(id, { in_stock_count: Math.max(0, Number(product.in_stock_count || 0) + money(delta)) });
     },
-    async removeProduct(id) {
+    async removeProduct(id, mode = "archive") {
       await apiRequest("/api/products/" + encodeURIComponent(id), {
         method: "DELETE",
-        body: "{}"
+        body: JSON.stringify({ mode: mode === "permanent" ? "permanent" : "archive" })
       }, true);
       return tx("products", st => {
         st.products = st.products.filter(product => product.id !== id);

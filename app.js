@@ -974,6 +974,48 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return out;
   }
 
+  /* ---- rack removal: archive (soft) or delete permanently (manager-gated) ---- */
+  function openProductDelete(p) {
+    if (!p) return;
+    const qty = Math.max(0, Number(p.in_stock_count) || 0);
+    const lossValue = qty * (Number(p.cost_price) || 0);
+    openModal(`
+      <button class="modal-x" data-close>×</button>
+      <p class="kicker">RACK REMOVAL</p>
+      <h3>Remove &ldquo;${esc(p.name)}&rdquo;?</h3>
+      <p class="muted small"><strong>${esc(p.sku)}</strong> · ${esc(p.category || "Uncategorised")} · ${qty} unit${qty === 1 ? "" : "s"} on hand${lossValue ? ` · ${ugx(lossValue)} at cost` : ""}</p>
+      <div class="del-options">
+        <button type="button" class="del-option" id="delArchive">
+          <strong>Archive it <span class="del-tag">Recommended</span></strong>
+          <span>Hides the piece from the rack and storefront immediately. Sales history, receipts, and financial reports stay complete.</span>
+        </button>
+        <button type="button" class="del-option danger" id="delPurge">
+          <strong>Delete permanently</strong>
+          <span>Erases the product record forever — <b>this cannot be undone</b>.<br/>
+          • Past order lines keep the item name, price, and totals, so old receipts and reports stay truthful.<br/>
+          ${lossValue ? `• The ${ugx(lossValue)} stock value is posted as an inventory write-off in the ledgers.` : "• No stock on hand, so no write-off is posted."}<br/>
+          • Manager authority required — enforced by the server.</span>
+        </button>
+      </div>
+      <div class="modal-actions"><button class="btn" data-close>Cancel</button></div>`);
+    const run = async (mode) => {
+      const button = mode === "permanent" ? $("#delPurge") : $("#delArchive");
+      setButtonBusy(button, true, mode === "permanent" ? "Deleting permanently…" : "Archiving…");
+      try {
+        await DB.removeProduct(p.id, mode);
+        closeModal();
+        toast(mode === "permanent"
+          ? `${p.name} permanently deleted — stock value written off, order history preserved`
+          : `${p.name} archived — hidden from rack and storefront`);
+      } catch (error) {
+        setButtonBusy(button, false);
+        toast(error.message, false);
+      }
+    };
+    $("#delArchive").addEventListener("click", () => run("archive"));
+    $("#delPurge").addEventListener("click", () => run("permanent"));
+  }
+
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
@@ -2704,11 +2746,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const dp = t.closest("[data-delprod]");
     if (dp) {
       const p = DB.getProduct(dp.dataset.delprod); if (!p) return;
-      Keys.require(async () => {
-        if (confirm(`Permanently delete “${p.name}” (${p.sku})? This cannot be undone.`)) {
-          await DB.removeProduct(p.id); toast("Item deleted from the rack");
-        }
-      });
+      Keys.require(() => openProductDelete(p));
       return;
     }
     const btnSaveProd = t.closest("[data-save-prod]");

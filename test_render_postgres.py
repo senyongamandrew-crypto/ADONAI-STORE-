@@ -1088,6 +1088,97 @@ class TestRenderPostgresHardening(unittest.TestCase):
         print(f"✅ PASS: Marketing expense flows into insights "
               f"(spend UGX {marketing['spend']:,}, {marketing['campaigns']} campaigns).")
 
+    def test_18_rack_permanent_delete(self):
+        """Rack deletion offers archive by default and a manager-gated permanent
+        purge that preserves order history and writes off live stock value."""
+        from models import LedgerEntry, AccountingJournalEntry
+
+        def pick_stock_product(session, exclude=()):
+            return session.query(Product).filter(
+                Product.in_stock_count >= 1,
+                ~Product.inventory_status.in_(["ARCHIVED", "WRITTEN_OFF"]),
+                ~Product.id.in_(exclude),
+            ).order_by(Product.in_stock_count.desc()).first()
+
+        # 1. Default DELETE keeps the soft-archive behaviour.
+        with get_db() as session:
+            victim = pick_stock_product(session)
+            self.assertIsNotNone(victim)
+            product_id, sku = victim.id, victim.sku
+
+        status, archived = self.api_request(
+            "DELETE", f"/api/products/{product_id}", {}, TEST_MASTER_KEY,
+        )
+        self.assertTrue(status.startswith("200"), archived)
+        self.assertEqual(archived.get("status"), "archived")
+        with get_db() as session:
+            still_there = session.query(Product).filter_by(id=product_id).first()
+            self.assertIsNotNone(still_there, "Archive must keep the product row")
+            self.assertEqual(still_there.inventory_status, "ARCHIVED")
+
+        # 2. Invalid mode is rejected explicitly.
+        status, bad_mode = self.api_request(
+            "DELETE", f"/api/products/{product_id}", {"mode": "maybe"}, TEST_MASTER_KEY,
+        )
+        self.assertTrue(status.startswith("400"), bad_mode)
+
+        # 3. Permanent deletion is manager/admin gated.
+        with get_db() as session:
+            target = pick_stock_product(session, exclude=(product_id,))
+            self.assertIsNotNone(target)
+            target_id, target_sku = target.id, target.sku
+            target_cost = int(target.cost_price or 0)
+
+        status, denied = self.api_request(
+            "DELETE", f"/api/products/{target_id}", {"mode": "permanent"}, "3456",
+        )
+        self.assertTrue(status.startswith("403"), "Cashiers must not permanently delete")
+
+        # 4. History stays truthful: order one unit, then permanently delete it.
+        status, order = self.api_request(
+            "POST", "/api/orders", {
+                "id": "AT-PURGE-TEST", "channel": "web",
+                "customer_name": "Purge Test Customer",
+                "items": [{"product_id": target_id, "qty": 1}],
+                "tender_type": "cash",
+            }, TEST_MASTER_KEY,
+        )
+        self.assertTrue(status.startswith("201"), order)
+        order_id = order["order"]["id"] if "order" in order else order.get("id")
+
+        status, purged = self.api_request(
+            "DELETE", f"/api/products/{target_id}", {"mode": "permanent"}, TEST_MASTER_KEY,
+        )
+        self.assertTrue(status.startswith("200"), purged)
+        self.assertEqual(purged.get("status"), "permanently_deleted")
+
+        with get_db() as session:
+            self.assertIsNone(
+                session.query(Product).filter_by(id=target_id).first(),
+                "Permanent delete must remove the product row",
+            )
+            self.assertIsNone(
+                session.query(Product).filter_by(sku=target_sku).first(),
+                "The SKU must be released for reuse",
+            )
+            if order_id:
+                line = session.query(OrderItem).filter_by(order_id=order_id).first()
+                self.assertIsNotNone(line)
+                self.assertIsNone(line.product_id, "Historic order line must be unlinked, not deleted")
+                self.assertTrue(line.name, "Historic order line keeps its name snapshot")
+            audit = session.query(LedgerEntry).filter(
+                LedgerEntry.description.ilike(f"%Permanently deleted%({target_sku})%")
+            ).first()
+            self.assertIsNotNone(audit, "Ledger audit trail must record the purge")
+            if target_cost > 0 and (purged.get("stock_loss_posted") or 0) > 0:
+                journal = session.query(AccountingJournalEntry).filter(
+                    AccountingJournalEntry.description.ilike(f"%Permanent delete%{target_sku}%")
+                ).first()
+                self.assertIsNotNone(journal, "Stock value must be written off via a balanced journal")
+                self.assertEqual(sum(l.debit for l in journal.lines), sum(l.credit for l in journal.lines))
+        print(f"✅ PASS: Permanent rack delete — row purged, {purged.get('unlinked_order_lines')} "
+              f"order line(s) unlinked, UGX {purged.get('stock_loss_posted', 0):,} written off.")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -710,7 +710,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     }, status=429)
 
         body = {}
-        if body_bytes and method in ("POST", "PUT", "PATCH"):
+        if body_bytes and method in ("POST", "PUT", "PATCH", "DELETE"):
             try:
                 body = json.loads(body_bytes.decode("utf-8"))
             except Exception:
@@ -969,10 +969,72 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not prod:
                     return json_response({"ok": False, "error": "Product not found"}, status=404)
                 if method == "DELETE":
-                    prod.inventory_status = "ARCHIVED"
-                    prod.in_stock_count = 0
-                    session.query(InventoryLock).filter_by(product_id=pid).delete(synchronize_session=False)
-                    return json_response({"ok": True, "status": "archived", "product": prod.to_dict()})
+                    mode = str(
+                        body.get("mode") or query_params.get("mode", [""])[0] or "archive"
+                    ).strip().lower()
+                    if mode not in {"archive", "permanent"}:
+                        return json_response(
+                            {"ok": False, "error": "mode must be 'archive' or 'permanent'"}, status=400
+                        )
+                    if mode == "archive":
+                        prod.inventory_status = "ARCHIVED"
+                        prod.in_stock_count = 0
+                        session.query(InventoryLock).filter_by(product_id=pid).delete(synchronize_session=False)
+                        return json_response({"ok": True, "status": "archived", "product": prod.to_dict()})
+
+                    # --- Permanent (hard) removal: manager/admin only ---
+                    role = str((staff_info or {}).get("role", "")).lower()
+                    if role not in FINANCE_MANAGER_ROLES:
+                        return json_response(
+                            {"ok": False, "error": "Manager or administrator authorization is required to permanently delete a product"},
+                            status=403,
+                        )
+                    product_name, product_sku = prod.name, prod.sku
+                    quantity_on_hand = max(0, int(prod.in_stock_count or 0))
+                    loss = int(prod.cost_price or 0) * quantity_on_hand
+                    locks_released = session.query(InventoryLock).filter_by(product_id=pid).delete(synchronize_session=False)
+                    # Historical order lines keep their name/price/cost snapshots so old
+                    # receipts and reports stay truthful; only the catalog link is removed.
+                    unlinked = session.query(OrderItem).filter(OrderItem.product_id == pid).update(
+                        {OrderItem.product_id: None}, synchronize_session=False
+                    )
+                    journal = None
+                    if loss:
+                        journal = create_journal_entry(
+                            session,
+                            reference=generate_uid("PDEL"), source="inventory_write_off",
+                            description=f"Permanent delete {quantity_on_hand} x {product_name} ({product_sku})",
+                            occurred_at=datetime.utcnow(), staff=staff_info,
+                            lines=[
+                                {"account_code": "5200", "account_name": ACCOUNT_NAMES["5200"], "debit": loss},
+                                {"account_code": "1200", "account_name": ACCOUNT_NAMES["1200"], "credit": loss},
+                            ],
+                        )
+                        session.add(InventoryAdjustment(
+                            id=generate_uid("ADJ"), product_id=pid, adjustment_type="PURGE",
+                            quantity=quantity_on_hand, old_price=int(prod.selling_price or 0), new_price=0,
+                            loss_amount=loss, reason="Permanent rack deletion (manager authorized)",
+                            journal_entry_id=journal.id,
+                            created_by_id=staff_info.get("id"), created_by_name=staff_info.get("name"),
+                        ))
+                    # Inventory rows cascade on the FK in Postgres; delete explicitly so
+                    # SQLite behaves identically before the product row is removed.
+                    session.query(Inventory).filter_by(product_id=pid).delete(synchronize_session=False)
+                    session.flush()
+                    session.delete(prod)
+                    session.add(LedgerEntry(
+                        id=generate_uid("LED"), kind="adjustment", amount=-loss,
+                        category="Inventory Removal",
+                        description=f"Permanently deleted {product_name} ({product_sku}) from the rack"
+                                    + (f" — UGX {loss:,} stock value written off" if loss else " — no stock on hand"),
+                        staff_name=staff_info.get("name"), ref_id=journal.id if journal else pid,
+                    ))
+                    session.flush()
+                    return json_response({
+                        "ok": True, "status": "permanently_deleted", "product_id": pid,
+                        "sku": product_sku, "unlinked_order_lines": unlinked,
+                        "locks_released": locks_released, "stock_loss_posted": loss,
+                    })
 
                 text_fields = {
                     "name": 255, "brand": 100, "color": 50, "demographic": 50,

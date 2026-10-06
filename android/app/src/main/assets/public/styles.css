@@ -1034,6 +1034,24 @@ html[data-pointer="touch"] .lnk { padding: 6px 2px; }
 }
 .finance-error-actions { margin-top:11px; }
 
+/* ---------- rack removal options (archive vs permanent delete) ---------- */
+.del-options { display:grid; gap:10px; margin:15px 0 4px; }
+.del-option {
+  appearance:none; width:100%; text-align:left; padding:13px 15px;
+  border:1.5px solid #E5E7EB; border-radius:13px; background:#fff; cursor:pointer;
+  transition:border-color .15s ease, background .15s ease, transform .1s ease;
+}
+.del-option:hover { border-color:#9CA3AF; background:#F9FAFB; }
+.del-option:active { transform:scale(.99); }
+.del-option:disabled { opacity:.55; cursor:wait; }
+.del-option strong { display:block; margin-bottom:4px; color:#111827; font-size:13.5px; }
+.del-option span { display:block; color:#4B5563; font-size:12px; line-height:1.55; }
+.del-option.danger { border-color:#FCA5A5; background:#FEF2F2; }
+.del-option.danger strong { color:#B91C1C; }
+.del-option.danger span { color:#7F1D1D; }
+.del-option.danger:hover { border-color:#DC2626; background:#FEE2E2; }
+.del-tag { font-size:9.5px; font-weight:800; color:#fff; background:#15803D; border-radius:999px; padding:2px 8px; margin-left:6px; vertical-align:2px; text-transform:uppercase; letter-spacing:.05em; }
+
 @media (max-width:1100px) {
   .quality-gauge-wrap { grid-template-columns:1fr; justify-items:center; }
   .cat-row .bar-value { min-width:0; }
