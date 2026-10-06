@@ -83,13 +83,20 @@ ALLOW_FRAME_EMBED = os.environ.get("ALLOW_FRAME_EMBED", "") == "1"
 # shared esc() helpers client-side. Everything else is locked down:
 # no plugins (object-src), no base hijacking (base-uri), restricted form
 # targets, and frame-ancestors synced with X-Frame-Options.
+# Flutterwave Inline checkout loads its script from checkout.flutterwave.com,
+# renders the payment modal in an iframe on that origin, and talks to the
+# gateway API. Only those exact origins are opened up — everything else stays
+# locked down. (No CSP change is needed for the server-side verify calls.)
+FLUTTERWAVE_ORIGINS = "https://checkout.flutterwave.com https://api.flutterwave.com"
+
 CSP_POLICY = (
     "default-src 'self'; "
-    "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com; "
+    "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https://*.flutterwave.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
-    "connect-src 'self'; "
+    f"connect-src 'self' {FLUTTERWAVE_ORIGINS}; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "script-src 'self' 'unsafe-inline'; "
+    f"script-src 'self' 'unsafe-inline' https://checkout.flutterwave.com; "
+    "frame-src https://checkout.flutterwave.com; "
     "object-src 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "

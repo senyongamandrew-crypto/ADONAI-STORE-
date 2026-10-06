@@ -144,6 +144,16 @@ def apply_additive_schema_migrations():
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
             ("category", "VARCHAR(100)"),
         ],
+        "orders": [
+            # Online payment lifecycle (Flutterwave). Existing orders keep
+            # 'unpaid' — exactly their historical cash-on-delivery meaning.
+            ("payment_status", "VARCHAR(20) NOT NULL DEFAULT 'unpaid'"),
+            ("payment_provider", "VARCHAR(30)"),
+            ("payment_reference", "VARCHAR(100)"),
+            ("payment_token_hash", "VARCHAR(128)"),
+            ("paid_at", "TIMESTAMP"),
+            ("payment_expires_at", "TIMESTAMP"),
+        ],
     }
     with engine.begin() as connection:
         # Existing PostgreSQL installations need the enum types created before
@@ -163,6 +173,28 @@ def apply_additive_schema_migrations():
                 END $$;
             """))
         schema = inspect(connection)
+
+        def run_isolated(statement: str, label: str) -> bool:
+            """Execute one additive step inside its own savepoint.
+
+            A single schema quirk (e.g. a legacy column with an unexpected
+            type) must never abort the whole migration and take the store
+            down with it. Each statement is idempotent and re-attempted on
+            every boot, so a loud log + continue is the correct posture for
+            repair work, while genuinely new-column adds stay all-or-nothing
+            at the statement level only.
+            Returns True when the statement committed.
+            """
+            try:
+                with connection.begin_nested():
+                    connection.execute(text(statement))
+                return True
+            except Exception as exc:
+                logger.error(
+                    "Migration step skipped after error (%s): %s", label, str(exc).splitlines()[0][:400]
+                )
+                return False
+
         for table_name, columns in additions.items():
             if IS_POSTGRES and table_name == "products":
                 columns = [
@@ -175,10 +207,12 @@ def apply_additive_schema_migrations():
             existing = {column["name"] for column in schema.get_columns(table_name)}
             for name, declaration in columns:
                 if name not in existing:
-                    connection.execute(
-                        text(f"ALTER TABLE {table_name} ADD COLUMN {name} {declaration}")
+                    added = run_isolated(
+                        f"ALTER TABLE {table_name} ADD COLUMN {name} {declaration}",
+                        f"add {table_name}.{name}",
                     )
-                    logger.info("Added safe column %s.%s", table_name, name)
+                    if added:
+                        logger.info("Added safe column %s.%s", table_name, name)
         # Existing catalog rows are the legacy curated stream. Backfill the
         # explicit policy fields before any new dual-inventory intake arrives.
         #
@@ -186,7 +220,9 @@ def apply_additive_schema_migrations():
         # PostgreSQL enum types. A text CASE cannot be assigned to the former,
         # and one enum cannot be assigned to the other without casting through
         # text. This used to make Render boot fail with SQLSTATE 42804
-        # ("You will need to rewrite or cast the expression").
+        # ("You will need to rewrite or cast the expression") — hence the
+        # savepoint isolation so a legacy-shape surprise can never again stop
+        # the store from booting.
         postgres_types = _postgres_column_types(connection, "products") if IS_POSTGRES else {}
         item_condition_is_enum = postgres_types.get("item_condition") == "item_condition_enum"
         quantity_type_is_enum = postgres_types.get("quantity_type") == "quantity_type_enum"
@@ -195,8 +231,11 @@ def apply_additive_schema_migrations():
             item_condition_is_enum=item_condition_is_enum,
             quantity_type_is_enum=quantity_type_is_enum,
         ):
-            connection.execute(text(statement))
-        connection.execute(text("UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF')"))
+            run_isolated(statement, "dual-inventory backfill")
+        run_isolated(
+            "UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF')",
+            "inventory_status refresh",
+        )
         if IS_POSTGRES:
             for statement in (
                 "ALTER TABLE products ADD CONSTRAINT ck_products_item_condition CHECK (item_condition IN ('BRAND_NEW', 'PRE_LOVED')) NOT VALID",
@@ -210,14 +249,23 @@ def apply_additive_schema_migrations():
                         raise
         # Existing catalog prices predate transport allocation: preserve them as
         # the base price and start with a zero transport allocation."}
-        connection.execute(text("UPDATE products SET base_price = selling_price WHERE base_price = 0 AND selling_price > 0"))
+        run_isolated(
+            "UPDATE products SET base_price = selling_price WHERE base_price = 0 AND selling_price > 0",
+            "transport base price backfill",
+        )
         for statement in (
             "CREATE INDEX IF NOT EXISTS ix_products_stock_lot_id ON products(stock_lot_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
             "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
+            # Payment-columns indexes for databases whose orders table predates
+            # the online-checkout feature (create_all only builds indexes for
+            # tables it creates in that pass).
+            "CREATE INDEX IF NOT EXISTS ix_orders_payment_status ON orders(payment_status)",
+            "CREATE INDEX IF NOT EXISTS ix_orders_payment_reference ON orders(payment_reference)",
+            "CREATE INDEX IF NOT EXISTS ix_orders_payment_expires_at ON orders(payment_expires_at)",
         ):
-            connection.execute(text(statement))
+            run_isolated(statement, "additive index")
 
     backfill_product_slugs()
 
@@ -495,7 +543,6 @@ def seed_products(session):
             color_variants_json=json.dumps(r[15] if isinstance(r[15], list) else []),
             factory_tag_notes=r[16],
             inner_packaging=r[17],
-            measurements_json=json.dumps(r[18] if isinstance(r[18], dict) else {}),
             fabric_grading_notes=r[19],
             cost_price=r[7],
             # base_price must be seeded too: final_selling_price is a generated

@@ -45,6 +45,7 @@ A production-grade unified retail and e-commerce system for **Adonai Store** (Pl
 
 - **Entry Route**: `/`
 - **Features**: Live dual-inventory catalog, Brand-New / Vintage filter chips, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, web cart reservations, and direct POS fulfillment sync.
+- **Online Payments (Flutterwave)**: Checkout offers **Pay now — MoMo & Card** (MTN MoMo, Airtel Money, Visa, Mastercard via the Flutterwave popup) alongside **Pay on delivery/pickup**. Orders are reserved while the customer pays, verified server-side before being marked paid, settled via webhook, and auto-released if unpaid within the payment window. **Setup guide: [FLUTTERWAVE_PAYMENTS.md](FLUTTERWAVE_PAYMENTS.md).**
 - **Privacy & Security**: All POS links, admin navigation, and staff login prompts have been completely stripped from the storefront.
 
 ---

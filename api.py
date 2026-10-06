@@ -18,6 +18,7 @@ import urllib.parse
 import uuid
 
 from database import DATABASE_URL, IS_POSTGRES, engine, get_db
+import payments
 from notifications import (
     LOW_STOCK_THRESHOLD,
     broadcast_event,
@@ -47,10 +48,13 @@ from models import (
     Inventory,
     InventoryAdjustment,
     InventoryLock,
+    ItemCondition,
     LedgerEntry,
     Order,
     OrderItem,
+    PaymentTransaction,
     Product,
+    QuantityType,
     Rider,
     StockLot,
     StoreSetting,
@@ -331,7 +335,7 @@ def payment_account(method: str) -> tuple[str, str]:
     value = str(method or "cash").strip().lower().replace("-", "_").replace(" ", "_")
     if value in {"mtn", "airtel", "mobile", "mobile_money", "momo"}:
         return "1010", ACCOUNT_NAMES["1010"]
-    if value in {"bank", "bank_transfer", "card"}:
+    if value in {"bank", "bank_transfer", "card", "flutterwave", "flw", "online"}:
         return "1020", ACCOUNT_NAMES["1020"]
     return "1000", ACCOUNT_NAMES["1000"]
 
@@ -527,6 +531,145 @@ def sale_journal_lines(total: int, cogs: int, tender_type: str, transport_total:
             {"account_code": "1200", "account_name": ACCOUNT_NAMES["1200"], "credit": cogs},
         ])
     return lines
+
+
+# ============================================================================
+# Online payments (Flutterwave) — lifecycle helpers
+# ============================================================================
+def expire_stale_flutterwave_orders(session, now=None):
+    """
+    Release stock on web orders whose payment window lapsed without a verified
+    charge. Mirrors the staff 'Cancelled' transition (restock + status) so a
+    one-of-one thrift piece goes back on the rail automatically.
+    """
+    now = now or datetime.utcnow()
+    stale = (
+        session.query(Order)
+        .filter(
+            Order.payment_status == "pending",
+            Order.payment_provider == payments.PROVIDER,
+            Order.payment_expires_at.isnot(None),
+            Order.payment_expires_at <= now,
+            ~Order.status.in_(["cancelled", "completed"]),
+        )
+        .with_for_update()
+        .all()
+    )
+    for order in stale:
+        for item in order.items:
+            product = session.query(Product).filter_by(id=item.product_id).with_for_update().first()
+            if product:
+                product.in_stock_count = int(product.in_stock_count or 0) + int(item.qty or 0)
+                if product.inventory_status == "OUT_OF_STOCK" and product.in_stock_count > 0:
+                    product.inventory_status = "AVAILABLE"
+        order.payment_status = "failed"
+        order.status = "cancelled"
+        order.dispatch_status = "Cancelled"
+        order.updated_at = now
+        session.query(PaymentTransaction).filter(
+            PaymentTransaction.order_id == order.id,
+            PaymentTransaction.status == "pending",
+        ).update({"status": "failed", "updated_at": now}, synchronize_session=False)
+        broadcast_event(
+            "ORDER_EXPIRED",
+            f"⌛ Unpaid order {order.id} released",
+            "Online payment was not completed in time — the piece(s) are back on the rail.",
+            {"order_id": order.id, "amount": order.total},
+        )
+    if stale:
+        session.flush()
+    return len(stale)
+
+
+def load_order_for_payment(session, order_id, payment_token):
+    """
+    Resolve an order for a browser payment action. The per-order payment token
+    (issued once, in the checkout response) authorizes initiate/verify/status
+    calls so strangers cannot poke at arbitrary order ids.
+    """
+    safe_id = safe_identifier(order_id)
+    if not safe_id or not payment_token:
+        return None, "order_id and payment_token are required"
+    order = session.query(Order).filter_by(id=safe_id).with_for_update().first()
+    if not order:
+        return None, "Order not found"
+    if not payments.payment_token_matches(order.payment_token_hash or "", payment_token):
+        return None, "Payment token is invalid for this order"
+    return order, None
+
+
+def settle_order_payment(session, order, verified, attempt=None, source="browser_verify"):
+    """
+    Mark an order paid after a Flutterwave transaction was re-verified with the
+    secret key. Idempotent: the browser verify call and the webhook can arrive
+    in any order (and repeatedly) without double-settling.
+    Returns (ok, payment_status, error_message).
+    """
+    now = datetime.utcnow()
+    if order.payment_status == "paid":
+        return True, "paid", ""
+
+    tx_ref = str(verified.get("tx_ref") or "").strip()
+    if attempt is None and tx_ref:
+        attempt = (
+            session.query(PaymentTransaction)
+            .filter(
+                PaymentTransaction.order_id == order.id,
+                PaymentTransaction.tx_ref == tx_ref,
+            )
+            .with_for_update()
+            .first()
+        )
+    if attempt is None:
+        logger.warning("Payment settle refused for %s: unknown tx_ref %r (%s)", order.id, tx_ref, source)
+        return False, order.payment_status or "pending", "Payment reference is not recognized for this order"
+
+    if not verified.get("ok"):
+        if verified.get("status") and str(verified.get("status")).lower() in {"failed", "cancelled"}:
+            attempt.status = "failed"
+            attempt.updated_at = now
+        return False, order.payment_status or "pending", "Flutterwave has not confirmed this payment"
+
+    # Trust only gateway-verified figures, and only against the ORDER's total —
+    # never against anything the browser posted.
+    verified_currency = str(verified.get("currency") or "").upper()
+    expected_currency = (payments.FLW_CURRENCY or "UGX").upper()
+    if verified_currency and verified_currency != expected_currency:
+        logger.warning("Payment settle refused for %s: currency %s != %s", order.id, verified_currency, expected_currency)
+        return False, order.payment_status or "pending", "Paid currency does not match this order"
+
+    verified_amount = verified.get("amount")
+    if verified_amount is not None:
+        try:
+            if int(round(float(verified_amount))) < int(order.total or 0):
+                logger.warning("Payment settle refused for %s: amount %s < %s", order.id, verified_amount, order.total)
+                return False, order.payment_status or "pending", "Paid amount is less than the order total"
+        except (TypeError, ValueError):
+            return False, order.payment_status or "pending", "Verified amount was not readable"
+
+    flw_id = verified.get("flw_id")
+    attempt.status = "successful"
+    attempt.flw_transaction_id = str(flw_id)[:40] if flw_id is not None else attempt.flw_transaction_id
+    attempt.channel = str(verified.get("payment_type") or "")[:40] or None
+    attempt.gateway_payload = payments.transaction_summary(verified)
+    attempt.updated_at = now
+
+    order.payment_status = "paid"
+    order.tender_type = payments.PROVIDER
+    order.payment_provider = payments.PROVIDER
+    order.payment_reference = attempt.tx_ref
+    order.paid_at = now
+    order.updated_at = now
+    session.flush()
+
+    order_number = order.id.split("-")[-1] if "-" in order.id else order.id
+    broadcast_event(
+        "ORDER_PAID",
+        f"💳 Paid online — Order #{order_number}",
+        f"{order.customer_name or 'Online shopper'} paid UGX {int(order.total or 0):,} via Flutterwave ({attempt.channel or 'online'}).",
+        {"order_id": order.id, "amount": order.total, "reference": attempt.tx_ref, "channel": attempt.channel or ""},
+    )
+    return True, "paid", ""
 
 
 def handle_api_request(method: str, path: str, query_params: dict, body_bytes: bytes, headers: dict = None, client_addr: str = None) -> tuple[int, str, bytes]:
@@ -1044,6 +1187,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 }, status=401)
 
             with get_db() as session:
+                # Drop abandoned online-payment orders out of the staff queue.
+                expire_stale_flutterwave_orders(session)
                 q = session.query(Order)
                 channel = query_params.get("channel", [""])[0]
                 if channel:
@@ -1145,6 +1290,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             with get_db() as session:
                 now = datetime.utcnow()
                 session.query(InventoryLock).filter(InventoryLock.expires_at <= now).delete(synchronize_session=False)
+                # Reclaim stock from online-payment orders abandoned past their
+                # payment window before promising stock to this new checkout.
+                expire_stale_flutterwave_orders(session, now)
                 products = {}
                 active_locks = {}
                 for pid in sorted(requested):
@@ -1227,6 +1375,24 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 tender = body.get("tender") or {}
                 cashier = body.get("cashier") or staff_info or {}
                 tender_type = tender.get("type", "cash" if channel == "pos" else "mobile_money")
+
+                # ---- Online payment intent (web storefront only) ----
+                # 'payment_method: flutterwave' reserves the pieces and issues
+                # a per-order payment token; the order only counts as PAID
+                # after the gateway transaction is verified server-side.
+                requested_payment_method = str(body.get("payment_method") or "").strip().lower()
+                wants_online_payment = channel != "pos" and requested_payment_method in {"flutterwave", "online", "card"}
+                if wants_online_payment and not payments.is_enabled():
+                    return json_response({
+                        "ok": False,
+                        "error": "Online payment is not available right now — please choose pay on delivery",
+                    }, status=503)
+                if wants_online_payment:
+                    # Route the double-entry debit to the online settlement
+                    # account (1020) so the books reflect gateway collections,
+                    # not loose mobile money.
+                    tender_type = payments.PROVIDER
+                payment_token = payments.new_payment_token() if wants_online_payment else ""
                 order = Order(
                     id=order_id,
                     channel=channel,
@@ -1246,6 +1412,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     tender_type=tender_type,
                     tender_amount=tender.get("tendered"),
                     tender_change=tender.get("change"),
+                    payment_status=("pending" if wants_online_payment else "unpaid"),
+                    payment_provider=(payments.PROVIDER if wants_online_payment else None),
+                    payment_token_hash=(payments.hash_payment_token(payment_token) if wants_online_payment else None),
+                    payment_expires_at=(now + timedelta(minutes=payments.PAYMENT_TTL_MINUTES) if wants_online_payment else None),
                     cashier_id=cashier.get("id"),
                     cashier_name=cashier.get("name"),
                     created_at=now,
@@ -1312,11 +1482,215 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                              "remaining": remaining, "barcode": product.barcode_id},
                         )
 
-                return json_response({
+                order_response = {
                     "status": "success",
                     "order": order.to_dict(),
                     "products": [product.to_dict() for product in products.values()],
-                }, status=201)
+                }
+                if wants_online_payment:
+                    # The payment token is issued ONCE, here, to the browser
+                    # that placed the order. It authorizes payment initiation
+                    # and verification for this order only, and is never stored
+                    # anywhere server-side except as a SHA-256 hash.
+                    order_response["payment"] = {
+                        "provider": payments.PROVIDER,
+                        "status": "pending",
+                        "token": payment_token,
+                        "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
+                        "payment_window_minutes": payments.PAYMENT_TTL_MINUTES,
+                    }
+                return json_response(order_response, status=201)
+
+        # ----------------------------------------------------
+        # 4b. Online payments — Flutterwave (public, order-token scoped)
+        # ----------------------------------------------------
+        if clean_path == "/api/payments/config" and method == "GET":
+            # Safe by design: only the PUBLIC key and display metadata.
+            return json_response({"ok": True, **payments.public_checkout_config()})
+
+        if clean_path == "/api/payments/status" and method == "GET":
+            now = datetime.utcnow()
+            with get_db() as session:
+                order, error = load_order_for_payment(
+                    session,
+                    (query_params.get("order_id") or [""])[0],
+                    (query_params.get("token") or [""])[0],
+                )
+                if not order:
+                    return json_response({"ok": False, "error": error}, status=404)
+                expire_stale_flutterwave_orders(session, now)
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "payment_status": order.payment_status or "unpaid",
+                    "total": order.total,
+                    "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+                    "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
+                })
+
+        if clean_path == "/api/payments/flutterwave/session" and method == "POST":
+            # Start one payment attempt: mint a unique tx_ref and hand the
+            # browser everything the Inline popup needs (amount comes from the
+            # server-side order row, never the client).
+            if not payments.is_enabled():
+                return json_response({"ok": False, "error": "Online payment is not available"}, status=503)
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.session", client_ip, 20, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many payment attempts. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            now = datetime.utcnow()
+            with get_db() as session:
+                order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
+                if not order:
+                    return json_response({"ok": False, "error": error}, status=404)
+                if order.payment_provider != payments.PROVIDER:
+                    return json_response({"ok": False, "error": "This order was not placed for online payment"}, status=409)
+                expire_stale_flutterwave_orders(session, now)
+                if order.payment_status == "paid":
+                    return json_response({"ok": False, "error": "This order is already paid", "payment_status": "paid"}, status=409)
+                if order.status in ("cancelled", "completed") or order.payment_status == "failed":
+                    return json_response({
+                        "ok": False,
+                        "error": "The payment window for this order has closed and its pieces were released. Please place the order again.",
+                        "payment_status": "expired",
+                    }, status=410)
+
+                attempt = PaymentTransaction(
+                    id=generate_uid("PAY"),
+                    tx_ref=payments.make_tx_ref(order.id),
+                    order_id=order.id,
+                    provider=payments.PROVIDER,
+                    amount=int(order.total or 0),
+                    currency=payments.FLW_CURRENCY,
+                    status="pending",
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(attempt)
+                order.payment_reference = attempt.tx_ref
+                order.updated_at = now
+                session.flush()
+                logger.info("Payment attempt %s opened for order %s (UGX %s)", attempt.tx_ref, order.id, order.total)
+                return json_response({
+                    "ok": True,
+                    "provider": payments.PROVIDER,
+                    "public_key": payments.public_checkout_config()["public_key"],
+                    "mock": payments.MOCK_MODE,
+                    "tx_ref": attempt.tx_ref,
+                    "amount": attempt.amount,
+                    "currency": attempt.currency,
+                    "order_id": order.id,
+                    "customer": {
+                        "name": order.customer_name or "Online Shopper",
+                        "phone": order.customer_phone or "",
+                        "email": "",
+                    },
+                    "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
+                })
+
+        if clean_path == "/api/payments/flutterwave/verify" and method == "POST":
+            # Called by the storefront after the Inline popup reports a charge.
+            # The popup's own response is NEVER trusted — the transaction is
+            # re-verified with Flutterwave using the secret key.
+            if not payments.is_enabled():
+                return json_response({"ok": False, "error": "Online payment is not available"}, status=503)
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.verify", client_ip, 30, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many verification attempts. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            transaction_id = str(body.get("transaction_id") or "").strip()
+            if not transaction_id:
+                return json_response({"ok": False, "error": "transaction_id is required"}, status=400)
+            now = datetime.utcnow()
+            with get_db() as session:
+                order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
+                if not order:
+                    return json_response({"ok": False, "error": error}, status=404)
+                if order.payment_provider != payments.PROVIDER:
+                    return json_response({"ok": False, "error": "This order was not placed for online payment"}, status=409)
+                expire_stale_flutterwave_orders(session, now)
+                if order.payment_status == "paid":
+                    return json_response({"ok": True, "payment_status": "paid", "order_id": order.id})
+                if order.payment_status == "failed" or order.status in ("cancelled", "completed"):
+                    return json_response({
+                        "ok": False,
+                        "error": "This order's payment window expired. If you were charged, contact the store with your payment receipt for a refund or fulfillment.",
+                        "payment_status": "expired",
+                    }, status=410)
+
+                # In mock mode the local popup hands us back the session's
+                # tx_ref so dev flow works end-to-end without a gateway.
+                if payments.MOCK_MODE:
+                    verified = payments.verify_transaction(transaction_id)
+                    verified["tx_ref"] = str(body.get("tx_ref") or order.payment_reference or "")
+                    verified["amount"] = order.total
+                else:
+                    try:
+                        verified = payments.verify_transaction(transaction_id)
+                    except payments.FlutterwaveApiError as exc:
+                        return json_response({"ok": False, "error": str(exc), "payment_status": "pending"}, status=502)
+
+                ok, payment_status, settle_error = settle_order_payment(
+                    session, order, verified, source="browser_verify"
+                )
+                status_code = 200 if ok else 202 if payment_status == "pending" else 409
+                return json_response({
+                    "ok": ok,
+                    "payment_status": payment_status,
+                    "order_id": order.id,
+                    "error": settle_error or None,
+                }, status=status_code)
+
+        if clean_path == "/api/payments/flutterwave/webhook" and method == "POST":
+            # Server-to-server settlement. Authenticated via the verif-hash
+            # header, then the transaction is re-verified against the API —
+            # the webhook payload alone is never trusted.
+            if not payments.verify_webhook_hash(headers):
+                return json_response({"ok": False, "error": "Invalid webhook signature"}, status=401)
+            payload = body if isinstance(body, dict) else {}
+            event_name = str(payload.get("event") or "")
+            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+            if event_name == "charge.completed" and str(data.get("status") or "").lower() == "successful":
+                tx_ref = str(data.get("tx_ref") or "")
+                transaction_id = data.get("id")
+                now = datetime.utcnow()
+                with get_db() as session:
+                    attempt = (
+                        session.query(PaymentTransaction)
+                        .filter_by(provider=payments.PROVIDER, tx_ref=tx_ref)
+                        .with_for_update()
+                        .first()
+                    ) or (
+                        session.query(PaymentTransaction)
+                        .filter_by(provider=payments.PROVIDER, flw_transaction_id=str(transaction_id)[:40])
+                        .with_for_update()
+                        .first()
+                    )
+                    order = (
+                        session.query(Order).filter_by(id=attempt.order_id).with_for_update().first()
+                        if attempt else None
+                    )
+                    if order and attempt:
+                        if payments.MOCK_MODE:
+                            verified = payments.verify_transaction(transaction_id or 0)
+                            verified["tx_ref"] = attempt.tx_ref
+                            verified["amount"] = order.total
+                        else:
+                            try:
+                                verified = payments.verify_transaction(transaction_id)
+                            except payments.FlutterwaveApiError as exc:
+                                logger.warning("Webhook re-verify failed for %s: %s", tx_ref, exc)
+                                verified = None
+                        if verified:
+                            settle_order_payment(session, order, verified, attempt=attempt, source="webhook")
+            # Always acknowledge so Flutterwave stops retrying.
+            return json_response({"ok": True})
 
         # ----------------------------------------------------
         # 5. Financial Ledgers hub (Protected)
@@ -1856,6 +2230,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 rows = session.query(StoreSetting).all()
                 return json_response({
                     "settings": public_store_settings(rows),
+                    # Safe payment metadata (public key only) so the storefront
+                    # can offer "Pay now" in the same sync round trip.
+                    "payments": payments.public_checkout_config(),
                     "synced_at": datetime.utcnow().isoformat()
                 })
 
