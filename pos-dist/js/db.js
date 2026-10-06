@@ -687,8 +687,9 @@
       });
     },
     pullStoreSettings,
-    syncStoreSettings(patch, adminCredential) {
+    syncStoreSettings(patch, adminCredential, options) {
       const cleanPatch = Object.assign({}, patch || {});
+      const opts = options || {};
       const credential = String(adminCredential || "").trim();
       const headers = { "Content-Type": "application/json" };
 
@@ -699,10 +700,13 @@
         Object.assign(headers, Auth.authHeaders());
       }
 
+      const body = { settings: cleanPatch };
+      if (opts.applyBaseFeeToCatalog) body.apply_base_fee_to_catalog = true;
+
       return fetch(apiUrl("/api/settings"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ settings: cleanPatch })
+        body: JSON.stringify(body)
       }).then(async response => {
         let data = null;
         try { data = await response.json(); } catch (e) {}
@@ -713,6 +717,14 @@
           throw new Error(message);
         }
 
+        const productsUpdated = Number(data.products_updated) || 0;
+        // A catalog-wide transport rollout changed product prices server-side;
+        // refresh the shared product cache right away instead of waiting for
+        // the next poll so every open panel sees the new fees immediately.
+        if (productsUpdated > 0 && typeof pullOperationalData === "function" && window.__ADONAI_STOREFRONT__ !== true) {
+          pullOperationalData().catch(() => {});
+        }
+
         const publicSettings = normalizeRemoteSettings(data.settings || {});
         return tx("settings", st => {
           Object.keys(publicSettings).forEach(key => { st.settings[key] = publicSettings[key]; });
@@ -720,7 +732,9 @@
           // master key in the admin_key slot only after the remote save succeeds.
           if (cleanPatch.master_key) st.settings.admin_key = String(cleanPatch.master_key);
           else if (cleanPatch.admin_key) st.settings.admin_key = String(cleanPatch.admin_key);
-          return Object.assign({}, st.settings);
+          const saved = Object.assign({}, st.settings);
+          saved.products_updated = productsUpdated;
+          return saved;
         });
       });
     },

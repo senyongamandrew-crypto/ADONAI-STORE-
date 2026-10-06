@@ -867,7 +867,15 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             try:
                 supplied_base = body.get("base_price", body.get("selling_price"))
                 base_price = parse_positive_int(supplied_base, "Base price")
-                transport_cost = parse_positive_int(body.get("total_transport_cost", 0), "Total transport cost", allow_zero=True)
+                if body.get("total_transport_cost") is None:
+                    # Global default: inherit the System Parameters base
+                    # delivery fee so intake forms never require re-typing it.
+                    with get_db() as settings_session:
+                        fee_row = settings_session.query(StoreSetting).filter_by(key="base_delivery_fee").first()
+                        fee_text = str(fee_row.value).strip() if fee_row and fee_row.value is not None else ""
+                    transport_cost = parse_positive_int(fee_text or 7000, "Total transport cost", allow_zero=True)
+                else:
+                    transport_cost = parse_positive_int(body.get("total_transport_cost"), "Total transport cost", allow_zero=True)
                 allocation = transport_allocation(base_price, transport_cost)
                 selling_price = whole_money(allocation["final_selling_price"])
                 stock_count = parse_positive_int(body.get("in_stock_count", 1), "Stock quantity", allow_zero=True)
@@ -2693,12 +2701,35 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     else:
                         session.add(StoreSetting(key=key, value=value))
                 session.flush()
+
+                # Optional one-command rollout: re-point every catalog item's
+                # transport cost at the (new) global base delivery fee so a
+                # System Parameters change reflects across the whole system.
+                apply_to_catalog = body.get("apply_base_fee_to_catalog") in (True, 1, "1", "true", "yes")
+                products_updated = 0
+                if apply_to_catalog:
+                    fee_row = session.query(StoreSetting).filter_by(key="base_delivery_fee").first()
+                    try:
+                        fee_value = max(0, int(float(updates.get("base_delivery_fee") or (fee_row.value if fee_row else 0) or 0)))
+                    except (TypeError, ValueError):
+                        fee_value = None
+                    if fee_value is not None:
+                        for product in session.query(Product).all():
+                            product.total_transport_cost = fee_value
+                            # Keep the customer-facing price consistent with the
+                            # 50/50 split: base price + embedded half of transport.
+                            base_component = product.base_price if product.base_price is not None else product.selling_price
+                            product.selling_price = whole_money(int(base_component or 0) + fee_value * 0.5)
+                            products_updated += 1
+                        session.flush()
+
                 public_rows = session.query(StoreSetting).all()
                 return json_response({
                     "ok": True,
                     "status": "updated",
                     "updated_keys": sorted(updates.keys()),
                     "settings": public_store_settings(public_rows),
+                    "products_updated": products_updated,
                     "synced_at": datetime.utcnow().isoformat()
                 })
 

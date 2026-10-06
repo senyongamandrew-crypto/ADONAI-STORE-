@@ -1126,7 +1126,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div class="field"><label>Base price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
       </div>
       <div class="fgrid">
-        <div class="field"><label>Total transport (UGX)<span class="fhint">50% embedded in price · 50% at checkout</span></label><input id="mpTransport" type="number" min="0" class="sel-full" value="${p ? (p.total_transport_cost || 0) : 0}" /></div>
+        <div class="field"><label>Total transport (UGX)<span class="fhint">50% embedded · 50% at checkout · defaults to System Parameters base fee</span></label><input id="mpTransport" type="number" min="0" class="sel-full" ${p ? "" : `data-auto="1" placeholder="${globalBaseDeliveryFee()}"`} value="${p ? (p.total_transport_cost || 0) : globalBaseDeliveryFee()}" /></div>
         <div class="field"><label>Final selling price (UGX)</label><input id="mpSell" type="number" class="sel-full" value="${p ? p.selling_price : ""}" readonly /></div>
       </div>
       <div class="fgrid">
@@ -1154,6 +1154,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     };
     $("#mpBase").addEventListener("input", recalculateModalPrice);
     $("#mpTransport").addEventListener("input", recalculateModalPrice);
+    $("#mpTransport").addEventListener("input", () => { $("#mpTransport").dataset.auto = "0"; });
     $$("[data-mp-image]").forEach(button => button.addEventListener("click", () => {
       const slot = Number(button.dataset.mpImage);
       const input = document.createElement("input");
@@ -1180,6 +1181,28 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const GROUPS = { "Apparel": ["Tops & Shirts", "Dresses & Skirts", "Pants & Jeans"], "Outerwear": ["Outerwear & Jackets"], "Footwear": ["Shoes"], "Accessories": ["Accessories"], "Kids": ["Children Wear"] };
   const intakePhotos = ["", "", "", ""];   // front, back, fabric, tag
   let intakeBound = false;
+
+  /* The System Parameters base delivery fee is the single source of truth for
+     transport pricing. New catalog items prefill from it so staff never re-type
+     the fee per product; a manually edited field (data-auto = "0") is never
+     overwritten. */
+  function globalBaseDeliveryFee() {
+    try {
+      const s = DB.getSettings();
+      return Math.max(0, Number(s.base_delivery_fee != null ? s.base_delivery_fee : s.boda_base_fee) || 7000);
+    } catch (e) { return 7000; }
+  }
+
+  function syncIntakeTransportDefault(force) {
+    const field = document.querySelector("#inTransport");
+    if (!field) return;
+    const fee = globalBaseDeliveryFee();
+    field.placeholder = String(fee);
+    if (force || field.dataset.auto !== "0" || String(field.value).trim() === "") {
+      field.value = String(fee);
+      field.dataset.auto = "1";
+    }
+  }
 
   function demoSku() {
     const demo = $("#inDemo").value || "Men";
@@ -1282,6 +1305,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       paintTag();
     });
     ["inTitle", "inSize", "inBrand", "inColor", "inCost", "inSell", "inTransport", "inRrp", "inSku"].forEach(id => $("#" + id).addEventListener("input", paintTag));
+    // A hand-typed transport fee marks the field as custom so the global
+    // System Parameters default stops auto-refreshing it.
+    $("#inTransport").addEventListener("input", () => { $("#inTransport").dataset.auto = "0"; });
     $("#inMeasureSet").addEventListener("change", () => buildMeasureFields($("#inMeasureSet").value));
     $("#inCat").addEventListener("change", () => {
       const suggested = measureSetForCategory($("#inCat").value);
@@ -1409,6 +1435,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         buildMeasureFields($("#inMeasureSet").value);
         intakePhotos.fill(""); paintAngles();
         $("#inStockLot").value = "";
+        // Next item restarts from the global System Parameters base fee.
+        syncIntakeTransportDefault(true);
         $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();
       } else {
         renderAll();
@@ -1418,6 +1446,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
   function renderIntake() {
     initIntakeForm();
+    syncIntakeTransportDefault(false);
     paintTag();
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
       <div class="ch-row">
@@ -2797,11 +2826,16 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       saveBtn.textContent = "Publishing to live storefront…";
 
       try {
-        await DB.syncStoreSettings(livePatch, adminCredential);
+        const applyAll = $("#setFeeApplyAll") && $("#setFeeApplyAll").checked;
+        const saved = await DB.syncStoreSettings(livePatch, adminCredential, { applyBaseFeeToCatalog: applyAll });
         if (newKey) Keys.set(true, newKey);
-        toast(newKey
+        const rolledOut = applyAll && saved && Number(saved.products_updated) > 0
+          ? ` · transport fee rolled out to ${saved.products_updated} catalog item${saved.products_updated === 1 ? "" : "s"}`
+          : "";
+        toast((newKey
           ? "Configuration published — storefront updated and master key rotated"
-          : "Configuration published — live storefront will refresh within 5 seconds");
+          : "Configuration published — live everywhere within seconds") + rolledOut);
+        if ($("#setFeeApplyAll")) $("#setFeeApplyAll").checked = false;
         renderSettings();
       } catch (err) {
         toast(err.message || "Could not publish configuration", false);

@@ -261,7 +261,7 @@
           <div class="field full"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
           <div class="field"><label>Cost price (UGX)</label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
           <div class="field"><label>Base price (UGX)<span class="fhint">Before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
-          <div class="field"><label>Total transport / shipping (UGX)<span class="fhint">Split 50 / 50 automatically</span></label><input class="sel-full" id="inTransport" type="number" min="0" value="0" placeholder="5000" /></div>
+          <div class="field"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
         </div>
 
@@ -610,7 +610,8 @@
           <div class="field full"><label>Physical store address</label><input class="sel-full" id="setAddress" /></div>
           <div class="field full"><label>Delivery area scope</label><input class="sel-full" id="setScope" /></div>
           <div class="field full"><label>Opening hours</label><input class="sel-full" id="setHours" /></div>
-          <div class="field"><label>Base delivery fee (UGX)<span class="fhint">Formula starts at this base for &lt;= 3 items</span></label><input class="sel-full" id="setFee" type="number" min="0" /></div>
+          <div class="field"><label>Base delivery fee (UGX)<span class="fhint">Single source of truth · delivery zones &amp; new catalog items use it instantly</span></label><input class="sel-full" id="setFee" type="number" min="0" /></div>
+          <div class="field full"><label style="display:flex;gap:10px;align-items:center;font-weight:600;cursor:pointer"><input type="checkbox" id="setFeeApplyAll" style="width:16px;height:16px;accent-color:#15803d;flex:none" /><span>Also apply this fee to all existing catalog items<span class="fhint" style="font-weight:400">overwrites each item&apos;s transport &amp; adjusts selling prices by the 50 / 50 split</span></span></label></div>
           <div class="field"><label>Update Admin Master Key<span class="fhint">Minimum 6 characters — leave blank to keep current key</span></label><input class="sel-full" id="setKey" placeholder="Leave blank to keep current key" /></div>
         </div>
         <div class="settings-foot">
@@ -633,9 +634,9 @@
 <script src="js/adaptive.js?v=1.0"></script>
 <script src="js/notifications.js?v=1.0"></script>
 <script src="js/icons.js?v=1.0"></script>
-<script src="js/db.js?v=3.7"></script>
+<script src="js/db.js?v=3.8"></script>
 <script src="js/auth.js?v=2.7"></script>
 <script src="js/intake.js?v=5.0"></script>
-<script src="app.js?v=6.2"></script>
+<script src="app.js?v=6.3"></script>
 </body>
 </html>
