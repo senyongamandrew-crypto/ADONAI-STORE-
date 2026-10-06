@@ -997,6 +997,97 @@ class TestRenderPostgresHardening(unittest.TestCase):
             self.assertGreaterEqual(len(with_flaws), 5, "Flaw disclosure must be demonstrated in the seed")
         print(f"✅ PASS: Seed catalog is PDP-ready ({len(with_measurements)} measured, {len(with_flaws)} with disclosed flaws).")
 
+    def test_16_strategy_insights_endpoint(self):
+        """The strategy & marketing insights endpoint is manager-only, validates
+        the window, and returns the full decision payload (KPIs, trend, channels,
+        customers, marketing ROI, data reliability, recommendations)."""
+        status, body = self.api_request("GET", "/api/finance/insights")
+        self.assertTrue(status.startswith("401"), f"Insights must require staff auth, got {status}")
+
+        status, body = self.api_request("GET", "/api/finance/insights", terminal_key="3456")
+        self.assertTrue(status.startswith("403"), f"Cashiers must not read strategy insights, got {status}")
+
+        status, body = self.api_request(
+            "GET", "/api/finance/insights", terminal_key=TEST_MASTER_KEY, query="days=45"
+        )
+        self.assertTrue(status.startswith("400"), f"Only 7/30/90 day windows allowed, got {status}")
+
+        status, data = self.api_request(
+            "GET", "/api/finance/insights", terminal_key=TEST_MASTER_KEY, query="days=30"
+        )
+        self.assertTrue(status.startswith("200"), data)
+        self.assertTrue(data.get("ok"), data)
+        self.assertEqual(data.get("days"), 30)
+
+        kpis = data.get("kpis") or {}
+        for key in ("revenue", "orders", "units", "avg_order_value", "gross_profit",
+                    "gross_margin", "expenses", "net_contribution", "delivery_fee_revenue"):
+            self.assertIn(key, kpis, f"kpis missing {key}")
+
+        trend = data.get("daily_trend") or []
+        self.assertEqual(len(trend), 31, "A 30-day window ends today, so the trend holds 31 day rows")
+        for row in trend:
+            self.assertIn("date", row)
+            self.assertIn("revenue", row)
+            self.assertIn("orders", row)
+            self.assertIn("profit", row)
+
+        for section in ("channels", "categories", "top_products", "customers",
+                        "marketing", "stock_signals", "data_quality", "recommendations"):
+            self.assertIn(section, data, f"response missing {section}")
+
+        customers = data["customers"]
+        for key in ("total", "repeat", "repeat_rate", "top", "identified_order_share"):
+            self.assertIn(key, customers, f"customers missing {key}")
+
+        quality = data["data_quality"]
+        self.assertGreaterEqual(quality["score"], 0)
+        self.assertLessEqual(quality["score"], 100)
+        self.assertGreaterEqual(len(quality["checks"]), 5, "Reliability audit needs several checks")
+        for check in quality["checks"]:
+            self.assertIn("label", check)
+            self.assertIn("pass_rate", check)
+            self.assertIn("impact", check)
+            self.assertGreaterEqual(check["pass_rate"], 0)
+            self.assertLessEqual(check["pass_rate"], 100)
+
+        self.assertIsInstance(data["recommendations"], list)
+        for rec in data["recommendations"]:
+            self.assertIn(rec.get("tone"), {"positive", "action", "warn"})
+            self.assertTrue(rec.get("title"))
+            self.assertTrue(rec.get("detail"))
+        print(f"✅ PASS: Strategy insights — score {quality['score']}%, "
+              f"{len(trend)} trend rows, {len(data['recommendations'])} recommendations.")
+
+    def test_17_strategy_insights_reflect_posted_business(self):
+        """A freshly posted marketing expense must appear in the marketing ROI
+        block of the insights report (data flows from ledgers to strategy)."""
+        amount = 12000
+        status, posted = self.api_request(
+            "POST", "/api/finance/expenses",
+            {
+                "category": "Marketing",
+                "amount": amount,
+                "payment_method": "mobile_money",
+                "vendor": "TikTok boost",
+                "occurred_at": datetime.now().strftime("%Y-%m-%dT%H:%M"),
+            },
+            TEST_MASTER_KEY,
+        )
+        self.assertTrue(status.startswith("201"), posted)
+
+        status, data = self.api_request(
+            "GET", "/api/finance/insights", terminal_key=TEST_MASTER_KEY, query="days=7"
+        )
+        self.assertTrue(status.startswith("200"), data)
+        marketing = data["marketing"]
+        self.assertGreaterEqual(marketing["spend"], amount,
+                                "Marketing spend must aggregate posted Marketing expenses")
+        self.assertGreaterEqual(marketing["campaigns"], 1)
+        self.assertIn("spend_ratio", marketing)
+        print(f"✅ PASS: Marketing expense flows into insights "
+              f"(spend UGX {marketing['spend']:,}, {marketing['campaigns']} campaigns).")
+
 
 if __name__ == "__main__":
     unittest.main()

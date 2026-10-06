@@ -468,10 +468,30 @@
     return headers;
   }
 
+  /* Network guard: every API request aborts after 30s so workspaces never
+     hang on a silent connection (the old UI stayed on "Loading…" forever).
+     The caller's own signal still wins when it is provided. */
+  const API_TIMEOUT_MS = 30000;
   async function apiRequest(path, options = {}, withAuth = true) {
-    const response = await fetch(apiUrl(path), Object.assign({}, options, {
-      headers: Object.assign(apiHeaders(withAuth), options.headers || {})
-    }));
+    const controller = (typeof AbortController === "function") ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => { try { controller.abort(); } catch (e) {} }, API_TIMEOUT_MS) : null;
+    let response;
+    try {
+      response = await fetch(apiUrl(path), Object.assign({
+        signal: options.signal || (controller && controller.signal) || undefined
+      }, options, {
+        headers: Object.assign(apiHeaders(withAuth), options.headers || {})
+      }));
+    } catch (networkError) {
+      const timedOut = controller && controller.signal && controller.signal.aborted && !options.signal;
+      const error = new Error(timedOut
+        ? "The server took too long to answer. Check your connection and tap Try again."
+        : "Could not reach the server. Check your connection and tap Try again.");
+      error.status = 0;
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     let data = null;
     try { data = await response.json(); } catch (e) {}
     if (!response.ok) {
@@ -517,6 +537,7 @@
     if (t.type === "cash") return "Cash";
     if (t.type === "mtn") return "MTN MoMo";
     if (t.type === "airtel") return "Airtel Money";
+    if (t.type === "flutterwave" || t.type === "online") return "Paid online (Flutterwave)";
     return t.type;
   }
 
@@ -897,8 +918,9 @@
         return JSON.parse(JSON.stringify(sale));
       });
     },
-    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items, lock_owner }) {
+    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items, lock_owner, payment_method }) {
       const fee = delivery_type === "pickup" ? 0 : Number(delivery_fee != null ? delivery_fee : 7000);
+      const wantsOnlinePayment = String(payment_method || "") === "flutterwave";
       const data = await apiRequest("/api/orders", {
         method: "POST",
         body: JSON.stringify({
@@ -912,6 +934,7 @@
           delivery_address: String(delivery_address || "").trim(),
           delivery_fee: fee,
           delivery_notes: String(delivery_notes || "").trim(),
+          ...(wantsOnlinePayment ? { payment_method: "flutterwave" } : {}),
           status: "unfulfilled",
           dispatch_status: "Unfulfilled"
         })
@@ -925,7 +948,7 @@
         assigned_rider_id: null,
         assigned_rider_name: null
       });
-      return tx("sales", st => {
+      const stored = tx("sales", st => {
         (data.products || []).forEach(product => {
           const local = byId(st.products, product.id);
           if (local) Object.assign(local, product);
@@ -935,6 +958,68 @@
         else st.sales.push(sale);
         return JSON.parse(JSON.stringify(sale));
       });
+      // The per-order payment token authorizes online payment actions for
+      // this order. It is handed back to the caller in memory only — it is
+      // never stored in the local sales record.
+      if (data.payment) stored.payment = data.payment;
+      return stored;
+    },
+
+    /* ---------- online payments (Flutterwave Inline) ---------- */
+    _paymentConfigCache: null,
+    async getPaymentConfig(force = false) {
+      if (this._paymentConfigCache && !force) return this._paymentConfigCache;
+      try {
+        const data = await apiRequest("/api/payments/config", { method: "GET" }, false);
+        this._paymentConfigCache = Object.assign({ enabled: false, provider: "flutterwave", currency: "UGX" }, data || {});
+      } catch (err) {
+        this._paymentConfigCache = { enabled: false, provider: "flutterwave", currency: "UGX" };
+      }
+      return this._paymentConfigCache;
+    },
+    async createFlutterwaveSession(orderId, paymentToken) {
+      const data = await apiRequest("/api/payments/flutterwave/session", {
+        method: "POST",
+        body: JSON.stringify({ order_id: String(orderId || ""), payment_token: String(paymentToken || "") })
+      }, false);
+      if (!data || !data.tx_ref) throw new Error((data && data.error) || "Could not start the payment session");
+      return data;
+    },
+    async verifyFlutterwavePayment(orderId, paymentToken, transactionId, txRef) {
+      // 202 = gateway hasn't confirmed yet; not an exception — normalize it.
+      try {
+        return await apiRequest("/api/payments/flutterwave/verify", {
+          method: "POST",
+          body: JSON.stringify({
+            order_id: String(orderId || ""),
+            payment_token: String(paymentToken || ""),
+            transaction_id: String(transactionId || ""),
+            tx_ref: String(txRef || "")
+          })
+        }, false);
+      } catch (err) {
+        if (err && err.status && err.data) return Object.assign({ ok: false, payment_status: "pending" }, err.data);
+        throw err;
+      }
+    },
+    async fetchPaymentStatus(orderId, paymentToken) {
+      const params = new URLSearchParams({ order_id: String(orderId || ""), token: String(paymentToken || "") });
+      const data = await apiRequest("/api/payments/status?" + params.toString(), { method: "GET" }, false);
+      return data || {};
+    },
+    /* Load the Flutterwave Inline SDK on demand (only when paying). */
+    loadFlutterwaveScript() {
+      if (window.FlutterwaveCheckout) return Promise.resolve(true);
+      if (this._flwScriptPromise) return this._flwScriptPromise;
+      this._flwScriptPromise = new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = "https://checkout.flutterwave.com/v3.js";
+        script.async = true;
+        script.onload = () => resolve(!!window.FlutterwaveCheckout);
+        script.onerror = () => { this._flwScriptPromise = null; resolve(false); };
+        document.head.appendChild(script);
+      });
+      return this._flwScriptPromise;
     },
     confirmWebOrder(id, method, by) {
       return tx("sales", st => {

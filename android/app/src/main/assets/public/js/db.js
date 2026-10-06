@@ -468,10 +468,30 @@
     return headers;
   }
 
+  /* Network guard: every API request aborts after 30s so workspaces never
+     hang on a silent connection (the old UI stayed on "Loading…" forever).
+     The caller's own signal still wins when it is provided. */
+  const API_TIMEOUT_MS = 30000;
   async function apiRequest(path, options = {}, withAuth = true) {
-    const response = await fetch(apiUrl(path), Object.assign({}, options, {
-      headers: Object.assign(apiHeaders(withAuth), options.headers || {})
-    }));
+    const controller = (typeof AbortController === "function") ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => { try { controller.abort(); } catch (e) {} }, API_TIMEOUT_MS) : null;
+    let response;
+    try {
+      response = await fetch(apiUrl(path), Object.assign({
+        signal: options.signal || (controller && controller.signal) || undefined
+      }, options, {
+        headers: Object.assign(apiHeaders(withAuth), options.headers || {})
+      }));
+    } catch (networkError) {
+      const timedOut = controller && controller.signal && controller.signal.aborted && !options.signal;
+      const error = new Error(timedOut
+        ? "The server took too long to answer. Check your connection and tap Try again."
+        : "Could not reach the server. Check your connection and tap Try again.");
+      error.status = 0;
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     let data = null;
     try { data = await response.json(); } catch (e) {}
     if (!response.ok) {

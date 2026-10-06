@@ -208,6 +208,36 @@ Configure in your Render Dashboard (**Environment** tab):
 
 ---
 
+## 4b. Financial Ledgers Hub & Strategy Workspace
+
+The Admin → **Financial Ledgers** view is a six-workspace, audit-grade operations hub.
+
+### Posting workspaces (reliable, validated data entry)
+- **01 Daily Expense** — one tap posts a cash-out and its balanced double-entry journal atomically. Inline plain-language validation blocks empty categories, zero/negative amounts, future dates, and vendor-less cash-outs of UGX 500,000+ so the books stay meaningful for reporting and tax.
+- **02 Bale Costs** — registers supplier bales with landed unit-cost allocation, again with guard-rails on counts, costs, and dates. The unit cost flows straight into POS Intake COGS.
+- **05 General Journal** — searchable/filterable double-entry ledger with running balances.
+
+### Control workspaces
+- **03 Executive** — per-day profitability: gross sales, COGS, margin, expenses, net operating income, and cash / MoMo / bank journal balances.
+- **04 Dead Stock** — 30/60/90-day aging with live markdown publishing and accounting-balanced write-offs.
+
+### 06 Strategy & Marketing (decision-ready intelligence)
+`GET /api/finance/insights?days=7|30|90` (manager-only) compiles posted sales, ledgers, and catalog records into a plain-language growth report rendered in an interactive workspace:
+
+- **KPIs** — revenue with period-over-period growth, net contribution, average order value, repeat-buyer rate, marketing ROI, and a **data-reliability score**.
+- **Interactive sales pulse** — an SVG revenue + gross-profit trend chart with hover tooltips per day.
+- **Channel strategy** — In-Store POS vs Web Storefront vs WhatsApp/Social share, so promotion budget follows the channel that answers with sales.
+- **Merchandising** — category demand, share and margin; tapping a row filters the Inventory Rack for instant action.
+- **Best sellers** — ranked products with margins for intake prioritisation.
+- **CRM & campaigns** — identified/repeat customers, highest-value customer list with one-tap WhatsApp deep links, a downloadable customer-marketing CSV, and a pre-filled WhatsApp broadcast template generator.
+- **Data reliability audit** — weighted 0–100% score across pricing, COGS, photos, branding, and customer-capture checks, each with a **Fix** shortcut to the screen that repairs it. Big decisions only get made on trustworthy data.
+- **Auto-strategist** — rule-based, plain-language recommendations (engine categories, thin-margin repricing, basket-lift targets, marketing discipline bands, retention plays, dead-stock markdown value, stockout warnings).
+- **One-click CSV export** of the entire report for meetings, spreadsheets, or investor updates.
+
+Every request in the console is protected by a 30-second network timeout with a **Try again** action, so workspaces never hang on a silent connection.
+
+---
+
 ## 5. Automated CI/CD & GitHub Actions Workflow
 
 The repository includes an automated GitHub Actions pipeline (`.github/workflows/build-pos-apk.yml`):

@@ -12,6 +12,7 @@ import hmac
 import json
 import logging
 import os
+import re
 from sqlalchemy import and_, func, inspect, or_, text
 import time
 import urllib.parse
@@ -2106,6 +2107,342 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 ))
                 session.flush()
                 return json_response({"ok": True, "status": "written_off", "product": product.to_dict(), "adjustment": adjustment.to_dict()})
+
+        # ----------------------------------------------------
+        # Strategy & Marketing Insights (Manager-only)
+        # Turns posted sales/ledger data into decision-ready intelligence:
+        # KPIs, trends, channels, customers, marketing ROI, stock signals,
+        # a data-reliability score, and plain-language strategy advice.
+        # ----------------------------------------------------
+        if clean_path == "/api/finance/insights" and method == "GET":
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            try:
+                days = int(query_params.get("days", ["30"])[0])
+                if days not in {7, 30, 90}:
+                    raise ValueError()
+            except ValueError:
+                return json_response({"ok": False, "error": "days must be 7, 30, or 90"}, status=400)
+
+            now = datetime.utcnow()
+            start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+            prev_start = start - timedelta(days=days)
+            with get_db() as session:
+                def fetch_orders(start_at, end_at):
+                    return session.query(Order).filter(
+                        Order.created_at >= start_at,
+                        Order.created_at < end_at,
+                        ~func.lower(Order.status).in_(["cancelled", "void"]),
+                    ).all()
+
+                orders = fetch_orders(start, now)
+                previous_orders = fetch_orders(prev_start, start)
+
+                def order_metrics(bucket):
+                    revenue = sum(int(o.total or 0) for o in bucket)
+                    units = 0
+                    cogs = 0
+                    for order in bucket:
+                        for item in order.items:
+                            qty = int(item.qty or 0)
+                            units += qty
+                            cost = int(item.unit_cost or 0)
+                            if not cost and item.product_id:
+                                ref = session.query(Product).filter_by(id=item.product_id).first()
+                                cost = int(ref.cost_price or 0) if ref else 0
+                            cogs += cost * qty
+                    return {"revenue": revenue, "orders": len(bucket), "units": units, "cogs": cogs}
+
+                current = order_metrics(orders)
+                previous = order_metrics(previous_orders)
+                gross_profit = current["revenue"] - current["cogs"]
+                gross_margin = round(gross_profit / current["revenue"] * 100, 1) if current["revenue"] else 0
+                avg_order_value = round(current["revenue"] / current["orders"]) if current["orders"] else 0
+                delivery_fees = sum(int(o.delivery_fee or 0) for o in orders)
+
+                # Expenses (journal-derived, matches dashboard) + marketing spend.
+                expense_debit, expense_credit = session.query(
+                    func.coalesce(func.sum(AccountingJournalLine.debit), 0),
+                    func.coalesce(func.sum(AccountingJournalLine.credit), 0),
+                ).join(
+                    AccountingJournalEntry,
+                    AccountingJournalLine.journal_entry_id == AccountingJournalEntry.id,
+                ).filter(
+                    AccountingJournalLine.account_code.in_(["5100", "5200"]),
+                    AccountingJournalEntry.occurred_at >= start,
+                ).one()
+                expenses = int(expense_debit or 0) - int(expense_credit or 0)
+                marketing_rows = session.query(ExpenseRecord).filter(
+                    ExpenseRecord.occurred_at >= start,
+                    func.lower(ExpenseRecord.status) == "posted",
+                    ExpenseRecord.category.ilike("%marketing%"),
+                ).all()
+                marketing_spend = sum(int(row.amount or 0) for row in marketing_rows)
+
+                # Daily trend with zero-filled days so charts stay honest.
+                trend = {}
+                for order in orders:
+                    key = order.created_at.date().isoformat()
+                    day = trend.setdefault(key, {"date": key, "revenue": 0, "orders": 0, "profit": 0})
+                    day["revenue"] += int(order.total or 0)
+                    day["orders"] += 1
+                    for item in order.items:
+                        cost = int(item.unit_cost or 0) * int(item.qty or 0)
+                        day["profit"] += int(item.line_total or 0) - cost
+                daily_trend = []
+                cursor = start.date()
+                end_date = now.date()
+                while cursor <= end_date:
+                    key = cursor.isoformat()
+                    daily_trend.append(trend.get(key, {"date": key, "revenue": 0, "orders": 0, "profit": 0}))
+                    cursor += timedelta(days=1)
+
+                # Channel performance.
+                channel_map = {}
+                for order in orders:
+                    if order.channel == "pos":
+                        name = "In-Store POS"
+                    elif order.channel in {"whatsapp", "tiktok", "social"}:
+                        name = "WhatsApp / Social"
+                    else:
+                        name = "Web Storefront"
+                    row = channel_map.setdefault(name, {"channel": name, "revenue": 0, "orders": 0})
+                    row["revenue"] += int(order.total or 0)
+                    row["orders"] += 1
+                channels = sorted(channel_map.values(), key=lambda r: r["revenue"], reverse=True)
+                for row in channels:
+                    row["share"] = round(row["revenue"] / current["revenue"] * 100, 1) if current["revenue"] else 0
+
+                # Category performance with revenue share.
+                category_map = {}
+                for order in orders:
+                    for item in order.items:
+                        qty = int(item.qty or 0)
+                        cost = int(item.unit_cost or 0) * qty
+                        name = item.category or "Uncategorised"
+                        row = category_map.setdefault(name, {"category": name, "revenue": 0, "units": 0, "profit": 0})
+                        row["revenue"] += int(item.line_total or 0)
+                        row["units"] += qty
+                        row["profit"] += int(item.line_total or 0) - cost
+                categories = sorted(category_map.values(), key=lambda r: r["revenue"], reverse=True)
+                for row in categories:
+                    row["share"] = round(row["revenue"] / current["revenue"] * 100, 1) if current["revenue"] else 0
+                    row["margin"] = round(row["profit"] / row["revenue"] * 100, 1) if row["revenue"] else 0
+
+                # Top-selling products (by revenue).
+                product_map = {}
+                for order in orders:
+                    for item in order.items:
+                        key = item.product_id or item.name
+                        qty = int(item.qty or 0)
+                        row = product_map.setdefault(key, {
+                            "product_id": item.product_id or "", "name": item.name,
+                            "category": item.category or "Uncategorised",
+                            "units": 0, "revenue": 0, "profit": 0,
+                        })
+                        row["units"] += qty
+                        row["revenue"] += int(item.line_total or 0)
+                        row["profit"] += int(item.line_total or 0) - int(item.unit_cost or 0) * qty
+                top_products = sorted(product_map.values(), key=lambda r: r["revenue"], reverse=True)[:8]
+                for row in top_products:
+                    row["margin"] = round(row["profit"] / row["revenue"] * 100, 1) if row["revenue"] else 0
+
+                # Customer & CRM intelligence (repeat rate drives retention strategy).
+                customers = {}
+                for order in orders:
+                    phone = re.sub(r"\D", "", order.customer_phone or "")
+                    name_key = re.sub(r"\s+", " ", (order.customer_name or "").strip().lower())
+                    key = phone or name_key or "walk-in"
+                    row = customers.setdefault(key, {
+                        "name": (order.customer_name or "").strip() or "Walk-in",
+                        "phone": phone, "orders": 0, "spend": 0,
+                    })
+                    row["orders"] += 1
+                    row["spend"] += int(order.total or 0)
+                    if not row["phone"] and name_key != "walk-in":
+                        row["phone"] = phone
+                named = [row for k, row in customers.items() if k != "walk-in"]
+                repeat_customers = [row for row in named if row["orders"] > 1]
+                top_customers = sorted(named, key=lambda r: r["spend"], reverse=True)[:6]
+                customer_insights = {
+                    "total": len(named),
+                    "repeat": len(repeat_customers),
+                    "repeat_rate": round(len(repeat_customers) / len(named) * 100, 1) if named else 0,
+                    "top": top_customers,
+                    "identified_order_share": round(
+                        (len(orders) - customers.get("walk-in", {}).get("orders", 0)) / len(orders) * 100, 1
+                    ) if orders else 0,
+                }
+
+                # Live inventory signals for buying/markdown strategy.
+                live_products = session.query(Product).filter(
+                    Product.inventory_status.notin_(["ARCHIVED", "WRITTEN_OFF"]),
+                ).all()
+                stock_units = sum(int(p.in_stock_count or 0) for p in live_products)
+                stock_value = sum(int(p.cost_price or 0) * int(p.in_stock_count or 0) for p in live_products)
+                aging_cutoff = now - timedelta(days=60)
+                aging_rows = [p for p in live_products
+                              if p.created_at and p.created_at <= aging_cutoff and int(p.in_stock_count or 0) > 0]
+                low_stock = [p for p in live_products if 0 < int(p.in_stock_count or 0) <= 2]
+                new_intakes = [p for p in live_products if p.created_at and p.created_at >= start]
+                stock_signals = {
+                    "live_products": len(live_products),
+                    "stock_units": stock_units,
+                    "stock_value_cost": stock_value,
+                    "new_intakes_in_period": len(new_intakes),
+                    "aging_60d_items": len(aging_rows),
+                    "aging_60d_value": sum(int(p.cost_price or 0) * int(p.in_stock_count or 0) for p in aging_rows),
+                    "low_stock_items": len(low_stock),
+                }
+
+                # Data-reliability audit: only trustworthy data should drive strategy.
+                in_stock = [p for p in live_products if int(p.in_stock_count or 0) > 0]
+                def rate(predicate, sample):
+                    if not sample:
+                        return 0
+                    return len([row for row in sample if predicate(row)]) / len(sample)
+                quality_checks = [
+                    {"key": "pricing", "label": "Selling price recorded",
+                     "weight": 3, "pass_rate": rate(lambda p: int(p.selling_price or 0) > 0, in_stock),
+                     "fix": "Inventory Rack", "impact": "Revenue reports"},
+                    {"key": "costing", "label": "Unit cost (COGS) recorded",
+                     "weight": 3, "pass_rate": rate(lambda p: int(p.cost_price or 0) > 0, in_stock),
+                     "fix": "Bale Costs tab", "impact": "Profit & margin figures"},
+                    {"key": "photos", "label": "Product photo attached",
+                     "weight": 2, "pass_rate": rate(lambda p: bool((p.image_url or "").strip()), in_stock),
+                     "fix": "Catalog Intake", "impact": "Online conversion"},
+                    {"key": "branding", "label": "Brand / label recorded",
+                     "weight": 1, "pass_rate": rate(lambda p: bool((p.brand or "").strip()), in_stock),
+                     "fix": "Inventory Rack", "impact": "Search & merchandising"},
+                    {"key": "customer_names", "label": "Customer name captured on orders",
+                     "weight": 2, "pass_rate": rate(lambda o: bool((o.customer_name or "").strip()), orders),
+                     "fix": "Checkout flow", "impact": "CRM & repeat marketing"},
+                    {"key": "customer_phones", "label": "Customer phone captured on orders",
+                     "weight": 2, "pass_rate": rate(lambda o: len(re.sub(r"\D", "", o.customer_phone or "")) >= 9, orders),
+                     "fix": "Checkout flow", "impact": "WhatsApp campaigns"},
+                ]
+                total_weight = sum(row["weight"] for row in quality_checks)
+                quality_score = round(
+                    sum(row["weight"] * row["pass_rate"] for row in quality_checks) / total_weight * 100
+                ) if total_weight else 0
+                for row in quality_checks:
+                    row["pass_rate"] = round(row["pass_rate"] * 100, 1)
+
+                # ---- Plain-language strategy engine ----
+                recommendations = []
+                growth = 0
+                if previous["revenue"]:
+                    growth = round((current["revenue"] - previous["revenue"]) / previous["revenue"] * 100, 1)
+                if not current["orders"]:
+                    recommendations.append({
+                        "tone": "warn", "title": "Record every sale to unlock insights",
+                        "detail": "No completed sales were found in this window. Ring every order through the POS or storefront so strategy reporting stays trustworthy.",
+                    })
+                if previous["revenue"]:
+                    trend_word = "up" if growth >= 0 else "down"
+                    recommendations.append({
+                        "tone": "positive" if growth >= 0 else "warn",
+                        "title": f"Revenue is {trend_word} {abs(growth)}% vs the previous {days} days",
+                        "detail": (f"This window: UGX {current['revenue']:,} · previous window: UGX {previous['revenue']:,}. "
+                                   + ("Protect what's working — keep the fast categories in stock and repeat the promotions that drove this."
+                                      if growth >= 0 else
+                                      "Investigate the dip: check stock-outs in your best categories, then re-run the last promotion that converted.")),
+                    })
+                if categories:
+                    named_cats = [row for row in categories if row["category"] != "Uncategorised"]
+                    top = named_cats[0] if named_cats else None
+                    if top and top["share"] >= 35:
+                        recommendations.append({
+                            "tone": "positive", "title": f"{top['category']} is your engine ({top['share']}% of revenue)",
+                            "detail": f"It returned UGX {top['profit']:,} gross profit on {top['units']} units. Prioritise intake of similar pieces and feature them first on TikTok, Instagram, and the storefront hero.",
+                        })
+                    weakest_margin = min(named_cats, key=lambda r: r["margin"]) if named_cats else None
+                    if weakest_margin and weakest_margin["margin"] < 20 and weakest_margin["revenue"] > 0:
+                        recommendations.append({
+                            "tone": "warn", "title": f"Re-price {weakest_margin['category']} (only {weakest_margin['margin']}% margin)",
+                            "detail": "Margin this thin means a small markdown wipes out profit. Raise base prices, negotiate cheaper bales, or bundle with high-margin items.",
+                        })
+                if avg_order_value:
+                    bundle_target = int(round(avg_order_value * 1.2, -3))
+                    recommendations.append({
+                        "tone": "action", "title": f"Lift the basket from UGX {avg_order_value:,} toward UGX {bundle_target:,}",
+                        "detail": "Train cashiers to offer a matching accessory at checkout and use bundle pricing online (tee + cap). A 20% basket lift compounds every marketing shilling.",
+                    })
+                if marketing_spend == 0:
+                    recommendations.append({
+                        "tone": "action", "title": "No marketing spend recorded",
+                        "detail": "Healthy retail invests roughly 5–8% of revenue in promotion. Post boosts, flyers, and TikTok content under Financial Ledgers → Daily Expense → Marketing so ROI can be measured here.",
+                    })
+                elif current["revenue"]:
+                    spend_ratio = marketing_spend / current["revenue"] * 100
+                    if spend_ratio > 12:
+                        recommendations.append({
+                            "tone": "warn", "title": f"Marketing is {round(spend_ratio)}% of revenue — audit ROI",
+                            "detail": f"UGX {marketing_spend:,} spent this window. Ask each campaign which orders it produced; shift budget to the channel that answers with sales.",
+                        })
+                    else:
+                        recommendations.append({
+                            "tone": "positive", "title": f"Marketing discipline looks healthy ({round(spend_ratio)}% of revenue)",
+                            "detail": f"UGX {marketing_spend:,} promoted UGX {current['revenue']:,} of sales. Tag boosted posts with a code at checkout to tighten attribution further.",
+                        })
+                if customer_insights["total"] >= 3:
+                    if customer_insights["repeat_rate"] < 20:
+                        recommendations.append({
+                            "tone": "action", "title": f"Only {customer_insights['repeat_rate']}% of customers returned",
+                            "detail": "Capture phone numbers at every checkout, then send weekly 'new drop' WhatsApp broadcasts from the Strategy tab's customer list. Repeat buyers cost nothing to re-acquire.",
+                        })
+                    else:
+                        recommendations.append({
+                            "tone": "positive", "title": f"Retention is strong — {customer_insights['repeat_rate']}% repeat buyers",
+                            "detail": "Reward loyalty: early access to new bales or size-run reservations keeps these customers from drifting to competitors.",
+                        })
+                if stock_signals["aging_60d_value"] > 0:
+                    recommendations.append({
+                        "tone": "warn", "title": f"UGX {stock_signals['aging_60d_value']:,} is parked in {stock_signals['aging_60d_items']} slow pieces (60+ days)",
+                        "detail": "That cash could fund a fresh bale this week. Run a markdown campaign (Dead Stock tab) and advertise the drop as a 'clearance event' on socials.",
+                    })
+                if stock_signals["low_stock_items"] > 0:
+                    recommendations.append({
+                        "tone": "action", "title": f"{stock_signals['low_stock_items']} products are nearly stocked out",
+                        "detail": "Replenish best-seller sizes before pushing ads — marketing an out-of-stock item burns budget and trust.",
+                    })
+                if quality_score < 85:
+                    recommendations.append({
+                        "tone": "warn", "title": f"Data reliability is {quality_score}% — fix records before big decisions",
+                        "detail": "Prices, costs, photos, and customer details below 100% make reports lie. Open each failed check below and clean up the records it lists.",
+                    })
+                recommendations = recommendations[:6]
+
+                return json_response({
+                    "ok": True,
+                    "days": days,
+                    "period": {"start": start.isoformat() + "Z", "end": now.isoformat() + "Z"},
+                    "kpis": {
+                        "revenue": current["revenue"], "orders": current["orders"],
+                        "units": current["units"], "avg_order_value": avg_order_value,
+                        "gross_profit": gross_profit, "gross_margin": gross_margin,
+                        "expenses": expenses, "net_contribution": gross_profit - expenses,
+                        "delivery_fee_revenue": delivery_fees,
+                        "revenue_growth_pct": growth if previous["revenue"] else None,
+                        "previous_revenue": previous["revenue"],
+                    },
+                    "daily_trend": daily_trend,
+                    "channels": channels,
+                    "categories": categories[:10],
+                    "top_products": top_products,
+                    "customers": customer_insights,
+                    "marketing": {
+                        "spend": marketing_spend,
+                        "campaigns": len(marketing_rows),
+                        "spend_ratio": round(marketing_spend / current["revenue"] * 100, 2) if current["revenue"] else 0,
+                        "revenue_per_shilling": round(current["revenue"] / marketing_spend, 1) if marketing_spend else None,
+                    },
+                    "stock_signals": stock_signals,
+                    "data_quality": {"score": quality_score, "checks": quality_checks},
+                    "recommendations": recommendations,
+                    "generated_at": now.isoformat() + "Z",
+                })
 
         if clean_path == "/api/finance/journal" and method == "GET":
             staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)

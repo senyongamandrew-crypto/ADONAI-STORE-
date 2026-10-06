@@ -254,6 +254,12 @@
     const t = e.target.closest(".ctab"); if (!t) return;
     activeCat = t.dataset.cat; renderCats(); renderTiles();
   });
+  $("#posInventoryTypes").addEventListener("click", e => {
+    const t = e.target.closest(".ctab"); if (!t) return;
+    activeInventory = t.dataset.inventory;
+    $$("#posInventoryTypes .ctab").forEach(button => button.classList.toggle("active", button.dataset.inventory === activeInventory));
+    renderTiles();
+  });
   function renderTiles() {
     const list = products
       .filter(p => activeDemo === "All" || p.demographic === activeDemo)
