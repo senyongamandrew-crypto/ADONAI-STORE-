@@ -468,10 +468,30 @@
     return headers;
   }
 
+  /* Network guard: every API request aborts after 30s so workspaces never
+     hang on a silent connection (the old UI stayed on "Loading…" forever).
+     The caller's own signal still wins when it is provided. */
+  const API_TIMEOUT_MS = 30000;
   async function apiRequest(path, options = {}, withAuth = true) {
-    const response = await fetch(apiUrl(path), Object.assign({}, options, {
-      headers: Object.assign(apiHeaders(withAuth), options.headers || {})
-    }));
+    const controller = (typeof AbortController === "function") ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => { try { controller.abort(); } catch (e) {} }, API_TIMEOUT_MS) : null;
+    let response;
+    try {
+      response = await fetch(apiUrl(path), Object.assign({
+        signal: options.signal || (controller && controller.signal) || undefined
+      }, options, {
+        headers: Object.assign(apiHeaders(withAuth), options.headers || {})
+      }));
+    } catch (networkError) {
+      const timedOut = controller && controller.signal && controller.signal.aborted && !options.signal;
+      const error = new Error(timedOut
+        ? "The server took too long to answer. Check your connection and tap Try again."
+        : "Could not reach the server. Check your connection and tap Try again.");
+      error.status = 0;
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     let data = null;
     try { data = await response.json(); } catch (e) {}
     if (!response.ok) {
@@ -667,8 +687,9 @@
       });
     },
     pullStoreSettings,
-    syncStoreSettings(patch, adminCredential) {
+    syncStoreSettings(patch, adminCredential, options) {
       const cleanPatch = Object.assign({}, patch || {});
+      const opts = options || {};
       const credential = String(adminCredential || "").trim();
       const headers = { "Content-Type": "application/json" };
 
@@ -679,10 +700,13 @@
         Object.assign(headers, Auth.authHeaders());
       }
 
+      const body = { settings: cleanPatch };
+      if (opts.applyBaseFeeToCatalog) body.apply_base_fee_to_catalog = true;
+
       return fetch(apiUrl("/api/settings"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ settings: cleanPatch })
+        body: JSON.stringify(body)
       }).then(async response => {
         let data = null;
         try { data = await response.json(); } catch (e) {}
@@ -693,6 +717,14 @@
           throw new Error(message);
         }
 
+        const productsUpdated = Number(data.products_updated) || 0;
+        // A catalog-wide transport rollout changed product prices server-side;
+        // refresh the shared product cache right away instead of waiting for
+        // the next poll so every open panel sees the new fees immediately.
+        if (productsUpdated > 0 && typeof pullOperationalData === "function" && window.__ADONAI_STOREFRONT__ !== true) {
+          pullOperationalData().catch(() => {});
+        }
+
         const publicSettings = normalizeRemoteSettings(data.settings || {});
         return tx("settings", st => {
           Object.keys(publicSettings).forEach(key => { st.settings[key] = publicSettings[key]; });
@@ -700,7 +732,9 @@
           // master key in the admin_key slot only after the remote save succeeds.
           if (cleanPatch.master_key) st.settings.admin_key = String(cleanPatch.master_key);
           else if (cleanPatch.admin_key) st.settings.admin_key = String(cleanPatch.admin_key);
-          return Object.assign({}, st.settings);
+          const saved = Object.assign({}, st.settings);
+          saved.products_updated = productsUpdated;
+          return saved;
         });
       });
     },
@@ -820,10 +854,10 @@
       if (!product) throw new Error("Product not found");
       return this.updateProduct(id, { in_stock_count: Math.max(0, Number(product.in_stock_count || 0) + money(delta)) });
     },
-    async removeProduct(id) {
+    async removeProduct(id, mode = "archive") {
       await apiRequest("/api/products/" + encodeURIComponent(id), {
         method: "DELETE",
-        body: "{}"
+        body: JSON.stringify({ mode: mode === "permanent" ? "permanent" : "archive" })
       }, true);
       return tx("products", st => {
         st.products = st.products.filter(product => product.id !== id);

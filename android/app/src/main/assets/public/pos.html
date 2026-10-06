@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="css/pos.css?v=7.2" />
+<link rel="stylesheet" href="css/pos.css?v=7.3" />
 <link rel="stylesheet" href="css/notifications.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
@@ -36,15 +36,25 @@
 
     <nav class="nav" id="posNavList">
       <a class="nav-item active" href="pos.html" title="Open the cashier register"><span class="nav-ico"><i data-icon="inbox"></i></span><span>POS Register</span></a>
-      <a class="nav-item" href="admin.html?view=sales" data-console-view="sales"><span class="nav-ico"><i data-icon="package" class="ico-lime"></i></span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
-      <a class="nav-item" href="admin.html?view=inventory" data-console-view="inventory"><span class="nav-ico"><i data-icon="boxes"></i></span><span>Inventory Rack</span></a>
-      <a class="nav-item" href="admin.html?view=intake" data-console-view="intake"><span class="nav-ico"><i data-icon="plus-circle"></i></span><span>Catalog Intake</span></a>
-      <a class="nav-item" href="admin.html?view=customers" data-console-view="customers"><span class="nav-ico"><i data-icon="printer"></i></span><span>Data Posting &amp; Audit Logs</span></a>
-      <a class="nav-item" href="admin.html?view=dispatch" data-console-view="dispatch"><span class="nav-ico"><i data-icon="truck"></i></span><span>Delivery Partners &amp; Dispatch</span></a>
-      <a class="nav-item" href="admin.html?view=overview" data-console-view="overview"><span class="nav-ico"><i data-icon="bar-chart-3"></i></span><span>Sales Analytics</span></a>
-      <a class="nav-item" href="admin.html?view=payments" data-console-view="payments"><span class="nav-ico"><i data-icon="book-open"></i></span><span>Financial Ledgers</span></a>
-      <a class="nav-item" href="admin.html?view=staff" data-console-view="staff"><span class="nav-ico"><i data-icon="key-round" class="ico-lime"></i></span><span>Staff &amp; Permissions</span></a>
-      <a class="nav-item" href="admin.html?view=settings" data-console-view="settings"><span class="nav-ico"><i data-icon="settings"></i></span><span>Store Settings</span></a>
+
+      <div class="nav-section">
+        <div class="nav-section-head">
+          <span class="ns-dot" aria-hidden="true"></span>
+          <span class="nav-section-label">Admin Suite</span>
+          <span class="ns-pill">one passkey · dashboards free inside</span>
+        </div>
+        <div class="nav-section-items">
+          <a class="nav-item" href="admin.html?view=sales" data-console-view="sales"><span class="nav-ico"><i data-icon="package" class="ico-lime"></i></span><span>Fulfillment &amp; Orders</span><span class="badge" id="posNavWebBadge"></span></a>
+          <a class="nav-item" href="admin.html?view=inventory" data-console-view="inventory"><span class="nav-ico"><i data-icon="boxes"></i></span><span>Inventory Rack</span></a>
+          <a class="nav-item" href="admin.html?view=intake" data-console-view="intake"><span class="nav-ico"><i data-icon="plus-circle"></i></span><span>Catalog Intake</span></a>
+          <a class="nav-item" href="admin.html?view=customers" data-console-view="customers"><span class="nav-ico"><i data-icon="printer"></i></span><span>Data Posting &amp; Audit Logs</span></a>
+          <a class="nav-item" href="admin.html?view=dispatch" data-console-view="dispatch"><span class="nav-ico"><i data-icon="truck"></i></span><span>Delivery Partners &amp; Dispatch</span></a>
+          <a class="nav-item" href="admin.html?view=overview" data-console-view="overview"><span class="nav-ico"><i data-icon="bar-chart-3"></i></span><span>Sales Analytics</span></a>
+          <a class="nav-item" href="admin.html?view=payments" data-console-view="payments"><span class="nav-ico"><i data-icon="book-open"></i></span><span>Financial Ledgers</span></a>
+          <a class="nav-item" href="admin.html?view=staff" data-console-view="staff"><span class="nav-ico"><i data-icon="key-round" class="ico-lime"></i></span><span>Staff &amp; Permissions</span></a>
+          <a class="nav-item" href="admin.html?view=settings" data-console-view="settings"><span class="nav-ico"><i data-icon="settings"></i></span><span>Store Settings</span></a>
+        </div>
+      </div>
       <button class="nav-item store-nav-item" id="btnSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
     </nav>
 
@@ -57,7 +67,7 @@
         </div>
       </div>
       <div class="foot-actions">
-        <a class="mini-link" href="admin.html">Operations Console →</a>
+        <a class="mini-link suite-link" href="admin.html">🔓 Admin Suite →</a>
         <button class="mini-link" id="btnPosSbExit" type="button">Sign out</button>
       </div>
     </div>
@@ -116,6 +126,12 @@
         <button class="ctab" data-cat="Shoes">Shoes</button>
         <button class="ctab" data-cat="Accessories">Accessories</button>
         <button class="ctab" data-cat="Children Wear">Children Wear</button>
+      </div>
+      <div class="cat-tabs category-pill-row" id="posInventoryTypes">
+        <span class="cat-lab">Inventory:</span>
+        <button class="ctab active" data-inventory="All">All Items</button>
+        <button class="ctab" data-inventory="BRAND_NEW">Brand New</button>
+        <button class="ctab" data-inventory="PRE_LOVED">Vintage / Pre-Loved</button>
       </div>
       <div class="tiles" id="tileGrid"></div>
     </section>
@@ -258,8 +274,8 @@
 <script src="js/adaptive.js?v=1.0"></script>
 <script src="js/notifications.js?v=1.0"></script>
 <script src="js/icons.js?v=1.0"></script>
-<script src="js/db.js?v=3.2"></script>
-<script src="js/auth.js?v=2.6"></script>
+<script src="js/db.js?v=3.8"></script>
+<script src="js/auth.js?v=2.7"></script>
 <script src="js/pos.js?v=6.3"></script>
 </body>
 </html>
