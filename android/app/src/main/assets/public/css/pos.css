@@ -750,6 +750,33 @@ html[data-device="phone"][data-density="hidpi"] .tile .t-name { line-height: 1.2
   background:linear-gradient(135deg,rgba(177,81,43,.38),rgba(255,255,255,.08)); color:#fff;
 }
 
+/* Admin Suite grouping section (one gate, dashboards free inside) */
+.pos-sidebar .nav-section { margin:10px 2px 0; }
+.pos-sidebar .nav-section-head {
+  display:flex; align-items:center; gap:7px; padding:6px 12px 7px;
+}
+.pos-sidebar .ns-dot {
+  width:8px; height:8px; border-radius:50%; background:#34D399;
+  box-shadow:0 0 9px rgba(52,211,153,.75); flex:0 0 auto;
+}
+.pos-sidebar .nav-section-label {
+  font-size:11px; font-weight:800; letter-spacing:.17em; text-transform:uppercase;
+  color:#BBF7D0; white-space:nowrap;
+}
+.pos-sidebar .ns-pill {
+  margin-left:auto; font-size:8.5px; font-weight:700; letter-spacing:.02em;
+  color:#6EE7B7; background:rgba(52,211,153,.13); border:1px solid rgba(52,211,153,.32);
+  padding:2.5px 7px; border-radius:999px; white-space:nowrap;
+}
+.pos-sidebar .nav-section-items {
+  display:flex; flex-direction:column; gap:3px;
+  margin-left:15px; padding-left:9px; border-left:1.5px solid rgba(52,211,153,.22);
+}
+.pos-sidebar .foot-actions .suite-link {
+  font-weight:700; color:#34D399 !important;
+}
+.pos-sidebar .foot-actions .suite-link:hover { color:#BBF7D0 !important; }
+
 /* ======================================================================
    RESPONSIVE DISPLAY HANDLING (v2.7)
    The legacy manual "View Mode" (Desktop/Phone) selector and its

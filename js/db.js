@@ -468,30 +468,10 @@
     return headers;
   }
 
-  /* Network guard: every API request aborts after 30s so workspaces never
-     hang on a silent connection (the old UI stayed on "Loading…" forever).
-     The caller's own signal still wins when it is provided. */
-  const API_TIMEOUT_MS = 30000;
   async function apiRequest(path, options = {}, withAuth = true) {
-    const controller = (typeof AbortController === "function") ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => { try { controller.abort(); } catch (e) {} }, API_TIMEOUT_MS) : null;
-    let response;
-    try {
-      response = await fetch(apiUrl(path), Object.assign({
-        signal: options.signal || (controller && controller.signal) || undefined
-      }, options, {
-        headers: Object.assign(apiHeaders(withAuth), options.headers || {})
-      }));
-    } catch (networkError) {
-      const timedOut = controller && controller.signal && controller.signal.aborted && !options.signal;
-      const error = new Error(timedOut
-        ? "The server took too long to answer. Check your connection and tap Try again."
-        : "Could not reach the server. Check your connection and tap Try again.");
-      error.status = 0;
-      throw error;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    const response = await fetch(apiUrl(path), Object.assign({}, options, {
+      headers: Object.assign(apiHeaders(withAuth), options.headers || {})
+    }));
     let data = null;
     try { data = await response.json(); } catch (e) {}
     if (!response.ok) {
@@ -840,10 +820,10 @@
       if (!product) throw new Error("Product not found");
       return this.updateProduct(id, { in_stock_count: Math.max(0, Number(product.in_stock_count || 0) + money(delta)) });
     },
-    async removeProduct(id, mode = "archive") {
+    async removeProduct(id) {
       await apiRequest("/api/products/" + encodeURIComponent(id), {
         method: "DELETE",
-        body: JSON.stringify({ mode: mode === "permanent" ? "permanent" : "archive" })
+        body: "{}"
       }, true);
       return tx("products", st => {
         st.products = st.products.filter(product => product.id !== id);

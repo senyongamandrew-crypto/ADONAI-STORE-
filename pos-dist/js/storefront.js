@@ -122,19 +122,6 @@
   const saveCart = () => localStorage.setItem(CART_KEY, JSON.stringify(cart));
   let orderResult = null;
 
-  /* ---------- online payment (Flutterwave) state ---------- */
-  // paymentMethod: 'cod'  = pay on delivery/pickup (order first, pay on handoff)
-  //                'flutterwave' = pay now in the Flutterwave popup before the
-  //                order is considered confirmed. Pieces stay reserved for the
-  //                payment window the server announces (default 30 minutes).
-  let paymentConfig = { enabled: false, provider: "flutterwave", currency: "UGX", payment_window_minutes: 30 };
-  let paymentMethod = "cod";
-  let paymentBusy = false;
-  function setPaymentMethod(method) {
-    paymentMethod = method === "flutterwave" && paymentConfig.enabled ? "flutterwave" : "cod";
-    renderCart();
-  }
-
   /* ---------- filter state ---------- */
   let products = [];
   let fDemo = "All", fCat = "All", fSize = "All", fCond = "All", fInventory = "All", fMax = 200000, term = "";
@@ -455,7 +442,7 @@
     window.location.href = PK.productPath(p) + suffix;
   }
 
-  async function addToCart(id) {
+  function addToCart(id) {
     const p = products.find(x => x.id === id);
     if (!p || p.in_stock_count <= 0) return toast("That item is currently unavailable");
     const line = cart.find(l => l.product_id === id);
@@ -630,48 +617,22 @@
     $("#cartCount").textContent = itemCount;
 
     if (orderResult) {
-      const paymentState = orderResult.paymentStatus || "unpaid";
-      const awaitingPayment = orderResult.method === "flutterwave" && paymentState === "pending";
-      const paymentFailed = orderResult.method === "flutterwave" && paymentState === "failed";
-      const heading = paymentState === "paid"
-        ? `Payment received — order <strong>${esc(orderResult.id)}</strong> is confirmed.`
-        : awaitingPayment
-          ? `Order <strong>${esc(orderResult.id)}</strong> is held for you — complete payment to confirm it.`
-          : paymentFailed
-            ? `Payment for <strong>${esc(orderResult.id)}</strong> was not completed.`
-            : `Held as <strong>${esc(orderResult.id)}</strong>. Your pieces are reserved off the rails.`;
-      const statusLine = paymentState === "paid"
-        ? `<p class="wa-instruct"><strong>Status: Paid ✔</strong><br />Thank you! Your payment has been verified and your order has synced directly to our POS fulfillment dashboard. Our team will contact the phone number you supplied with confirmation and delivery updates.</p>`
-        : awaitingPayment
-          ? `<p class="wa-instruct"><strong>Status: Awaiting payment</strong><br />Your pieces are reserved for <strong>${esc(String(orderResult.paymentWindow || 30))} minutes</strong> while you pay with mobile money or card. Tap the button below to finish — unpaid orders are automatically released back onto the rail.</p>`
-          : paymentFailed
-            ? `<p class="wa-instruct"><strong>Status: Payment not completed</strong><br />No money was captured for that attempt. You can retry while your pieces are still reserved.</p>`
-            : `<p class="wa-instruct"><strong>Status: Unfulfilled</strong><br />Your order has synced directly to our POS fulfillment dashboard. Our team will contact the phone number you supplied with confirmation and status updates.</p>`;
-
       $("#cartBody").innerHTML = `
         <div class="order-confirmed-view">
           <div class="order-held-pill">
-            ${heading}
+            Held as <strong>${esc(orderResult.id)}</strong>. Your pieces are reserved off the rails.
           </div>
 
           <div class="total-due-card">
-            <span class="due-lbl">${paymentState === "paid" ? "TOTAL PAID" : "TOTAL AMOUNT DUE"}</span>
+            <span class="due-lbl">TOTAL AMOUNT DUE</span>
             <span class="due-val">${DB.ugx(orderResult.total)}</span>
           </div>
 
-          ${statusLine}
+          <p class="wa-instruct"><strong>Status: Unfulfilled</strong><br />Your order has synced directly to our POS fulfillment dashboard. Our team will contact the phone number you supplied with confirmation and status updates.</p>
         </div>`;
-
-      const footButtons = [];
-      if (awaitingPayment || paymentFailed) {
-        footButtons.push(`<button class="claim-confirm-btn" id="payNowBtn" ${paymentBusy ? "disabled" : ""}>${paymentBusy ? "Opening secure payment…" : `Pay ${DB.ugx(orderResult.total)} now — MoMo & Card`}</button>`);
-      }
-      footButtons.push(`<button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`);
-      $("#cartFoot").innerHTML = footButtons.join("");
-      const keepShoppingBtn = $("#keepShopping");
-      if (keepShoppingBtn) keepShoppingBtn.addEventListener("click", () => { orderResult = null; renderCart(); closeCart(); });
-      const payNowBtn = $("#payNowBtn");
-      if (payNowBtn) payNowBtn.addEventListener("click", () => { startFlutterwavePayment(); });
+      $("#cartFoot").innerHTML = `
+        <button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`;
+      $("#keepShopping").addEventListener("click", () => { orderResult = null; renderCart(); closeCart(); });
       return;
     }
 
@@ -708,12 +669,6 @@
           <button type="button" class="deliv-toggle-btn ${deliveryType === 'pickup' ? 'active' : ''}" id="btnDelivPickup">Store Pickup (Free)</button>
         </div>
 
-        <div class="delivery-toggle-row" ${paymentConfig.enabled ? "" : 'style="display:none"'}>
-          <button type="button" class="deliv-toggle-btn ${paymentMethod === 'flutterwave' ? 'active' : ''}" id="btnPayNow">Pay now — MoMo & Card</button>
-          <button type="button" class="deliv-toggle-btn ${paymentMethod === 'cod' ? 'active' : ''}" id="btnPayLater">Pay on ${deliveryType === 'pickup' ? 'pickup' : 'delivery'}</button>
-        </div>
-        ${paymentConfig.enabled && paymentMethod === 'flutterwave' ? `<p class="delivery-service-note">Secure checkout by Flutterwave — MTN MoMo, Airtel Money, Visa & Mastercard. Your pieces stay reserved for ${esc(String(paymentConfig.payment_window_minutes || 30))} minutes while you pay.</p>` : ""}
-
         <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
           <p class="delivery-service-note">Adonai Store manages confirmation, careful packaging, route coordination, customer updates, and the final handoff. A boda or courier partner is simply one part of the delivery journey.</p>
           <label class="claim-field-label">Destination Area:</label>
@@ -736,7 +691,7 @@
         <div class="sum-line"><span>Allocated delivery (50% transport):</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
-      <button class="claim-confirm-btn" id="confirmOrder">${paymentMethod === "flutterwave" ? `Pay ${DB.ugx(grandTotal)} — MoMo & Card` : `Confirm order (${DB.ugx(grandTotal)})`}</button>
+      <button class="claim-confirm-btn" id="confirmOrder">Confirm order (${DB.ugx(grandTotal)})</button>
       <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
     `;
 
@@ -758,10 +713,6 @@
     const btnBoda = $("#btnDelivBoda"), btnPickup = $("#btnDelivPickup");
     if (btnBoda) btnBoda.addEventListener("click", () => { deliveryType = "boda"; renderCart(); });
     if (btnPickup) btnPickup.addEventListener("click", () => { deliveryType = "pickup"; renderCart(); });
-
-    const btnPayNow = $("#btnPayNow"), btnPayLater = $("#btnPayLater");
-    if (btnPayNow) btnPayNow.addEventListener("click", () => setPaymentMethod("flutterwave"));
-    if (btnPayLater) btnPayLater.addEventListener("click", () => setPaymentMethod("cod"));
 
     const confirmButton = $("#confirmOrder");
     if (confirmButton) confirmButton.addEventListener("click", checkout);
@@ -854,7 +805,6 @@
         delivery_fee: deliveryFee,
         delivery_notes: deliveryNotes,
         lock_owner: webLockOwner,
-        payment_method: paymentMethod === "flutterwave" ? "flutterwave" : undefined,
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
 
@@ -862,150 +812,21 @@
         window.AdonaiAnalytics.trackWebPurchase(order);
       }
 
-      const paymentInfo = order.payment || null;
       orderResult = {
         id: order.id,
         total: order.total,
-        status: order.dispatch_status || "Unfulfilled",
-        method: paymentInfo ? "flutterwave" : "cod",
-        paymentStatus: (paymentInfo && paymentInfo.status) || "unpaid",
-        paymentToken: paymentInfo ? paymentInfo.token : "",
-        paymentWindow: paymentInfo ? paymentInfo.payment_window_minutes : null
+        status: order.dispatch_status || "Unfulfilled"
       };
 
       cart = [];
       saveCart();
       renderCart();
       refreshProducts();
-
-      if (paymentInfo) {
-        // The pieces are already reserved server-side — go straight into the
-        // secure Flutterwave popup so the order is confirmed in one motion.
-        startFlutterwavePayment();
-      }
     } catch (err) {
       toast(err.message || "Something went wrong — please try again");
       refreshProducts();
       renderCart();
     }
-  }
-
-  /* ---------- Flutterwave Inline popup orchestration ---------- */
-  async function startFlutterwavePayment() {
-    if (!orderResult || orderResult.method !== "flutterwave" || !orderResult.paymentToken) return;
-    if (paymentBusy) return;
-    paymentBusy = true;
-    renderCart();
-    try {
-      const sessionData = await DB.createFlutterwaveSession(orderResult.id, orderResult.paymentToken);
-
-      if (sessionData.mock) {
-        // Local development mock (no real keys configured): approve through
-        // the same server verification path the real gateway uses.
-        const simulated = await DB.verifyFlutterwavePayment(orderResult.id, orderResult.paymentToken, `MOCK${Date.now()}`, sessionData.tx_ref);
-        if (simulated && simulated.payment_status === "paid") {
-          orderResult.paymentStatus = "paid";
-        } else {
-          toast((simulated && simulated.error) || "Mock payment did not confirm");
-        }
-        paymentBusy = false;
-        renderCart();
-        return;
-      }
-
-      const scriptOk = await DB.loadFlutterwaveScript();
-      if (!scriptOk) throw new Error("Could not load the secure payment window — check your internet connection and try again");
-
-      let handledResponse = false;
-      window.FlutterwaveCheckout({
-        public_key: sessionData.public_key,
-        tx_ref: sessionData.tx_ref,
-        amount: sessionData.amount,
-        currency: sessionData.currency || "UGX",
-        payment_options: "mobilemoneyuganda,card",
-        meta: { order_id: sessionData.order_id },
-        customer: {
-          name: (sessionData.customer && sessionData.customer.name) || undefined,
-          phone_number: (sessionData.customer && sessionData.customer.phone) || undefined,
-        },
-        customizations: {
-          title: (S.store_name || "Adonai Store") + " — Secure checkout",
-          description: `Order ${sessionData.order_id}`,
-          logo: window.location.origin + "/assets/favicon-512.png",
-        },
-        callback: (response) => {
-          handledResponse = true;
-          finalizeFlutterwavePayment(response, sessionData);
-        },
-        onclose: () => {
-          // The gateway may confirm mobile money a beat after the modal
-          // closes; reconcile with the server either way.
-          pollPaymentCompletion(!handledResponse);
-        },
-      });
-      paymentBusy = false;
-      renderCart();
-    } catch (err) {
-      paymentBusy = false;
-      toast(err.message || "Payment could not be started — try again");
-      renderCart();
-    }
-  }
-
-  async function finalizeFlutterwavePayment(response, sessionData) {
-    if (!orderResult || !orderResult.paymentToken) return;
-    const popupStatus = String((response && response.status) || "").toLowerCase();
-    if (popupStatus !== "successful" && popupStatus !== "completed") {
-      orderResult.paymentStatus = "pending";
-      renderCart();
-      toast("Payment was not completed — you can retry while your pieces are still reserved");
-      return;
-    }
-    paymentBusy = true;
-    renderCart();
-    try {
-      const result = await DB.verifyFlutterwavePayment(
-        orderResult.id,
-        orderResult.paymentToken,
-        (response && response.transaction_id) || "",
-        (sessionData && sessionData.tx_ref) || ""
-      );
-      if (result && result.payment_status === "paid") {
-        orderResult.paymentStatus = "paid";
-      } else {
-        const settled = await pollPaymentCompletion(true);
-        if (!settled && result && result.error) toast(result.error);
-      }
-    } catch (err) {
-      toast("Payment confirmation is taking longer than usual — checking with the server…");
-      await pollPaymentCompletion(true);
-    } finally {
-      paymentBusy = false;
-      renderCart();
-    }
-  }
-
-  async function pollPaymentCompletion(silent) {
-    if (!orderResult || !orderResult.paymentToken) return false;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      try {
-        const statusData = await DB.fetchPaymentStatus(orderResult.id, orderResult.paymentToken);
-        if (statusData.payment_status === "paid") {
-          orderResult.paymentStatus = "paid";
-          renderCart();
-          return true;
-        }
-        if (statusData.payment_status === "failed") {
-          orderResult.paymentStatus = "failed";
-          renderCart();
-          return false;
-        }
-      } catch (err) { /* transient network hiccup — keep polling */ }
-      await new Promise(resolve => setTimeout(resolve, 2500));
-    }
-    if (!silent) toast("Still waiting for payment confirmation — it will appear here shortly");
-    renderCart();
-    return false;
   }
 
   /* Keep browser cart reservations alive while the shopper is active. The
@@ -1042,15 +863,6 @@
   /* ---------- boot ---------- */
   refreshProducts();
   renderCart();
-
-  // Discover whether online payment is offered (keys configured server-side).
-  // When disabled, the "Pay now" toggle simply never renders.
-  DB.getPaymentConfig().then(config => {
-    const wasEnabled = paymentConfig.enabled;
-    paymentConfig = Object.assign(paymentConfig, config || {});
-    if (!paymentConfig.enabled && paymentMethod === "flutterwave") paymentMethod = "cod";
-    if (paymentConfig.enabled !== wasEnabled) renderCart();
-  }).catch(() => {});
 
   // "Checkout now" from a Product Detail Page lands on /?cart=1 — open the
   // bag drawer straight away so the shopper keeps their momentum.

@@ -9,7 +9,6 @@
   const LS_KEY = "adonai-session-v2";
   const SS_KEY = "adonai-session-v1";
   const TOKEN_KEY = "adonai-terminal-token";
-  const SUITE_KEY = "adonai-suite-unlocked";
   const BC_NAME = "adonai-auth-events";
 
   const storage = (typeof localStorage !== "undefined") ? localStorage : {
@@ -105,46 +104,6 @@
         return false;
       } catch (e) {
         return false;
-      }
-    },
-
-    /* ----------------------------------------------------------------
-       ADMIN SUITE — single gate, one passkey.
-       Once the suite is unlocked, every dashboard (analytics, inventory,
-       intake, ledgers & strategy, staff, settings) is freely accessible
-       for the session — no per-task key prompts. An admin-grade staff
-       session (e.g. the store owner signed in with admin PIN) unlocks it
-       automatically; the dedicated suite gate accepts the master passkey.
-       ---------------------------------------------------------------- */
-
-    /** true while the Admin Suite is unlocked for this session/tab */
-    suiteUnlocked() {
-      try { if (sessionStore.getItem(SUITE_KEY) === "1") return true; } catch (e) {}
-      const me = Auth.me();
-      return !!(me && String(me.role || "").toLowerCase() === "admin" && Auth.token());
-    },
-
-    /** Grant suite access: persists an admin-grade session + the suite flag */
-    unlockSuite(credential, staff) {
-      const sessionInfo = Object.assign(
-        { id: "ADMIN-SUITE", name: "Administrator", role: "admin" },
-        staff || {}
-      );
-      sessionInfo.role = "admin";
-      if (!sessionInfo.token) sessionInfo.token = String(credential || "");
-      Auth.signIn(sessionInfo);
-      try { sessionStore.setItem(SUITE_KEY, "1"); } catch (e) {}
-      if (authBc) {
-        try { authBc.postMessage({ type: "SUITE_UNLOCK" }); } catch (e) {}
-      }
-    },
-
-    /** End the suite session: clears the flag and the stored credential */
-    lockSuite() {
-      try { sessionStore.removeItem(SUITE_KEY); } catch (e) {}
-      Auth.signOut();
-      if (authBc) {
-        try { authBc.postMessage({ type: "SUITE_LOCK" }); } catch (e) {}
       }
     },
 

@@ -42,9 +42,3 @@ android/app/release/
 android/gradlew
 android/gradlew.bat
 android/gradle/wrapper/gradle-wrapper.jar
-
-# SQLite WAL sidecars
-adonai.db-shm
-adonai.db-wal
-*.db-shm
-*.db-wal
