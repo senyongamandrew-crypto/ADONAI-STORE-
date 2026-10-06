@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<title>Adonai Store — Operations Console</title>
+<title>Adonai Store — Admin Suite</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.1" />
+<link rel="stylesheet" href="styles.css?v=7.2" />
 <link rel="stylesheet" href="css/notifications.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
@@ -18,6 +18,25 @@
 <meta name="theme-color" content="#111827" />
 </head>
 <body>
+<!-- ============ ADMIN SUITE GATE (one passkey unlocks every dashboard) ============ -->
+<div id="suiteGate" class="suite-gate" hidden>
+  <div class="suite-card" role="dialog" aria-modal="true" aria-label="Admin Suite unlock">
+    <img class="suite-logo" src="assets/adonai-logo-stacked-light.svg" alt="Adonai Store" width="132" height="132" />
+    <p class="kicker suite-kicker">ADONAI STORE · KAMPALA, UGANDA</p>
+    <h1 class="suite-title">Admin Suite</h1>
+    <p class="suite-sub">One passkey unlocks <strong>every dashboard</strong> — sales analytics, orders, the inventory rack, catalog intake, financial ledgers &amp; strategy, staff and settings. Once inside, nothing asks for another key.</p>
+    <div class="field suite-field"><label for="suiteKeyInput">Store master passkey</label>
+      <div class="sku-row">
+        <input id="suiteKeyInput" type="password" class="sel-full" placeholder="Enter the store master passkey…" autocomplete="current-password" />
+        <button class="btn sm ghost" id="suiteKeyShow" type="button">Show</button>
+      </div>
+    </div>
+    <p class="suite-error" id="suiteGateError" role="alert"></p>
+    <button class="btn primary big suite-go" id="suiteGateGo" type="button">Unlock Admin Suite</button>
+    <div class="suite-foot"><a class="mini-link light" href="pos.html">Cashier? Open the POS Register &#8594;</a></div>
+  </div>
+</div>
+
 <div class="app" id="shell">
 
   <!-- ============ SIDEBAR (warm dark — matches reference console) ============ -->
@@ -30,7 +49,7 @@
     </div>
     <div class="brand-meta">
       <span>Kampala, Uganda</span>
-      <span class="ver-chip">OPS v2.3</span>
+      <span class="ver-chip suite-chip">ADMIN SUITE</span>
     </div>
 
     <nav class="nav" id="navList">
@@ -614,9 +633,9 @@
 <script src="js/adaptive.js?v=1.0"></script>
 <script src="js/notifications.js?v=1.0"></script>
 <script src="js/icons.js?v=1.0"></script>
-<script src="js/db.js?v=3.6"></script>
-<script src="js/auth.js?v=2.6"></script>
+<script src="js/db.js?v=3.7"></script>
+<script src="js/auth.js?v=2.7"></script>
 <script src="js/intake.js?v=5.0"></script>
-<script src="app.js?v=6.1"></script>
+<script src="app.js?v=6.2"></script>
 </body>
 </html>

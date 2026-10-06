@@ -1052,6 +1052,59 @@ html[data-pointer="touch"] .lnk { padding: 6px 2px; }
 .del-option.danger:hover { border-color:#DC2626; background:#FEE2E2; }
 .del-tag { font-size:9.5px; font-weight:800; color:#fff; background:#15803D; border-radius:999px; padding:2px 8px; margin-left:6px; vertical-align:2px; text-transform:uppercase; letter-spacing:.05em; }
 
+/* ======================================================================
+   ADMIN SUITE GATE — one passkey unlocks every dashboard
+   ====================================================================== */
+body.suite-locked { overflow:hidden; }
+body.suite-locked .app { visibility:hidden; }
+.suite-gate {
+  position:fixed; inset:0; z-index:4000; display:grid; place-items:center;
+  padding:22px; overflow-y:auto;
+  background:
+    radial-gradient(circle at 85% 12%, rgba(21,128,61,.28), transparent 34%),
+    radial-gradient(circle at 12% 88%, rgba(184,131,50,.16), transparent 40%),
+    linear-gradient(160deg,#0B1120 0%,#111827 55%,#0C1512 100%);
+  animation:fin-in .25s ease both;
+}
+.suite-gate[hidden] { display:none !important; }
+.suite-card {
+  width:min(436px,100%); padding:38px 32px 26px; text-align:center;
+  border:1px solid rgba(187,247,208,.16); border-radius:24px;
+  background:linear-gradient(180deg,rgba(17,24,39,.94),rgba(15,23,33,.9));
+  box-shadow:0 30px 80px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter:blur(10px);
+}
+.suite-logo { width:84px; height:84px; object-fit:contain; margin:0 auto 10px; display:block; }
+.suite-kicker { color:#34D399; letter-spacing:.22em; margin:0 0 6px; }
+.suite-title { margin:0 0 10px; color:#F9FAFB; font-family:var(--serif); font-size:clamp(34px,6vw,44px); letter-spacing:-.02em; line-height:1.02; }
+.suite-sub { margin:0 auto 20px; color:#9CA3AF; font-size:13.5px; line-height:1.65; max-width:33ch; }
+.suite-sub strong { color:#BBF7D0; font-weight:700; }
+.suite-field { text-align:left; margin:0 0 6px; }
+.suite-field label { color:#D1D5DB; font-size:11px; letter-spacing:.08em; text-transform:uppercase; font-weight:800; }
+.suite-field .sel-full {
+  background:rgba(255,255,255,.06); border:1.5px solid rgba(209,213,219,.22); color:#F9FAFB;
+}
+.suite-field .sel-full::placeholder { color:#6B7280; }
+.suite-field .sel-full:focus { border-color:#34D399; outline:none; box-shadow:0 0 0 4px rgba(52,211,153,.18); }
+.suite-field .sel-full.err { border-color:#F87171; animation:shake-x .3s ease; }
+.suite-field .btn.ghost { border-color:rgba(209,213,219,.25); color:#D1D5DB; background:transparent; }
+.suite-error { min-height:20px; margin:6px 0 10px; color:#FCA5A5; font-size:12px; font-weight:700; line-height:1.45; }
+.suite-go { width:100%; min-height:50px; font-size:15px; border-radius:13px; }
+.suite-go:disabled { opacity:.6; cursor:wait; }
+.suite-foot { margin-top:16px; padding-top:14px; border-top:1px solid rgba(209,213,219,.14); }
+.suite-foot .mini-link.light { color:#9CA3AF; font-size:12.5px; text-decoration:none; }
+.suite-foot .mini-link.light:hover { color:#BBF7D0; }
+@keyframes shake-x { 0%,100%{transform:translateX(0)} 33%{transform:translateX(-6px)} 66%{transform:translateX(6px)} }
+
+/* Admin Suite chip in the sidebar */
+.suite-chip { background:linear-gradient(135deg,#15803D,#16A34A); color:#ECFDF5 !important; border-color:transparent !important; letter-spacing:.14em; }
+
+/* Inline passkey unlock (403 workspace cards — never a dead end) */
+.fin-inline-unlock { display:grid; gap:6px; margin:2px auto 0; max-width:340px; text-align:left; padding:10px 12px 12px; border-radius:11px; background:rgba(255,255,255,.72); border:1px dashed #FCA5A5; }
+.fin-inline-unlock .flab { color:#991B1B; font-size:10.5px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.fin-inline-unlock .err { border-color:#DC2626 !important; animation:shake-x .3s ease; }
+.fin-inline-unlock small { color:#7F1D1D; opacity:.75; }
+
 @media (max-width:1100px) {
   .quality-gauge-wrap { grid-template-columns:1fr; justify-items:center; }
   .cat-row .bar-value { min-width:0; }

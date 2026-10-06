@@ -55,12 +55,20 @@
       }
       paintUnlockChip();
     },
-    require(cb) { if (this.unlocked()) return cb(masterCredential); renderMasterModal(cb); },
+    require(cb) {
+      // One unlock rules everything: suite-unlocked sessions skip every gate.
+      if (this.unlocked()) return cb(masterCredential);
+      if (typeof Auth !== "undefined" && Auth.suiteUnlocked && Auth.suiteUnlocked()) {
+        return cb(masterCredential || Auth.token());
+      }
+      renderMasterModal(cb);
+    },
     requireRemote(cb) {
       if (masterCredential) return cb(masterCredential);
       const active = Auth.me();
       const token = Auth.token();
       if (active && active.role === "admin" && token) return cb(token);
+      if (typeof Auth !== "undefined" && Auth.suiteUnlocked && Auth.suiteUnlocked() && token) return cb(token);
       renderMasterModal(cb);
     }
   };
@@ -95,22 +103,17 @@
       const val = input.value.trim();
       if (!val) return;
       if (DB.verifyMasterKey(val)) {
-        Keys.set(true, val); closeModal(); toast("Master Key unlocked for this session");
+        applySuiteUnlock(val, { name: "Admin Suite" });
+        closeModal(); toast("Admin Suite unlocked — every dashboard is open");
         if (after) after(val);
         return;
       }
       try {
-        const authEndpoint = (typeof DB !== "undefined" && DB.apiUrl) ? DB.apiUrl("/api/auth/verify") : "/api/auth/verify";
-        const r = await fetch(authEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pin: val, key: val, terminal_key: val })
-        });
-        const data = await r.json();
-        if (data && data.ok && data.staff && data.staff.role === "admin") {
-          const credential = data.token || val;
-          Keys.set(true, credential); closeModal(); toast("Master Key unlocked via Server / Environment");
-          if (after) after(credential);
+        const result = await suiteUnlockAttempt(val);
+        if (result.ok) {
+          applySuiteUnlock(result.credential, result.staff);
+          closeModal(); toast("Admin Suite unlocked — every dashboard is open");
+          if (after) after(result.credential);
           return;
         }
       } catch (err) {}
@@ -129,6 +132,85 @@
     Keys.require(() => {});
   });
   paintUnlockChip();
+
+  /* =============== ADMIN SUITE — one gate, one passkey ===============
+     A single passkey unlocks every dashboard in the suite (analytics,
+     inventory, intake, audit, dispatch, ledgers & strategy, staff,
+     settings). After that, no task asks for another key — the session
+     carries admin-grade authorization everywhere.
+     =================================================================== */
+
+  /** Verify a passkey (local master key, then server). Resolves {ok, message, credential, staff}. */
+  async function suiteUnlockAttempt(value) {
+    const val = String(value || "").trim();
+    if (!val) return { ok: false, message: "Enter the passkey first" };
+    if (typeof DB !== "undefined" && DB.verifyMasterKey && DB.verifyMasterKey(val)) {
+      return { ok: true, credential: val, staff: { name: "Admin Suite" } };
+    }
+    try {
+      const endpoint = (typeof DB !== "undefined" && DB.apiUrl) ? DB.apiUrl("/api/auth/verify") : "/api/auth/verify";
+      const r = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: val, key: val, terminal_key: val })
+      });
+      const data = await r.json();
+      if (data && data.ok && data.staff) {
+        if (String(data.staff.role || "").toLowerCase() === "admin") {
+          return { ok: true, credential: data.token || val, staff: data.staff };
+        }
+        return {
+          ok: false,
+          message: `That PIN belongs to ${data.staff.name || "a staff member"} (${data.staff.role || "staff"}) — the Admin Suite requires the store master passkey.`
+        };
+      }
+      return { ok: false, message: "Incorrect passkey — try again." };
+    } catch (e) {
+      return { ok: false, message: "Could not verify right now — check your connection." };
+    }
+  }
+
+  /** Every successful unlock ends the same way: full suite access, chips painted. */
+  function applySuiteUnlock(credential, staff) {
+    Auth.unlockSuite(credential, staff);
+    Keys.set(true, credential);
+  }
+
+  function installSuiteGate() {
+    const gate = $("#suiteGate");
+    if (!gate) return;
+    if (Auth.suiteUnlocked()) { gate.hidden = true; return; }
+    gate.hidden = false;
+    document.body.classList.add("suite-locked");
+    const input = $("#suiteKeyInput"), go = $("#suiteGateGo"), err = $("#suiteGateError");
+    setTimeout(() => input && input.focus(), 60);
+    if (!input || !go) return;
+    const attempt = async () => {
+      err.textContent = "";
+      go.disabled = true;
+      go.textContent = "Verifying passkey…";
+      const result = await suiteUnlockAttempt(input.value);
+      go.disabled = false;
+      go.textContent = "Unlock Admin Suite";
+      if (!result.ok) {
+        err.textContent = result.message;
+        input.classList.add("err");
+        setTimeout(() => input.classList.remove("err"), 700);
+        input.select();
+        return;
+      }
+      applySuiteUnlock(result.credential, result.staff);
+      toast("Admin Suite unlocked — every dashboard is open");
+      location.reload(); // boot the suite with full authorization
+    };
+    go.addEventListener("click", attempt);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") attempt(); });
+    const show = $("#suiteKeyShow");
+    if (show) show.addEventListener("click", () => {
+      input.type = input.type === "password" ? "text" : "password";
+      show.textContent = input.type === "password" ? "Show" : "Hide";
+    });
+  }
+  installSuiteGate();
 
   /* =============== console chrome =============== */
   const shell = $("#shell");
@@ -172,7 +254,7 @@
   const btnAdminExit = $("#btnAdminExit");
   if (btnAdminExit) {
     btnAdminExit.addEventListener("click", () => {
-      Auth.signOut();
+      if (Auth.lockSuite) Auth.lockSuite(); else Auth.signOut();
       location.href = "login.html";
     });
   }
@@ -1562,7 +1644,20 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const financeError = error => {
     const status = Number(error && error.status);
     const message = (error && error.message) || "Financial data could not be loaded";
-    return `<div class="finance-error"><div><strong>${status === 401 ? "Staff sign-in required" : status === 403 ? "Manager authorization required" : "Could not load this workspace"}</strong><p class="small">${esc(message)}</p><div class="finance-error-actions">${status === 401 ? `<a class="btn primary sm" href="login.html">Sign in to terminal</a>` : `<button type="button" class="btn primary sm" data-finance-retry>Try again</button>`}</div></div></div>`;
+    const action = status === 403
+      // never a dead end: the passkey input is right here
+      ? `<div class="fin-inline-unlock">
+           <label class="flab">Admin Suite passkey</label>
+           <div class="sku-row">
+             <input type="password" class="sel-full" data-unlock-input placeholder="Store master passkey…" autocomplete="off" />
+             <button class="btn primary sm" data-finance-unlock type="button">Unlock</button>
+           </div>
+           <small class="muted">One unlock opens every dashboard in the suite for this session.</small>
+         </div>`
+      : status === 401
+        ? `<a class="btn primary sm" href="login.html">Sign in to terminal</a>`
+        : `<button type="button" class="btn primary sm" data-finance-retry>Try again</button>`;
+    return `<div class="finance-error"><div><strong>${status === 401 ? "Staff sign-in required" : status === 403 ? "Admin Suite passkey required" : "Could not load this workspace"}</strong><p class="small">${esc(message)}</p><div class="finance-error-actions">${action}</div></div></div>`;
   };
   const setFinanceUpdated = text => {
     const target = $("#financeUpdated");
@@ -2230,6 +2325,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     } catch (error) { toast(error.message, false); }
     finally { setButtonBusy(button, false); }
   });
+  $("#view-payments").addEventListener("keydown", event => {
+    const input = event.target.closest("[data-unlock-input]");
+    if (input && event.key === "Enter") {
+      event.preventDefault();
+      const btn = input.closest(".fin-inline-unlock") && input.closest(".fin-inline-unlock").querySelector("[data-finance-unlock]");
+      if (btn) btn.click();
+    }
+  });
   $("#dashboardDate").addEventListener("change", loadDashboard);
   $("#agingPills").addEventListener("click", event => {
     const button = event.target.closest("[data-aging-days]"); if (!button) return;
@@ -2241,6 +2344,26 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   $("#view-payments").addEventListener("click", async event => {
     const retry = event.target.closest("[data-finance-retry]");
     if (retry) { switchFinanceTab(financeTab, true); return; }
+    const unlockBtn = event.target.closest("[data-finance-unlock]");
+    if (unlockBtn) {
+      const wrap = unlockBtn.closest(".fin-inline-unlock");
+      const input = wrap && wrap.querySelector("[data-unlock-input]");
+      if (!input || !input.value.trim()) { if (input) input.focus(); return; }
+      setButtonBusy(unlockBtn, true, "Verifying…");
+      const result = await suiteUnlockAttempt(input.value);
+      setButtonBusy(unlockBtn, false);
+      if (!result.ok) {
+        input.classList.add("err");
+        toast(result.message, false);
+        setTimeout(() => input.classList.remove("err"), 700);
+        input.select();
+        return;
+      }
+      applySuiteUnlock(result.credential, result.staff);
+      toast("Admin Suite unlocked — every dashboard is open");
+      switchFinanceTab(financeTab, true);
+      return;
+    }
     const categoryDrill = event.target.closest("[data-insights-cat]");
     if (categoryDrill) {
       const search = $("#invSearch");

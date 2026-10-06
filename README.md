@@ -238,6 +238,25 @@ Every request in the console is protected by a 30-second network timeout with a 
 
 ---
 
+## 4c. Admin Suite — One Gate, One Passkey
+
+The operations console (`/admin`) is consolidated as the **Admin Suite**: a
+single full-screen gate asks for **one store master passkey** (the
+`ADMIN_ACCESS_PIN`/configured master key, or an admin-role staff PIN). After
+that single unlock, every dashboard inside — Sales Analytics, Fulfillment &
+Orders, Inventory Rack, Catalog Intake, Posting Audit Logs, Delivery Dispatch,
+Financial Ledgers (all six workspaces), Staff & Permissions, and Store Settings —
+is **freely accessible for the session**. No mid-task key popups: the old
+`Keys.require` prompts defer to the suite session automatically, and any
+server-side refusal (403) renders an **inline passkey input** right where the
+error appeared — never a dead end. Sign out (or `Lock Suite`) re-locks every
+tab via cross-tab session events. Admin-grade staff sign-ins from `login.html`
+unlock the suite without a second step; cashier and manager PINs still run the
+POS register but require the master passkey for suite dashboards, enforced by
+the API as before.
+
+---
+
 ## 5. Automated CI/CD & GitHub Actions Workflow
 
 The repository includes an automated GitHub Actions pipeline (`.github/workflows/build-pos-apk.yml`):
