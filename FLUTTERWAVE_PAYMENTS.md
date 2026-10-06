@@ -48,9 +48,15 @@ In your **Render service → Environment** tab, add:
 
 | Variable | Where to find it | Example |
 |---|---|---|
-| `FLW_PUBLIC_KEY` | Dashboard → Settings → APIs → Public Key | `FLWPUBK-377...-X` |
-| `FLW_SECRET_KEY` | Dashboard → Settings → APIs → Secret Key | `FLWSECK-9b1...-X` |
+| `FLW_PUBLIC_KEY` | Dashboard → Settings → APIs → Public Key | `FLWPUBK_TEST-377...-X` |
+| `FLW_SECRET_KEY` | Dashboard → Settings → APIs → Secret Key | `FLWSECK_TEST-9b1...-X` |
 | `FLW_SECRET_HASH` | **You invent this** (long random string) — also paste it into the webhook settings (step 3) | `8f7a...long-random...` |
+
+The server also accepts the variables spelled `FLWPUBK` / `FLWPUBK_TEST` /
+`FLWPUBK_LIVE` and `FLWSECK` / `FLWSECK_TEST` / `FLWSECK_LIVE`, and if you
+pasted only the token body (for example `d7a8...-X` without the
+`FLWPUBK_TEST-` prefix) it is reconstructed automatically from the variable
+name. Standard names with the full prefixed key remain the cleanest setup.
 
 Optional variables (defaults shown):
 

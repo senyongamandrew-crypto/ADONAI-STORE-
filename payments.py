@@ -16,7 +16,9 @@ Trust model (never violate):
 
 Environment (see .env.example):
   FLW_PUBLIC_KEY    — Flutterwave public key (used by the browser popup).
+                      Also accepted: FLWPUBK / FLWPUBK_TEST / FLWPUBK_LIVE.
   FLW_SECRET_KEY    — Flutterwave secret key (server only, never exposed).
+                      Also accepted: FLWSECK / FLWSECK_TEST / FLWSECK_LIVE.
   FLW_SECRET_HASH   — Webhook verification hash configured in the dashboard.
   FLW_BASE_URL      — API base, default https://api.flutterwave.com.
   FLW_CURRENCY      — Charge currency, default UGX.
@@ -39,8 +41,36 @@ logger = logging.getLogger("adonai.payments")
 
 PROVIDER = "flutterwave"
 
-FLW_PUBLIC_KEY = (os.environ.get("FLW_PUBLIC_KEY") or "").strip()
-FLW_SECRET_KEY = (os.environ.get("FLW_SECRET_KEY") or "").strip()
+
+def _first_env(*names: str) -> tuple[str, str]:
+    """Return (name, value) of the first environment variable that is set."""
+    for name in names:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return name, value
+    return "", ""
+
+
+def _normalize_key(env_name: str, value: str, kind: str) -> str:
+    """
+    Reconstruct the full Flutterwave key format when operators paste only the
+    token body. Dashboard keys look like FLWPUBK_TEST-xxxx-X / FLWSECK-xxxx-XXX;
+    the Inline popup and the API both accept the canonical prefixed form.
+    """
+    upper = value.upper()
+    if upper.startswith(("FLWPUBK", "FLWSECK")):
+        return value
+    if "_TEST" in env_name.upper():
+        return f"FLWPUBK_TEST-{value}" if kind == "public" else f"FLWSECK_TEST-{value}"
+    if "_LIVE" in env_name.upper():
+        return f"FLWPUBK_LIVE-{value}" if kind == "public" else f"FLWSECK_LIVE-{value}"
+    return value
+
+
+_pub_name, _pub_raw = _first_env("FLW_PUBLIC_KEY", "FLWPUBK", "FLWPUBK_TEST", "FLWPUBK_LIVE")
+_sec_name, _sec_raw = _first_env("FLW_SECRET_KEY", "FLWSECK", "FLWSECK_TEST", "FLWSECK_LIVE")
+FLW_PUBLIC_KEY = _normalize_key(_pub_name, _pub_raw, "public")
+FLW_SECRET_KEY = _normalize_key(_sec_name, _sec_raw, "secret")
 FLW_SECRET_HASH = (os.environ.get("FLW_SECRET_HASH") or "").strip()
 FLW_BASE_URL = (os.environ.get("FLW_BASE_URL") or "https://api.flutterwave.com").strip().rstrip("/")
 FLW_CURRENCY = (os.environ.get("FLW_CURRENCY") or "UGX").strip().upper() or "UGX"
