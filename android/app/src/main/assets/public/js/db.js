@@ -1030,10 +1030,14 @@
       }
       return this._paymentConfigCache;
     },
-    async createFlutterwaveSession(orderId, paymentToken) {
+    async createFlutterwaveSession(orderId, paymentToken, customerEmail) {
       const data = await apiRequest("/api/payments/flutterwave/session", {
         method: "POST",
-        body: JSON.stringify({ order_id: String(orderId || ""), payment_token: String(paymentToken || "") })
+        body: JSON.stringify({
+          order_id: String(orderId || ""),
+          payment_token: String(paymentToken || ""),
+          customer_email: String(customerEmail || "").trim()
+        })
       }, false);
       if (!data || !data.tx_ref) throw new Error((data && data.error) || "Could not start the payment session");
       return data;

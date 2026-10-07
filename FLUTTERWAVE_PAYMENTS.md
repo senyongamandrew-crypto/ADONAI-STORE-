@@ -14,14 +14,15 @@ Shopper cart → [Pay now | Pay on delivery] toggle
                      │
         Pay now (Flutterwave)
                      │
-1. Order created     → pieces reserved server-side, status "Awaiting payment"
-2. Popup opens       → shopper approves MTN MoMo / Airtel / card
-3. Server verifies   → transaction re-checked with your SECRET key
+1. Shopper enters email → required by Flutterwave for checkout receipts
+2. Order created        → pieces reserved server-side, status "Awaiting payment"
+3. Checkout opens       → shopper approves MTN MoMo / Airtel / card
+4. Server verifies      → transaction re-checked with your SECRET key
    (browser response is never trusted on its own)
-4. Order marked PAID → POS/admin get a 💳 "Paid online" notification
-5. Webhook backup    → Flutterwave also calls your server directly
-                       (settles the order even if the shopper closed the tab)
-6. If unpaid in 30 min → pieces automatically return to the rail, order cancelled
+5. Order marked PAID    → POS/admin get a 💳 "Paid online" notification
+6. Webhook backup       → Flutterwave also calls your server directly
+                         (settles the order even if the shopper closed the tab)
+7. If unpaid in 30 min  → pieces automatically return to the rail, order cancelled
 ```
 
 Key properties:
@@ -34,6 +35,12 @@ Key properties:
   once** (idempotent — safe for retries).
 * Abandoned payments automatically release stock (important for 1-of-1
   thrift pieces) and drop out of the POS fulfillment queue.
+
+Flutterwave securely renders the card and MTN/Airtel mobile-money steps; the
+storefront must not collect or store card numbers itself. A store's separate
+manual merchant-code deposit is not part of the Flutterwave popup. To support
+that, configure the merchant code and add a distinct manual-payment / receipt
+confirmation flow rather than presenting an unverified deposit as paid.
 
 ---
 
@@ -65,9 +72,13 @@ FLW_CURRENCY=UGX                 # charge currency
 FLW_PAYMENT_TTL_MINUTES=30       # how long an unpaid order holds stock
 ```
 
-Redeploy. The storefront now shows **"Pay now — MoMo & Card"** next to
-**"Pay on delivery/pickup"** at checkout. (If the keys are missing, the toggle
-simply doesn't appear and everything keeps working as before.)
+Redeploy. Once both keys are present, the storefront shows **Pay now — Card & MoMo**
+and selects it by default; the customer can still switch to **Pay on
+delivery/pickup**. Pay-now checkout asks for an email address because
+Flutterwave requires it for payment receipts. The email is sent to Flutterwave
+for that checkout session and is not stored on the order. If the keys are
+missing, the storefront clearly explains that online payment is unavailable
+instead of silently hiding the option.
 
 > ⚠️ Never commit `FLW_SECRET_KEY` or `FLW_SECRET_HASH` into git — set them
 > only in the Render dashboard.
@@ -127,7 +138,8 @@ set this on Render.
 
 | Symptom | Fix |
 |---|---|
-| "Pay now" toggle not visible | `FLW_PUBLIC_KEY`/`FLW_SECRET_KEY` not set, or site not redeployed |
+| Online payment unavailable message shown | Add `FLW_PUBLIC_KEY` and `FLW_SECRET_KEY` to the Render service environment, then redeploy |
+| Checkout refuses to continue to Flutterwave | The shopper needs a valid email address; Flutterwave requires one for the payment session |
 | Popup opens, payment succeeds, order stays "Awaiting payment" | Webhook not configured — but the browser verify should still settle it. Check Render logs for `Payment settle refused` (amount/currency mismatch) |
 | Webhook returns 401 | `FLW_SECRET_HASH` in Render ≠ secret hash in the Flutterwave dashboard |
 | Order cancelled & item back on sale | Shopper didn't pay within `FLW_PAYMENT_TTL_MINUTES` — normal behavior |

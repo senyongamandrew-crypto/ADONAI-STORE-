@@ -43,12 +43,15 @@ from models import (
     Product,
     Order,
     OrderItem,
+    PaymentTransaction,
     Category,
     User,
     Inventory,
     StockLot,
     StoreSetting,
+    InventoryAdjustment,
 )
+import payments
 from db_init import (
     PRODUCT_POLICY_CONSTRAINTS,
     _dual_inventory_backfill_statements,
@@ -128,30 +131,28 @@ class TestRenderPostgresHardening(unittest.TestCase):
 
             print(f"✅ PASS: Schema verification & seed complete ({prods_count} products, {cats_count} categories, {users_count} users).")
 
-    def test_02b_postgres_enum_backfill_uses_explicit_casts(self):
-        """Native PostgreSQL enum migrations must not rely on implicit casts."""
+    def test_02b_postgres_enum_backfill_uses_explicit_casts_and_skips_invalid_stock(self):
+        """Native enum repairs must be typed and preserve rows that fail stock policy."""
         statements = _dual_inventory_backfill_statements(
             postgres=True,
-            item_condition_is_enum=True,
             quantity_type_is_enum=True,
         )
-        item_backfill, invalid_quantity_backfill, mismatched_quantity_backfill = statements
+        invalid_quantity_backfill, mismatched_quantity_backfill = statements
 
-        self.assertIn("THEN 'BRAND_NEW'::item_condition_enum", item_backfill)
-        self.assertIn("ELSE 'PRE_LOVED'::item_condition_enum", item_backfill)
-        self.assertIn("item_condition::text NOT IN", item_backfill)
         self.assertIn("SET quantity_type = item_condition::text::quantity_type_enum", invalid_quantity_backfill)
         self.assertIn("SET quantity_type = item_condition::text::quantity_type_enum", mismatched_quantity_backfill)
         self.assertIn("quantity_type::text = 'PRE_LOVED'", mismatched_quantity_backfill)
+        for statement in statements:
+            self.assertIn("in_stock_count IN (0, 1)", statement)
+            self.assertIn("in_stock_count >= 0", statement)
 
         legacy_statements = _dual_inventory_backfill_statements(
             postgres=True,
-            item_condition_is_enum=False,
             quantity_type_is_enum=False,
         )
-        self.assertNotIn("::item_condition_enum", legacy_statements[0])
-        self.assertIn("SET quantity_type = item_condition::text", legacy_statements[1])
-        print("✅ PASS: PostgreSQL enum backfill uses safe, explicit casts.")
+        self.assertIn("SET quantity_type = item_condition::text", legacy_statements[0])
+        self.assertNotIn("::quantity_type_enum", legacy_statements[0])
+        print("✅ PASS: PostgreSQL enum backfills use explicit casts and skip stock-policy violations.")
 
     def test_02c_policy_constraints_are_redeploy_safe(self):
         """Guard constraints must be added by name-check, never by error-swallowing.
@@ -1360,6 +1361,170 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 session.query(Order).filter_by(id=order_id).delete(synchronize_session=False)
 
         print("✅ PASS: Rider assignment is returned on dispatch, preserved in order sync, and retained after completion.")
+
+    def test_21_flutterwave_session_requires_customer_email(self):
+        """Checkout sessions provide Flutterwave's required customer email without persisting it."""
+        suffix = uuid.uuid4().hex[:10].upper()
+        order_id = f"AT-FLW-SESSION-{suffix}"
+        token = payments.new_payment_token()
+        old_config = (payments.FLW_PUBLIC_KEY, payments.FLW_SECRET_KEY, payments.MOCK_MODE)
+        try:
+            # Exercise session creation without a real gateway call or real keys.
+            payments.FLW_PUBLIC_KEY = ""
+            payments.FLW_SECRET_KEY = ""
+            payments.MOCK_MODE = True
+            with get_db() as session:
+                session.add(Order(
+                    id=order_id,
+                    channel="web",
+                    status="unfulfilled",
+                    customer_name="Flutterwave Checkout Test",
+                    customer_phone="+256700000002",
+                    delivery_type="pickup",
+                    subtotal=12500,
+                    total=12500,
+                    tender_type="flutterwave",
+                    payment_status="pending",
+                    payment_provider="flutterwave",
+                    payment_token_hash=payments.hash_payment_token(token),
+                    payment_expires_at=datetime.utcnow() + timedelta(minutes=30),
+                    created_at=datetime.utcnow(),
+                ))
+
+            status, missing_email = self.api_request(
+                "POST", "/api/payments/flutterwave/session",
+                {"order_id": order_id, "payment_token": token},
+            )
+            self.assertTrue(status.startswith("400"), missing_email)
+
+            status, invalid_email = self.api_request(
+                "POST", "/api/payments/flutterwave/session",
+                {"order_id": order_id, "payment_token": token, "customer_email": "not-an-email"},
+            )
+            self.assertTrue(status.startswith("400"), invalid_email)
+
+            status, checkout = self.api_request(
+                "POST", "/api/payments/flutterwave/session",
+                {"order_id": order_id, "payment_token": token, "customer_email": "Shopper@example.com"},
+            )
+            self.assertTrue(status.startswith("200"), checkout)
+            self.assertEqual(checkout["customer"]["email"], "shopper@example.com")
+            self.assertEqual(checkout["customer"]["phone"], "+256700000002")
+            self.assertNotIn("secret", json.dumps(checkout).lower())
+            with get_db() as session:
+                order = session.query(Order).filter_by(id=order_id).first()
+                self.assertIsNotNone(order)
+                self.assertIsNone(getattr(order, "customer_email", None))
+        finally:
+            payments.FLW_PUBLIC_KEY, payments.FLW_SECRET_KEY, payments.MOCK_MODE = old_config
+            with get_db() as session:
+                session.query(PaymentTransaction).filter_by(order_id=order_id).delete(synchronize_session=False)
+                session.query(Order).filter_by(id=order_id).delete(synchronize_session=False)
+        print("✅ PASS: Flutterwave session requires and passes the customer's email only to checkout.")
+
+    def test_22_startup_skips_legacy_stock_policy_violations_without_changing_quantities(self):
+        """Every startup product backfill skips invalid legacy rows without mutating their stock."""
+        suffix = uuid.uuid4().hex[:10].upper()
+        pre_loved_id = f"PRD-POLICY-USED-{suffix}"
+        brand_new_id = f"PRD-POLICY-NEW-{suffix}"
+        trigger_name = f"reject_policy_violation_{suffix.lower()}"
+        try:
+            with get_db() as session:
+                session.add_all([
+                    Product(
+                        id=pre_loved_id,
+                        sku=f"SKU-USED-{suffix}",
+                        barcode_id=f"BAR-USED-{suffix}",
+                        name="Legacy multi-quantity pre-loved item",
+                        demographic="Unisex",
+                        category="Tops & Shirts",
+                        item_condition=ItemCondition.PRE_LOVED,
+                        quantity_type=QuantityType.PRE_LOVED,
+                        condition="Grade A — Excellent",
+                        base_price=0,
+                        total_transport_cost=0,
+                        selling_price=25000,
+                        cost_price=10000,
+                        in_stock_count=3,
+                        inventory_status="OUT_OF_STOCK",
+                        slug=None,
+                    ),
+                    Product(
+                        id=brand_new_id,
+                        sku=f"SKU-NEW-{suffix}",
+                        barcode_id=f"BAR-NEW-{suffix}",
+                        name="Legacy negative-count factory item",
+                        demographic="Unisex",
+                        category="Tops & Shirts",
+                        item_condition=ItemCondition.BRAND_NEW,
+                        quantity_type=QuantityType.PRE_LOVED,
+                        condition="Factory Fresh",
+                        base_price=0,
+                        total_transport_cost=0,
+                        selling_price=32000,
+                        cost_price=18000,
+                        in_stock_count=-2,
+                        inventory_status="AVAILABLE",
+                        slug=None,
+                    ),
+                ])
+
+            # SQLite cannot add a NOT VALID CHECK to a populated table. This
+            # trigger reproduces PostgreSQL's behavior: any UPDATE that leaves
+            # an invalid stock-policy row raises ck_products_stock_policy.
+            with engine.begin() as connection:
+                connection.exec_driver_sql(f"""
+                    CREATE TRIGGER {trigger_name}
+                    BEFORE UPDATE ON products
+                    WHEN NOT (
+                        (NEW.item_condition = 'PRE_LOVED' AND NEW.in_stock_count IN (0, 1))
+                        OR (NEW.item_condition = 'BRAND_NEW' AND NEW.in_stock_count >= 0)
+                    )
+                    BEGIN
+                        SELECT RAISE(ABORT, 'ck_products_stock_policy');
+                    END
+                """)
+
+            with self.assertLogs("adonai.db_init", level="WARNING") as captured:
+                self.assertTrue(init_db(), "Startup must succeed with legacy invalid-stock rows present")
+            startup_logs = "\n".join(captured.output)
+            self.assertIn(pre_loved_id, startup_logs)
+            self.assertIn(brand_new_id, startup_logs)
+            self.assertIn("Skipped permalink backfill", startup_logs)
+            self.assertNotIn("Migration step skipped after error", startup_logs)
+            self.assertNotIn("Database Initialization Error", startup_logs)
+
+            with get_db() as session:
+                pre_loved = session.query(Product).filter_by(id=pre_loved_id).one()
+                brand_new = session.query(Product).filter_by(id=brand_new_id).one()
+                self.assertEqual(pre_loved.in_stock_count, 3)
+                self.assertEqual(brand_new.in_stock_count, -2)
+                self.assertEqual(pre_loved.inventory_status, "OUT_OF_STOCK")
+                self.assertEqual(brand_new.inventory_status, "AVAILABLE")
+                self.assertIsNone(pre_loved.slug)
+                self.assertIsNone(brand_new.slug)
+                self.assertEqual(float(pre_loved.base_price), 0)
+                self.assertEqual(float(brand_new.base_price), 0)
+                self.assertEqual(brand_new.quantity_type, QuantityType.PRE_LOVED)
+                self.assertEqual(
+                    session.query(InventoryAdjustment).filter(
+                        InventoryAdjustment.product_id.in_([pre_loved_id, brand_new_id]),
+                        InventoryAdjustment.adjustment_type == "POLICY_RECONCILE",
+                    ).count(),
+                    0,
+                    "Startup must not create stock adjustment records for invalid rows",
+                )
+        finally:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(f"DROP TRIGGER IF EXISTS {trigger_name}")
+            with get_db() as session:
+                session.query(InventoryAdjustment).filter(
+                    InventoryAdjustment.product_id.in_([pre_loved_id, brand_new_id])
+                ).delete(synchronize_session=False)
+                session.query(Product).filter(
+                    Product.id.in_([pre_loved_id, brand_new_id])
+                ).delete(synchronize_session=False)
+        print("✅ PASS: Startup skips invalid stock rows and preserves quantities, statuses, prices, and slugs.")
 
 
 if __name__ == "__main__":

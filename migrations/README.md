@@ -4,6 +4,8 @@
 
 Run `20261003_dual_inventory.sql` after the financial and transport migrations. It creates the native `item_condition_enum` and `quantity_type_enum` values (`BRAND_NEW` and `PRE_LOVED`), adds variant/specification fields, snapshots the policy on order items, and installs database enforcement plus `pg_notify('adonai_inventory', ...)` triggers. `PRE_LOVED` rows are constrained to quantity 1 (or 0 after sale); `BRAND_NEW` rows support multi-quantity stock. The API and browser/POS polling layer consume the same authoritative stock and expiring cart/POS reservations.
 
+On application startup, `db_init.py` preserves legacy inventory quantities. Rows that violate the dual-inventory checks are logged and skipped by routine product updates, including inventory-status, price, and permalink backfills, so a PostgreSQL `NOT VALID` check cannot block unrelated startup work. Reconcile a flagged row only after physically verifying its stock; startup does not clamp quantities or create adjustment records.
+
 ```sh
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20261003_dual_inventory.sql
 ```

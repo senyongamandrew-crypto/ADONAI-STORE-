@@ -36,17 +36,32 @@ ALTER TABLE order_items
 -- BRAND_NEW when the caller does not send the new discriminator.
 UPDATE products
 SET item_condition = CASE
-  WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
-    OR lower(coalesce(condition, '')) LIKE '%factory%'
-  THEN 'BRAND_NEW'::item_condition_enum
-  ELSE 'PRE_LOVED'::item_condition_enum
-END
-WHERE item_condition = 'PRE_LOVED'::item_condition_enum;
+      WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
+        OR lower(coalesce(condition, '')) LIKE '%factory%'
+      THEN 'BRAND_NEW'::item_condition_enum
+      ELSE 'PRE_LOVED'::item_condition_enum
+    END,
+    quantity_type = CASE
+      WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
+        OR lower(coalesce(condition, '')) LIKE '%factory%'
+      THEN 'BRAND_NEW'::quantity_type_enum
+      ELSE 'PRE_LOVED'::quantity_type_enum
+    END
+WHERE item_condition = 'PRE_LOVED'::item_condition_enum
+  -- Preserve legacy stock and do not touch rows that the stock policy would
+  -- reject. Existing NOT VALID checks are enforced on every updated row.
+  AND in_stock_count IN (0, 1);
 
 -- item_condition_enum and quantity_type_enum are separate PostgreSQL enum
 -- types. Cast through text rather than relying on a non-existent implicit enum
--- to enum conversion.
-UPDATE products SET quantity_type = item_condition::text::quantity_type_enum;
+-- to enum conversion. Skip legacy stock-policy violations: NOT VALID checks
+-- are still enforced on rows touched by this UPDATE.
+UPDATE products
+SET quantity_type = item_condition::text::quantity_type_enum
+WHERE (
+  (item_condition = 'PRE_LOVED'::item_condition_enum AND in_stock_count IN (0, 1))
+  OR (item_condition = 'BRAND_NEW'::item_condition_enum AND in_stock_count >= 0)
+);
 UPDATE order_items oi
 SET item_condition = p.item_condition::text,
     quantity_type = p.quantity_type::text

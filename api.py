@@ -1647,6 +1647,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         "ok": False, "error": "Too many payment attempts. Please wait a moment.",
                         "retry_after_seconds": retry_after,
                     }, status=429)
+            # Flutterwave Inline requires a customer email for its payment
+            # receipt and card/mobile-money checkout. Accept it for this
+            # payment session only; we do not persist it on the order row.
+            customer_email = clean_text(body.get("customer_email"), 254).lower()
+            if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", customer_email):
+                return json_response({"ok": False, "error": "Enter a valid email address to continue to Flutterwave checkout"}, status=400)
             now = datetime.utcnow()
             with get_db() as session:
                 order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
@@ -1692,7 +1698,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "customer": {
                         "name": order.customer_name or "Online Shopper",
                         "phone": order.customer_phone or "",
-                        "email": "",
+                        "email": customer_email,
                     },
                     "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
                 })
