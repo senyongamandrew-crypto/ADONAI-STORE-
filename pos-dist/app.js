@@ -377,6 +377,14 @@
     return aliases[key] || raw;
   };
   const fulfillmentStage = s => normalizeFulfillmentStage(s && (s.dispatch_status || (s.channel === "web" ? "Unfulfilled" : "Completed")));
+  const assignedRiderId = s => {
+    const rider = s && s.rider && typeof s.rider === "object" ? s.rider : {};
+    return String(s && (s.assigned_rider_id || s.rider_id || rider.id) || "");
+  };
+  const assignedRiderName = s => {
+    const rider = s && s.rider && typeof s.rider === "object" ? s.rider : {};
+    return String(s && (s.assigned_rider_name || s.rider_name || rider.name) || "");
+  };
   const statusChip = s => laneChip(fulfillmentStage(s));
   const laneChip = d => {
     const map = {
@@ -501,7 +509,7 @@
 
     /* ---- boda pool ---- */
     $("#riderPool").innerHTML = DB.listRiders().slice(0, 3).map(r => {
-      const active = allSales().filter(s => s.assigned_rider_id === r.id && s.dispatch_status === "With rider").length;
+      const active = allSales().filter(s => assignedRiderId(s) === String(r.id) && fulfillmentStage(s) === "Dispatched").length;
       return `
       <div class="ch-row">
         <div class="rider-mini">
@@ -1056,7 +1064,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         ${laneChip(fulfillmentStage(s))}
         <span class="stat-chip ${paid ? 'ok' : 'pend'}">${paid ? 'PAID' : 'UNPAID'}</span>
         <span class="stat-chip ${s.channel === 'web' ? 'web' : 'pos'}">${s.channel === 'web' ? 'Web Store' : 'Register'}</span>
-        ${s.assigned_rider_name ? `<span class="stat-chip blue">Rider: ${esc(s.assigned_rider_name)}</span>` : ''}
+        ${assignedRiderName(s) ? `<span class="stat-chip blue">Rider: ${esc(assignedRiderName(s))}</span>` : ''}
       </div>
 
       <div class="odm-section">
@@ -1120,7 +1128,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
           <label>ASSIGN DELIVERY PARTNER</label>
           <select id="modalRiderSel" class="sel-full">
             ${riders.map(r => `
-              <option value="${r.id}" ${s.assigned_rider_id === r.id ? "selected" : ""}>
+              <option value="${r.id}" ${assignedRiderId(s) === String(r.id) ? "selected" : ""}>
                 ${esc(r.name)} (${esc(r.zone)}) · ${esc(r.status.toUpperCase())}
               </option>
             `).join("")}
@@ -1843,8 +1851,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function renderRiders() {
     const all = allSales();
     $("#riderList").innerHTML = DB.listRiders().map(r => {
-      const active = all.filter(s => s.assigned_rider_id === r.id && s.dispatch_status === "With rider").length;
-      const delivered = all.filter(s => s.assigned_rider_id === r.id && s.dispatch_status === "Delivered").length;
+      const active = all.filter(s => assignedRiderId(s) === String(r.id) && fulfillmentStage(s) === "Dispatched").length;
+      const delivered = all.filter(s => assignedRiderId(s) === String(r.id) && fulfillmentStage(s) === "Completed").length;
       return `
       <div class="rider-card">
         <div class="rc-top">
@@ -2780,9 +2788,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         else                                 p.badge = { tone: "gray",  text: "Off Duty" };
       } else if (s.role === "rider") {
         const rc = riders.find(r => r.name === s.name || (r.phone && s.phone && r.phone === s.phone));
-        const riderOrders = sales.filter(x => (x.assigned_rider_name || x.rider_name) === s.name);
-        const delivering = riderOrders.find(x => x.dispatch_status === "Out for Delivery" || x.dispatch_status === "Packed");
-        const dropsReal = riderOrders.filter(x => x.dispatch_status === "Delivered").length;
+        const riderOrders = sales.filter(x => assignedRiderName(x) === s.name);
+        const delivering = riderOrders.find(x => fulfillmentStage(x) === "Dispatched");
+        const dropsReal = riderOrders.filter(x => fulfillmentStage(x) === "Completed").length;
         const target = 20;
         const done = dropsReal > 0 ? dropsReal : 6 + (h % 13);
         p.pct = Math.min(100, Math.round((done / target) * 100));
@@ -2969,7 +2977,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         const items = (x.items || []).reduce((a, i) => a + (i.qty || 1), 0);
         events.push({ at: x.created_at, ico: Icons.svg("receipt", "ico-14"), text: `Sale ${x.id} — ${items} item${items === 1 ? "" : "s"} · ${x.channel === "web" ? "Web order" : "POS register"}`, amt: ugx(x.total || 0) });
       }
-      if ((x.assigned_rider_name || x.rider_name) === s.name) {
+      if (assignedRiderName(x) === s.name) {
         events.push({ at: x.updated_at || x.created_at, ico: Icons.svg("bike", "ico-14"), text: `${x.dispatch_status || "Dispatch"} — Order ${x.id}${x.customer_location ? ` (${x.customer_location})` : ""}`, amt: ugx(x.total || 0) });
       }
     });

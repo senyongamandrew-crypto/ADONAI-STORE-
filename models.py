@@ -441,10 +441,16 @@ class Order(Base):
                 "id": self.cashier_id,
                 "name": self.cashier_name
             } if self.cashier_id or self.cashier_name else None,
+            # Keep the structured rider object for API clients while exposing
+            # the flat aliases consumed by the operations console. Without
+            # these aliases, dispatch succeeded on the server but the assigned
+            # rider disappeared when the order was reloaded.
             "rider": {
                 "id": self.rider_id,
                 "name": self.rider_name
             } if self.rider_id or self.rider_name else None,
+            "assigned_rider_id": self.rider_id or None,
+            "assigned_rider_name": self.rider_name or None,
             "items": [it.to_dict() for it in self.items],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
