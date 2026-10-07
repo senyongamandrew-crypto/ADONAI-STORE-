@@ -20,7 +20,6 @@ import urllib.parse
 
 # Setup Database and Auto-Migrations
 import notifications
-from api import handle_api_request
 from database import DATABASE_URL, IS_POSTGRES, mask_database_url, verify_database_connection
 from db_init import init_db
 
@@ -538,6 +537,10 @@ def wsgi_app(environ, start_response):
             elif k in ("CONTENT_TYPE", "CONTENT_LENGTH"):
                 headers_dict[k.replace("_", "-").lower()] = v
 
+        # Import the API router only when an API request is dispatched. This
+        # keeps the server module safe to import while api.py is initializing.
+        from api import handle_api_request
+
         status_code, content_type, response_body = handle_api_request(
             method, raw_path, query_params, body_bytes, headers=headers_dict,
             client_addr=environ.get("REMOTE_ADDR", "")
@@ -726,6 +729,9 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
                 body_bytes = b""
 
             headers_dict = {k.lower(): v for k, v in self.headers.items()}
+            # Keep the API dependency lazy here too, matching the WSGI path.
+            from api import handle_api_request
+
             status_code, content_type, response_body = handle_api_request(
                 self.command, path, query_params, body_bytes, headers=headers_dict,
                 client_addr=(self.client_address[0] if self.client_address else "")
