@@ -476,7 +476,7 @@ body.pdp-lightbox-open { overflow: hidden; }
 }
 .plb-stage {
   margin: 0; max-height: 86vh; display: grid; place-items: center;
-  overflow: auto; cursor: zoom-in;
+  overflow: auto; overscroll-behavior: contain; cursor: zoom-in;
 }
 .plb-stage.zoomed { cursor: zoom-out; }
 .plb-stage picture, .plb-stage img {

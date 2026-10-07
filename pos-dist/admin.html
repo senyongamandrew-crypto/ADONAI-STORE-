@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.2" />
+<link rel="stylesheet" href="styles.css?v=7.3" />
 <link rel="stylesheet" href="css/notifications.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
@@ -158,16 +158,56 @@
 
     <!-- ==================== FULFILLMENT & ORDERS ==================== -->
     <section class="view" id="view-sales">
-      <div class="page-head">
-        <p class="kicker">REAL-TIME ORDER &amp; DISPATCH PIPELINE</p>
-        <h1>Order Fulfillment</h1>
-        <p class="muted" id="pendingLine"></p>
+      <div class="orders-page-head">
+        <div class="orders-heading-copy">
+          <p class="kicker">REAL-TIME ORDER &amp; DISPATCH PIPELINE</p>
+          <h1>Orders &amp; Fulfillment</h1>
+          <p class="muted" id="pendingLine"></p>
+        </div>
+        <div class="orders-head-tools">
+          <div class="orders-sync-state" id="ordersSyncState" data-state="checking" role="status" aria-live="polite">
+            <span class="orders-sync-dot" aria-hidden="true"></span>
+            <span class="orders-sync-label">Connecting to live orders…</span>
+          </div>
+          <button class="btn orders-refresh-btn" id="btnRefreshOrders" type="button">
+            <i data-icon="refresh-cw" data-size="15"></i><span>Refresh</span>
+          </button>
+        </div>
       </div>
-      <div class="fulfillment-filter-bar">
-        <input class="search-wide" id="orderSearch" type="search" placeholder="Search order ref, customer, phone" />
-        <div class="dpills" id="payFilterPills"></div>
+
+      <div class="orders-summary-grid" id="orderSummaryStats" aria-label="Order queue summary"></div>
+
+      <div class="orders-filter-panel">
+        <div class="orders-toolbar">
+          <label class="order-search-field">
+            <i data-icon="search" data-size="16"></i>
+            <span class="sr-only">Search orders</span>
+            <input id="orderSearch" type="search" placeholder="Search order, customer, item or phone" autocomplete="off" />
+          </label>
+          <label class="order-select-field">
+            <span class="sr-only">Sort orders</span>
+            <select id="orderSort" aria-label="Sort orders">
+              <option value="oldest">Oldest first · priority</option>
+              <option value="newest">Newest first</option>
+              <option value="value">Highest value</option>
+            </select>
+          </label>
+          <label class="order-select-field order-channel-field">
+            <span class="sr-only">Filter by sales channel</span>
+            <select id="orderChannelFilter" aria-label="Filter by sales channel">
+              <option value="all">All channels</option>
+              <option value="web">Web store</option>
+              <option value="pos">POS register</option>
+            </select>
+          </label>
+        </div>
+        <div class="orders-payment-filter">
+          <span class="orders-filter-label">Payment</span>
+          <div class="dpills" id="payFilterPills" role="group" aria-label="Filter orders by payment status"></div>
+        </div>
       </div>
-      <div class="lane-tabs" id="laneTabs"></div>
+
+      <div class="lane-tabs" id="laneTabs" role="group" aria-label="Order workflow stage filters"></div>
       <div id="lanePanel"></div>
     </section>
 
@@ -633,10 +673,10 @@
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
 <script src="js/notifications.js?v=1.0"></script>
-<script src="js/icons.js?v=1.0"></script>
-<script src="js/db.js?v=3.8"></script>
+<script src="js/icons.js?v=1.1"></script>
+<script src="js/db.js?v=3.9"></script>
 <script src="js/auth.js?v=2.7"></script>
 <script src="js/intake.js?v=5.0"></script>
-<script src="app.js?v=6.3"></script>
+<script src="app.js?v=6.4"></script>
 </body>
 </html>

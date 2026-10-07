@@ -90,7 +90,7 @@
           <input id="mkInput" type="password" class="sel-full" placeholder="Enter master key password…" autocomplete="off" />
           <button class="btn sm ghost" id="mkShow" type="button">Show</button>
         </div>
-        <p class="muted small" style="margin-top:6px">The master key is configured by the store owner in System Parameters.</p>
+        <p class="muted small" style="margin-top:6px">Verified by the server. Production uses the Render STORE_MASTER_KEY environment variable as the preferred store passkey.</p>
       </div>
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
@@ -362,19 +362,32 @@
     if (s < 9 * 86400) return Math.floor(s / 86400) + "d ago";
     return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   }
-  const fulfillmentStage = s => s.dispatch_status || (s.channel === "web" ? "Unfulfilled" : "Completed");
+  const normalizeFulfillmentStage = value => {
+    const raw = String(value || "").trim();
+    const key = raw.toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+    const aliases = {
+      "pending": "Unfulfilled", "incoming": "Unfulfilled", "received": "Unfulfilled", "new": "Unfulfilled", "new order": "Unfulfilled", "unfulfilled": "Unfulfilled",
+      "needs review": "Unfulfilled", "awaiting review": "Unfulfilled", "waiting review": "Unfulfilled", "waiting for review": "Unfulfilled", "received and waiting for review": "Unfulfilled", "awaiting fulfillment": "Unfulfilled", "awaiting processing": "Unfulfilled",
+      "assembly": "In Assembly", "assembling": "In Assembly", "in assembly": "In Assembly", "in progress": "In Assembly", "processing": "In Assembly", "packing": "In Assembly", "packed": "In Assembly",
+      "ready": "Ready for Pickup", "ready for pickup": "Ready for Pickup", "ready for dispatch": "Dispatched", "ready to dispatch": "Dispatched",
+      "with rider": "Dispatched", "handed over": "Dispatched", "out for delivery": "Dispatched", "dispatched": "Dispatched",
+      "delivered": "Completed", "complete": "Completed", "completed": "Completed",
+      "canceled": "Cancelled", "cancelled": "Cancelled", "void": "Cancelled"
+    };
+    return aliases[key] || raw;
+  };
+  const fulfillmentStage = s => normalizeFulfillmentStage(s && (s.dispatch_status || (s.channel === "web" ? "Unfulfilled" : "Completed")));
   const statusChip = s => laneChip(fulfillmentStage(s));
   const laneChip = d => {
     const map = {
-      "Unfulfilled": ["pend", "UNFULFILLED"], "Pending": ["pend", "UNFULFILLED"],
-      "In Assembly": ["blue", "IN ASSEMBLY"], "Ready for Pickup": ["amber", "READY FOR PICKUP"],
-      "Dispatched": ["blue", "DISPATCHED"], "Completed": ["ok", "COMPLETED"],
-      "Cancelled": ["bad", "CANCELLED"]
+      "Unfulfilled": ["pend", "NEEDS REVIEW"], "In Assembly": ["blue", "IN ASSEMBLY"],
+      "Ready for Pickup": ["amber", "READY FOR PICKUP"], "Dispatched": ["blue", "DISPATCHED"],
+      "Completed": ["ok", "COMPLETED"], "Cancelled": ["bad", "CANCELLED"]
     };
-    const [cls, txt] = map[d || "Unfulfilled"] || ["pend", String(d || "Unfulfilled").toUpperCase()];
-    return `<span class="stat-chip ${cls}">${txt}</span>`;
+    const [cls, txt] = map[normalizeFulfillmentStage(d) || "Unfulfilled"] || ["mut", String(d || "Unknown").toUpperCase()];
+    return `<span class="stat-chip ${cls}">${esc(txt)}</span>`;
   };
-  const isOpenWebOrder = s => s.channel === "web" && !["completed", "cancelled"].includes(String(s.status || "").toLowerCase());
+  const isOpenWebOrder = s => s.channel === "web" && !["completed", "cancelled", "canceled", "void"].includes(String(s.status || "").toLowerCase());
   /* KPI stat card — icon chip + accent tone + fluid responsive grid */
   function kpiCard(label, value, sub, tone, icon) {
     return `<div class="kpi-card kpi-${tone || "rust"}">
@@ -518,118 +531,341 @@
   }
 
   /* ============================================================
-     FULFILLMENT & ORDERS (pipeline lanes)
+     FULFILLMENT & ORDERS — mobile-first operations workbench
      ============================================================ */
   const LANES = [
-    { key: "incoming", title: "Unfulfilled", sub: "New web orders awaiting processing" },
-    { key: "fulfillment", title: "In Assembly", sub: "Items being picked and packed" },
-    { key: "ready", title: "Ready / Dispatched", sub: "Ready for pickup or on the way" },
-    { key: "completed", title: "Completed", sub: "Fulfilled and closed" }
+    { key: "active", title: "Open orders", sub: "All orders that still need a staff action" },
+    { key: "incoming", title: "Needs review", sub: "New orders waiting for a first check" },
+    { key: "fulfillment", title: "In assembly", sub: "Items being picked, verified, and packed" },
+    { key: "ready", title: "Ready / dispatched", sub: "Ready for pickup or already with a rider" },
+    { key: "completed", title: "Completed", sub: "Fulfilled and closed orders" },
+    { key: "cancelled", title: "Cancelled", sub: "Cancelled orders and released stock" }
   ];
   let activeLane = "incoming";
   let orderTerm = "";
   let payFilter = "all"; // 'all' | 'paid' | 'unpaid'
+  let channelFilter = "all";
+  let orderSort = "oldest";
 
   function isSalePaid(s) {
-    if (!s || !s.tender) return false;
-    if (s.tender.paid === true) return true;
-    if (s.tender.paid === false) return false;
-    if (s.channel === "pos" && s.status === "completed") return true;
-    if (s.tender.type === "cash" || s.tender.type === "mtn" || s.tender.type === "airtel") return true;
+    if (!s) return false;
+    const remotePayment = String(s.payment && s.payment.status || "").toLowerCase();
+    if (["paid", "successful", "succeeded"].includes(remotePayment)) return true;
+    if (["unpaid", "pending", "failed", "expired", "cancelled"].includes(remotePayment)) return false;
+    if (s.tender && s.tender.paid === true) return true;
+    if (s.tender && s.tender.paid === false) return false;
+    if (s.channel === "pos" && String(s.status || "").toLowerCase() === "completed") return true;
+    // Older register records pre-date the explicit payment object. A tender
+    // type alone is not proof that a web customer has paid.
+    if (s.channel !== "web" && s.tender && ["cash", "mtn", "airtel"].includes(String(s.tender.type || "").toLowerCase())) return true;
     return false;
   }
 
-  $("#orderSearch").addEventListener("input", e => { orderTerm = e.target.value.trim().toLowerCase(); renderSales(); });
+  function paymentState(s) {
+    const remotePayment = String(s && s.payment && s.payment.status || "").toLowerCase();
+    if (["pending", "processing"].includes(remotePayment)) return "pending";
+    if (["failed", "expired"].includes(remotePayment)) return "failed";
+    return isSalePaid(s) ? "paid" : "unpaid";
+  }
+
+  function isOrderInLane(s, laneKey) {
+    const lane = DB.laneOf(s);
+    if (laneKey === "active") return ["incoming", "fulfillment", "ready"].includes(lane);
+    return lane === laneKey;
+  }
+
+  function stageOrders(rows, stage) {
+    return rows.filter(s => DB.laneOf(s) === stage);
+  }
+
+  function orderSearchText(s) {
+    const itemText = (Array.isArray(s.items) ? s.items : []).map(i => [i.name, i.sku, i.barcode_id].join(" ")).join(" ");
+    return [s.id, s.customer_name, s.customer_phone, s.customer_address, s.delivery_area, s.delivery_type, s.channel, itemText]
+      .map(x => String(x || "").toLowerCase()).join(" ");
+  }
+
+  function orderActionFor(s) {
+    const stage = fulfillmentStage(s);
+    if (stage === "Unfulfilled") return { next: "In Assembly", label: "Start assembly", icon: "package" };
+    if (stage === "In Assembly") {
+      const pickup = String(s.delivery_type || "").toLowerCase() === "pickup";
+      return { next: pickup ? "Ready for Pickup" : "Dispatched", label: pickup ? "Mark ready for pickup" : "Mark dispatched", icon: pickup ? "check-circle" : "truck" };
+    }
+    if (stage === "Ready for Pickup" || stage === "Dispatched") return { next: "Completed", label: "Complete order", icon: "check-circle" };
+    return null;
+  }
+
+  function laneRevenue(rows) {
+    return rows.reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+  }
+
+  function renderOrderSyncState() {
+    const host = $("#ordersSyncState");
+    if (!host) return;
+    const sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+    if (!sync || sync.online === null) {
+      host.dataset.state = "checking";
+      host.querySelector(".orders-sync-label").textContent = "Connecting to live orders…";
+      return;
+    }
+    if (sync.online) {
+      host.dataset.state = "live";
+      const elapsed = sync.last_synced_at ? ago(sync.last_synced_at) : "just now";
+      host.querySelector(".orders-sync-label").textContent = `Live · updated ${elapsed}`;
+      return;
+    }
+    host.dataset.state = "offline";
+    const status = Number(sync.status) || 0;
+    host.querySelector(".orders-sync-label").textContent = status === 401 || status === 403
+      ? "Staff session needs attention · tap refresh"
+      : "Connection issue · showing last saved orders";
+  }
 
   function renderSales() {
     const sales = allSales();
     const webPend = sales.filter(isOpenWebOrder);
-    $("#pendingLine").textContent = `${webPend.length} pending online orders in UGX. Automatic background polling active (every 5s).`;
-    $("#navWebBadge").textContent = webPend.length || "";
+    const openOrders = sales.filter(s => ["incoming", "fulfillment", "ready"].includes(DB.laneOf(s)));
+    const needsReview = stageOrders(sales, "incoming");
+    const inAssembly = stageOrders(sales, "fulfillment");
+    const readyOrders = stageOrders(sales, "ready");
+    const unpaidOpen = openOrders.filter(s => !isSalePaid(s));
+    const outstanding = laneRevenue(unpaidOpen);
+    const openOnlineValue = laneRevenue(webPend);
 
-    // Payment Filter Pills (All / Paid / Unpaid)
-    const pPills = $("#payFilterPills");
-    if (pPills) {
-      const paidCount = sales.filter(isSalePaid).length;
-      const unpaidCount = sales.filter(s => !isSalePaid(s)).length;
-      pPills.innerHTML = [
-        { key: "all", label: `All Orders (${sales.length})` },
-        { key: "paid", label: `Paid (${paidCount})` },
-        { key: "unpaid", label: `Unpaid (${unpaidCount})` }
-      ].map(p => `<button class="dpill ${p.key === payFilter ? 'active' : ''}" data-pay-filter="${p.key}">${p.label}</button>`).join("");
-      $$("#payFilterPills .dpill").forEach(b => b.addEventListener("click", () => {
-        payFilter = b.dataset.payFilter;
-        renderSales();
-      }));
-    }
+    $("#pendingLine").textContent = `${webPend.length} open web order${webPend.length === 1 ? "" : "s"} · ${ugx(openOnlineValue)} in the queue · auto-sync every 2 seconds.`;
+    $("#navWebBadge").textContent = webPend.length || "";
+    renderOrderSyncState();
+
+    const stats = [
+      { lane: "incoming", label: "Needs review", count: needsReview.length, total: laneRevenue(needsReview), hint: "Oldest orders first", icon: "inbox", tone: "review" },
+      { lane: "fulfillment", label: "In assembly", count: inAssembly.length, total: laneRevenue(inAssembly), hint: "Currently being picked", icon: "package", tone: "assembly" },
+      { lane: "ready", label: "Ready / dispatched", count: readyOrders.length, total: laneRevenue(readyOrders), hint: "Next: pickup or handoff", icon: "truck", tone: "ready" },
+      { lane: "active", payment: "unpaid", label: "Unpaid in open queue", count: unpaidOpen.length, total: outstanding, hint: "Payment not recorded", icon: "banknote", tone: "unpaid" }
+    ];
+    $("#orderSummaryStats").innerHTML = stats.map(stat => `
+      <button type="button" class="order-stat-card tone-${stat.tone}" data-select-lane="${stat.lane}" ${stat.payment ? `data-select-payment="${stat.payment}"` : ""} aria-pressed="${activeLane === stat.lane && (!stat.payment || payFilter === stat.payment)}">
+        <span class="order-stat-icon">${Icons.svg(stat.icon, "ico-18")}</span>
+        <span class="order-stat-copy"><span class="order-stat-label">${stat.label}</span><strong>${stat.count}</strong><span class="order-stat-hint">${stat.hint}</span></span>
+        <span class="order-stat-value">${ugx(stat.total)}</span>
+      </button>`).join("");
+
+    const paidCount = sales.filter(isSalePaid).length;
+    const unpaidCount = sales.length - paidCount;
+    const paymentRail = $("#payFilterPills");
+    const paymentScrollLeft = paymentRail.scrollLeft;
+    paymentRail.innerHTML = [
+      { key: "all", label: `All (${sales.length})` },
+      { key: "paid", label: `Paid (${paidCount})` },
+      { key: "unpaid", label: `Unpaid (${unpaidCount})` }
+    ].map(p => `<button type="button" class="dpill ${p.key === payFilter ? "active" : ""}" data-pay-filter="${p.key}" aria-pressed="${p.key === payFilter}">${p.label}</button>`).join("");
+    paymentRail.scrollLeft = paymentScrollLeft;
 
     const filtered = sales.filter(s => {
-      const matchSearch = !orderTerm || [s.id, s.customer_name, s.customer_phone].some(x => String(x || "").toLowerCase().includes(orderTerm));
-      if (!matchSearch) return false;
-      if (payFilter === "paid") return isSalePaid(s);
-      if (payFilter === "unpaid") return !isSalePaid(s);
+      if (orderTerm && !orderSearchText(s).includes(orderTerm)) return false;
+      if (channelFilter !== "all" && s.channel !== channelFilter) return false;
+      const state = paymentState(s);
+      if (payFilter === "paid" && state !== "paid") return false;
+      if (payFilter === "unpaid" && state === "paid") return false;
       return true;
     });
+    const createdAt = s => {
+      const time = Date.parse(s.created_at || "");
+      return Number.isFinite(time) ? time : 0;
+    };
+    filtered.sort((a, b) => {
+      if (orderSort === "value") return (Number(b.total) || 0) - (Number(a.total) || 0) || createdAt(a) - createdAt(b);
+      return orderSort === "newest" ? createdAt(b) - createdAt(a) : createdAt(a) - createdAt(b);
+    });
 
-    $("#laneTabs").innerHTML = LANES.map(l => {
-      const n = filtered.filter(s => DB.laneOf(s) === l.key).length;
-      return `<button class="lane-tab ${l.key === activeLane ? "active" : ""}" data-lane="${l.key}">${l.title} (${n})</button>`;
+    const laneRail = $("#laneTabs");
+    const laneScrollLeft = laneRail.scrollLeft;
+    laneRail.innerHTML = LANES.map(lane => {
+      const count = filtered.filter(s => isOrderInLane(s, lane.key)).length;
+      return `<button type="button" class="lane-tab ${lane.key === activeLane ? "active" : ""}" data-lane="${lane.key}" aria-pressed="${lane.key === activeLane}">${lane.title}<span class="lane-tab-count">${count}</span></button>`;
     }).join("");
-    $$("#laneTabs .lane-tab").forEach(b => b.addEventListener("click", () => { activeLane = b.dataset.lane; renderSales(); }));
+    laneRail.scrollLeft = laneScrollLeft;
 
-    const lane = LANES.find(l => l.key === activeLane);
-    const inLane = filtered.filter(s => DB.laneOf(s) === activeLane);
+    const lane = LANES.find(item => item.key === activeLane) || LANES[1];
+    const inLane = filtered.filter(s => isOrderInLane(s, lane.key));
+    const totalValue = laneRevenue(inLane);
+    const hasFilters = !!orderTerm || payFilter !== "all" || channelFilter !== "all";
+    const emptyMessage = hasFilters
+      ? `<div class="order-empty"><span class="order-empty-icon">${Icons.svg("search", "ico-22")}</span><strong>No orders match these filters</strong><p>Try a different search, payment status, or sales channel.</p><button class="btn ghost sm" type="button" data-clear-order-filters>Clear filters</button></div>`
+      : `<div class="order-empty"><span class="order-empty-icon">${Icons.svg("check-circle", "ico-22")}</span><strong>${lane.key === "incoming" ? "No orders need review" : "This queue is clear"}</strong><p>${lane.key === "incoming" ? "New web orders will appear here as soon as they arrive." : "There are no orders in this workflow stage right now."}</p></div>`;
     $("#lanePanel").innerHTML = `
       <div class="lane-card">
-        <div class="lane-head"><div><strong class="serif">${lane.title}</strong><div class="muted small">${lane.sub}</div></div><span class="lane-count">${inLane.length}</span></div>
-        ${inLane.length ? inLane.map(orderCard).join("") : `<p class="lane-empty">Lane is clear.</p>`}
+        <div class="lane-head">
+          <div class="lane-heading"><span class="lane-heading-icon">${Icons.svg(lane.key === "incoming" ? "inbox" : lane.key === "fulfillment" ? "package" : lane.key === "ready" ? "truck" : lane.key === "cancelled" ? "ban" : "check-circle", "ico-18")}</span><div><div class="lane-title-row"><strong>${lane.title}</strong><span class="lane-count">${inLane.length}</span></div><div class="muted small">${lane.sub}</div></div></div>
+          <div class="lane-total"><span>Queue value</span><strong>${ugx(totalValue)}</strong></div>
+        </div>
+        <div class="order-list">${inLane.length ? inLane.map(orderCard).join("") : emptyMessage}</div>
       </div>`;
   }
 
+  $("#orderSearch").addEventListener("input", e => { orderTerm = e.target.value.trim().toLowerCase(); renderSales(); });
+  $("#orderSort").addEventListener("change", e => { orderSort = e.target.value; renderSales(); });
+  $("#orderChannelFilter").addEventListener("change", e => { channelFilter = e.target.value; renderSales(); });
+  $("#payFilterPills").addEventListener("click", e => {
+    const button = e.target.closest("[data-pay-filter]");
+    if (!button) return;
+    payFilter = button.dataset.payFilter;
+    renderSales();
+  });
+  $("#laneTabs").addEventListener("click", e => {
+    const button = e.target.closest("[data-lane]");
+    if (!button) return;
+    activeLane = button.dataset.lane;
+    renderSales();
+  });
+  $("#orderSummaryStats").addEventListener("click", e => {
+    const button = e.target.closest("[data-select-lane]");
+    if (!button) return;
+    activeLane = button.dataset.selectLane;
+    orderTerm = "";
+    channelFilter = "all";
+    orderSort = "oldest";
+    $("#orderSearch").value = "";
+    $("#orderChannelFilter").value = "all";
+    $("#orderSort").value = "oldest";
+    if (button.dataset.selectPayment) payFilter = button.dataset.selectPayment;
+    else payFilter = "all";
+    renderSales();
+  });
+
   function orderCard(s) {
-    const paid = isSalePaid(s);
-    const acts = [];
     const stage = fulfillmentStage(s);
-    if (stage === "Unfulfilled" || stage === "Pending") {
-      acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="In Assembly">Start Assembly →</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Order details</button>
-        <button class="btn sm danger" data-cancel-web="${esc(s.id)}">Cancel</button></div>`);
-    } else if (stage === "In Assembly" || stage === "Packed") {
-      const readyStage = s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched";
-      acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="${readyStage}">Mark ${readyStage} →</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Order details</button></div>`);
-    } else if (stage === "Ready for Pickup" || stage === "Dispatched" || stage === "With rider" || stage === "Handed over") {
-      acts.push(`<div class="pay-row">
-        <button class="btn sm primary" data-dispatch-to="${esc(s.id)}" data-stage="Completed">Complete Order ✓</button>
-        <button class="btn sm" data-open-order="${esc(s.id)}">Order details</button></div>`);
-    } else {
-      acts.push(`<div class="pay-row">
-        <button class="btn sm" data-print-order="${esc(s.id)}">View receipt</button>
-        <button class="btn sm ghost" data-open-order="${esc(s.id)}">Details</button></div>`);
-    }
-    return `<div class="order-card" data-card-order="${esc(s.id)}">
-      <div class="oc-top">
-        <strong class="serif">${esc(s.id)}</strong>
-        ${s.channel === "web" ? `<span class="stat-chip web">WEB STORE</span>` : `<span class="stat-chip pos">REGISTER</span>`}
-        ${laneChip(fulfillmentStage(s))}
-        ${paid ? `<span class="stat-chip ok">PAID</span>` : `<span class="stat-chip pend">UNPAID</span>`}
-        <span class="muted small oc-when">${ago(s.created_at)}</span>
+    const action = orderActionFor(s);
+    const payState = paymentState(s);
+    const payLabel = payState === "paid" ? "PAID" : payState === "pending" ? "PAYMENT PENDING" : payState === "failed" ? "PAYMENT FAILED" : "UNPAID";
+    const payClass = payState === "paid" ? "ok" : payState === "failed" ? "bad" : "pend";
+    const paidVia = s.tender ? DB.TENDER_LABEL(s.tender) : (s.payment && s.payment.provider) || "recorded tender";
+    const items = Array.isArray(s.items) ? s.items : [];
+    const quantity = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+    const summary = items.slice(0, 2).map(item => `${Number(item.qty) || 1}× ${item.name || "Item"}`).join(" · ") + (items.length > 2 ? ` · +${items.length - 2} more` : "");
+    const delivery = String(s.delivery_type || "boda").toLowerCase() === "pickup" ? "Customer pickup" : "Delivery";
+    const destination = s.delivery_area || s.customer_address || s.delivery_address || "Location not provided";
+    const phone = String(s.customer_phone || "").trim();
+    const created = Date.parse(s.created_at || "");
+    const ageHours = Number.isFinite(created) ? Math.max(0, (Date.now() - created) / 3600000) : 0;
+    const needsAttention = ageHours >= 24 && ["incoming", "fulfillment", "ready"].includes(DB.laneOf(s));
+    const ageLabel = !Number.isFinite(created) ? "time unavailable" : needsAttention ? `${Math.floor(ageHours / 24)}d waiting` : ago(s.created_at);
+    const cancellable = stage === "Unfulfilled" || stage === "In Assembly";
+    const actionButton = action ? `<button type="button" class="btn primary order-primary-action" data-order-action="advance" data-order-id="${esc(s.id)}" data-next-stage="${esc(action.next)}">${Icons.svg(action.icon, "ico-15")}<span>${action.label}</span>${Icons.svg("arrow-right", "ico-13")}</button>` : "";
+    return `<article class="order-card ${needsAttention ? "needs-attention" : ""}" data-card-order="${esc(s.id)}">
+      <div class="order-card-top">
+        <div class="order-reference-block">
+          <span class="order-channel ${s.channel === "web" ? "is-web" : "is-pos"}">${Icons.svg(s.channel === "web" ? "globe" : "store", "ico-12")} ${s.channel === "web" ? "WEB STORE" : "POS REGISTER"}</span>
+          <strong class="order-reference">${esc(s.id)}</strong>
+        </div>
+        <div class="order-card-badges">${laneChip(stage)}<span class="stat-chip ${payClass}">${payLabel}</span></div>
+        <span class="order-age ${needsAttention ? "attention" : ""}">${needsAttention ? Icons.svg("alert-triangle", "ico-12") : Icons.svg("clock-3", "ico-12")}${ageLabel}</span>
       </div>
-      <div class="oc-body">
-        <div class="oc-customer">
-          <span class="avatar oc-ava" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "G")}</span>
-          <div class="grow">
-            <div class="oc-name">${esc(s.customer_name)}${s.customer_phone ? ` <a class="lnk oc-tel" href="tel:${esc(String(s.customer_phone).replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-12")} ${esc(s.customer_phone)}</a>` : ""}</div>
-            <div class="muted small">${esc(itemsSummary(s))}</div>
+      <div class="order-card-main">
+        <div class="order-customer-block">
+          <span class="avatar order-avatar" style="background:${avColor(s.customer_name || "Guest")}">${initials(s.customer_name || "Guest")}</span>
+          <div class="order-customer-copy">
+            <strong class="order-customer-name">${esc(s.customer_name || "Online shopper")}</strong>
+            ${phone ? `<a class="order-phone" href="tel:${esc(phone.replace(/[^+0-9]/g, ""))}">${Icons.svg("phone", "ico-12")}<span>${esc(phone)}</span></a>` : `<span class="order-phone missing">No phone provided</span>`}
           </div>
         </div>
-        <strong class="oc-total serif">${ugx(s.total)}</strong>
+        <div class="order-total-block"><span>ORDER TOTAL</span><strong>${ugx(s.total)}</strong></div>
       </div>
-      ${acts.join("")}
-    </div>`;
+      <div class="order-item-summary">${Icons.svg("shopping-bag", "ico-13")}<span>${esc(summary || "No item details")}</span><b>${quantity} ${quantity === 1 ? "item" : "items"}</b></div>
+      <div class="order-delivery-line">${Icons.svg(String(s.delivery_type || "").toLowerCase() === "pickup" ? "store" : "map-pin", "ico-13")}<span><b>${delivery}</b><span>${esc(destination)}</span></span></div>
+      <div class="order-card-footer">
+        <span class="order-payment-note">${payState === "paid" ? `Paid via ${esc(paidVia)}` : payState === "pending" ? "Waiting for payment confirmation" : payState === "failed" ? "Payment attempt failed" : "Payment not yet recorded"}</span>
+        <div class="order-actions">
+          ${actionButton}
+          <button type="button" class="btn order-details-action" data-open-order="${esc(s.id)}">Details</button>
+          ${cancellable ? `<button type="button" class="btn danger order-cancel-action" data-order-action="cancel" data-order-id="${esc(s.id)}">Cancel</button>` : stage === "Completed" || stage === "Cancelled" ? `<button type="button" class="btn order-details-action" data-print-order="${esc(s.id)}">Receipt</button>` : ""}
+        </div>
+      </div>
+    </article>`;
   }
+
+  function orderActionError(err) {
+    const status = Number(err && err.status) || 0;
+    if (status === 401) return "Your staff session is no longer valid. Sign in again, then retry the order action.";
+    if (status === 403) return "Your staff account does not have permission to change this order.";
+    if (status === 404) return "This order is no longer on the server. Refresh the queue to load the latest list.";
+    if (status === 409) return `${err.message || "This order has changed."} The queue has been refreshed; review its latest status before continuing.`;
+    if (status === 0) return "Could not confirm the update because the server could not be reached. Refresh the queue before retrying; the action may have reached the server.";
+    return (err && err.message) || "The order could not be updated. Please refresh and try again.";
+  }
+
+  async function performOrderAction(button, work, successMessage, afterSuccess) {
+    if (!button || button.dataset.busy === "true") return null;
+    const original = button.innerHTML;
+    button.dataset.busy = "true";
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.classList.add("is-busy");
+    button.innerHTML = `${Icons.svg("refresh-cw", "ico-14 order-action-spinner")}<span>Saving…</span>`;
+    try {
+      const updated = await work();
+      if (typeof afterSuccess === "function") afterSuccess(updated);
+      if (updated && updated.dispatch_status) activeLane = DB.laneOf(updated);
+      toast(successMessage);
+      renderSales();
+      return updated;
+    } catch (err) {
+      if ((Number(err && err.status) === 0 || Number(err && err.status) === 404 || Number(err && err.status) === 409) && DB.refreshOperationalData) {
+        try { await DB.refreshOperationalData(); } catch (refreshError) {}
+      }
+      toast(orderActionError(err), false);
+      renderSales();
+      return null;
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        delete button.dataset.busy;
+        button.classList.remove("is-busy");
+        button.innerHTML = original;
+      }
+    }
+  }
+
+  function confirmOrderCancellation(order) {
+    const quantity = (Array.isArray(order.items) ? order.items : []).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+    const paidWarning = isSalePaid(order) ? "\n\nPayment is recorded as paid. This action does not issue a refund; process any refund separately." : "";
+    return window.confirm(`Cancel order ${order.id}?\n\nThis stops fulfillment and returns ${quantity} ${quantity === 1 ? "item" : "items"} to available stock.${paidWarning}`);
+  }
+
+  async function refreshOrders(button) {
+    if (!button || button.dataset.busy === "true") return;
+    const original = button.innerHTML;
+    button.dataset.busy = "true";
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.classList.add("is-busy");
+    button.innerHTML = `${Icons.svg("refresh-cw", "ico-14 order-action-spinner")}<span>Refreshing…</span>`;
+    renderOrderSyncState();
+    try {
+      const refreshed = await DB.refreshOperationalData();
+      if (refreshed) toast("Orders refreshed from the live store");
+      else {
+        const sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+        toast(sync && (sync.status === 401 || sync.status === 403)
+          ? "Staff session needs attention. Sign in again to sync orders."
+          : "Could not refresh orders. Showing the last saved list.", false);
+      }
+      renderSales();
+    } catch (err) {
+      toast(orderActionError(err), false);
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.removeAttribute("aria-busy");
+        delete button.dataset.busy;
+        button.classList.remove("is-busy");
+        button.innerHTML = original;
+      }
+      renderOrderSyncState();
+    }
+  }
+
+  $("#btnRefreshOrders").addEventListener("click", e => refreshOrders(e.currentTarget));
 
   function receiptDateFormat(dateStr) {
     const d = dateStr ? new Date(dateStr) : new Date();
@@ -891,16 +1127,17 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
           </select>
         </div>
 
-        ${fulfillmentStage(s) === "Unfulfilled" || fulfillmentStage(s) === "Pending" ? `
+        ${fulfillmentStage(s) === "Unfulfilled" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">${Icons.svg("package", "ico-14")} Start Assembly</button>
-        ` : fulfillmentStage(s) === "In Assembly" || fulfillmentStage(s) === "Packed" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${s.delivery_type === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
+        ` : fulfillmentStage(s) === "In Assembly" ? `
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${String(s.delivery_type || "").toLowerCase() === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${String(s.delivery_type || "").toLowerCase() === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
+          ${String(s.delivery_type || "").toLowerCase() !== "pickup" ? `<button class="btn ghost btn-full" id="btnDispatchRider">${Icons.svg("bike", "ico-14")} Assign selected rider &amp; dispatch</button>` : ""}
         ` : fulfillmentStage(s) === "Ready for Pickup" || fulfillmentStage(s) === "Dispatched" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Completed">✓ Complete Order</button>
         ` : ""}
 
         <button class="btn primary btn-full" id="btnSendOrderConfirmation">${Icons.svg("message-circle", "ico-14")} Send WhatsApp Confirmation</button>
-        <button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel Order &amp; Release Item to Rack</button>
+        ${["Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched"].includes(fulfillmentStage(s)) ? `<button class="btn ghost btn-full" id="btnCancelOrderModal">Cancel order &amp; release stock</button>` : ""}
         <button class="btn light btn-full" id="btnPrintReceiptModal">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
     `);
@@ -910,46 +1147,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (btnDisp) {
       btnDisp.addEventListener("click", async () => {
         const riderId = sel ? sel.value : null;
-        if (!riderId) return toast("Please select a rider", false);
-        try {
-          await DB.assignRiderToOrder(s.id, riderId);
-          toast(`Order ${s.id} dispatched with rider`);
-          closeModal();
-          activeLane = "rider";
-          renderSales();
-        } catch (err) {
-          toast(err.message, false);
-        }
+        if (!riderId) return toast("Choose a delivery partner before dispatching", false);
+        await performOrderAction(
+          btnDisp,
+          () => DB.assignRiderToOrder(s.id, riderId),
+          `${s.id} assigned to a rider and marked dispatched`,
+          closeModal
+        );
       });
     }
 
     const btnAdv = $("#btnAdvRider");
     if (btnAdv) {
       btnAdv.addEventListener("click", async () => {
-        try {
-          await DB.setDispatchStatus(s.id, btnAdv.dataset.advanceStage);
-          toast(`${s.id} → ${btnAdv.dataset.advanceStage}`);
-          closeModal();
-          renderSales();
-        } catch (err) {
-          toast(err.message, false);
-        }
+        const nextStage = btnAdv.dataset.advanceStage;
+        await performOrderAction(
+          btnAdv,
+          () => DB.setDispatchStatus(s.id, nextStage),
+          `${s.id} moved to ${nextStage}`,
+          closeModal
+        );
       });
     }
 
     const btnCanc = $("#btnCancelOrderModal");
     if (btnCanc) {
       btnCanc.addEventListener("click", async () => {
-        if (confirm(`Cancel order ${s.id} and return items to shelf rack?`)) {
-          try {
-            await DB.cancelWebOrder(s.id);
-            toast("Order cancelled — items restored to rack");
-            closeModal();
-            renderSales();
-          } catch (err) {
-            toast(err.message, false);
-          }
-        }
+        if (!confirmOrderCancellation(s)) return;
+        await performOrderAction(
+          btnCanc,
+          () => DB.cancelWebOrder(s.id),
+          `${s.id} cancelled — stock returned to the rack`,
+          closeModal
+        );
       });
     }
 
@@ -2885,10 +3115,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     }
     const cf = t.closest("[data-confirm-web]");
     if (cf) { try { await DB.confirmWebOrder(cf.dataset.confirmWeb, cf.dataset.method, whoName); toast(`${cf.dataset.confirmWeb} confirmed & moved to Fulfillment`); } catch (err) { toast(err.message, false); } return; }
-    const cw = t.closest("[data-cancel-web]");
-    if (cw) { try { await DB.cancelWebOrder(cw.dataset.cancelWeb); toast("Order cancelled — stock returned"); } catch (err) { toast(err.message, false); } return; }
-    const dt = t.closest("[data-dispatch-to]");
-    if (dt) { try { await DB.setDispatchStatus(dt.dataset.dispatchTo, dt.dataset.stage); toast(`${dt.dataset.dispatchTo} → ${dt.dataset.stage}`); } catch (err) { toast(err.message, false); } return; }
+    const clearOrderFilters = t.closest("[data-clear-order-filters]");
+    if (clearOrderFilters) {
+      orderTerm = ""; payFilter = "all"; channelFilter = "all";
+      $("#orderSearch").value = "";
+      $("#orderChannelFilter").value = "all";
+      renderSales();
+      return;
+    }
+    const orderAction = t.closest("[data-order-action]");
+    if (orderAction) {
+      const orderId = orderAction.dataset.orderId;
+      const order = DB.getSale(orderId);
+      if (!order) {
+        if (DB.refreshOperationalData) await DB.refreshOperationalData();
+        return toast("Order not found in the saved list. Refresh and try again.", false);
+      }
+      if (orderAction.dataset.orderAction === "cancel") {
+        if (!confirmOrderCancellation(order)) return;
+        await performOrderAction(
+          orderAction,
+          () => DB.cancelWebOrder(orderId),
+          `${orderId} cancelled — stock returned to the rack`
+        );
+      } else {
+        const nextStage = orderAction.dataset.nextStage;
+        await performOrderAction(
+          orderAction,
+          () => DB.setDispatchStatus(orderId, nextStage),
+          `${orderId} moved to ${nextStage}`
+        );
+      }
+      return;
+    }
     const po = t.closest("[data-print-order]");
     if (po) { return printReceiptModal(po.dataset.printOrder); }
     const vs = t.closest("[data-view-sale]");

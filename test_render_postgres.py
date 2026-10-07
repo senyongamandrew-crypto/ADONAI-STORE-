@@ -21,6 +21,7 @@ import json
 import os
 import sys
 import unittest
+import uuid
 
 # Ensure current directory in python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,13 +31,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # (the old hardcoded default key has been permanently retired).
 os.environ.setdefault("ADONAI_RATE_LIMIT_DISABLED", "1")
 TEST_MASTER_KEY = "TEST-MASTER-KEY-9271-SECURE"
-os.environ.setdefault("ADMIN_ACCESS_PIN", TEST_MASTER_KEY)
+os.environ.setdefault("STORE_MASTER_KEY", TEST_MASTER_KEY)
 
 from database import get_formatted_database_url, mask_database_url, get_db, engine
 from models import (
     AccountingJournalEntry,
     ExpenseRecord,
     InventoryLock,
+    ItemCondition,
+    QuantityType,
     Product,
     Order,
     OrderItem,
@@ -415,12 +418,37 @@ class TestRenderPostgresHardening(unittest.TestCase):
         self.assertGreaterEqual(len(data["products"]), 16)
         print(f"✅ PASS: /api/sync/pull payload generated with {len(data['products'])} products and secured by terminal auth.")
 
+    def test_05a_store_master_key_environment_auth(self):
+        """The canonical Render STORE_MASTER_KEY unlocks the Admin Suite without being exposed."""
+        original = os.environ.get("STORE_MASTER_KEY")
+        candidate = "RENDER-STORE-MASTER-KEY-9271-TEST"
+        try:
+            os.environ["STORE_MASTER_KEY"] = candidate
+            status, data = self.api_request(
+                "POST", "/api/auth/verify", {"password": candidate}
+            )
+            self.assertTrue(status.startswith("200"), data)
+            self.assertTrue(data.get("ok"))
+            self.assertEqual(data.get("via"), "env_admin:STORE_MASTER_KEY")
+            self.assertEqual(data.get("staff", {}).get("role"), "admin")
+            self.assertTrue(data.get("token"))
+
+            status, auth_status = self.api_request("GET", "/api/auth/status")
+            self.assertTrue(status.startswith("200"))
+            self.assertIn("STORE_MASTER_KEY", auth_status.get("supported_keys", []))
+            self.assertNotIn(candidate, json.dumps(auth_status))
+        finally:
+            if original is None:
+                os.environ.pop("STORE_MASTER_KEY", None)
+            else:
+                os.environ["STORE_MASTER_KEY"] = original
+
     def test_06_staff_and_admin_auth_verification(self):
         """Test Staff Terminal Key and Admin Access PIN verification via environment variables and database."""
         import io
 
-        # 1. Test ADMIN_ACCESS_PIN environment variable (restored afterwards
-        # so the suite-wide TEST_MASTER_KEY keeps working in later tests)
+        # 1. Test the backward-compatible ADMIN_ACCESS_PIN alias while the
+        # canonical STORE_MASTER_KEY remains available for later tests.
         original_admin_pin = os.environ.get("ADMIN_ACCESS_PIN")
         os.environ["ADMIN_ACCESS_PIN"] = "987654-TEST-ADMIN"
         self.addCleanup(lambda: os.environ.update({"ADMIN_ACCESS_PIN": original_admin_pin} if original_admin_pin else {}))
@@ -1178,6 +1206,100 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 self.assertEqual(sum(l.debit for l in journal.lines), sum(l.credit for l in journal.lines))
         print(f"✅ PASS: Permanent rack delete — row purged, {purged.get('unlinked_order_lines')} "
               f"order line(s) unlinked, UGX {purged.get('stock_loss_posted', 0):,} written off.")
+
+
+    def test_19_order_fulfillment_and_cancel_retry(self):
+        """Legacy intake labels can be assembled, and cancellation returns stock once.
+
+        This exercises the exact operations used by the mobile queue: an order
+        loaded with a legacy "waiting for review" stage can move into assembly, can then
+        be cancelled, and can safely retry cancellation after a lost response.
+        """
+        suffix = uuid.uuid4().hex[:10].upper()
+        product_id = f"PRD-FLOW-{suffix}"
+        order_id = f"AT-FLOW-{suffix}"
+        original_stock = 0  # the order has already reserved the only unit
+        try:
+            with get_db() as session:
+                product = Product(
+                    id=product_id,
+                    sku=f"SKU-FLOW-{suffix}",
+                    barcode_id=f"BAR-FLOW-{suffix}",
+                    name="Fulfillment regression item",
+                    demographic="Unisex",
+                    category="Tops & Shirts",
+                    item_condition=ItemCondition.BRAND_NEW,
+                    quantity_type=QuantityType.BRAND_NEW,
+                    condition="Brand New with Tags (BNWT)",
+                    base_price=10000,
+                    total_transport_cost=0,
+                    selling_price=10000,
+                    cost_price=4000,
+                    in_stock_count=original_stock,
+                    inventory_status="OUT_OF_STOCK",
+                )
+                order = Order(
+                    id=order_id,
+                    channel="web",
+                    status="unfulfilled",
+                    dispatch_status="waiting for review",  # legacy incoming-stage label
+                    customer_name="Fulfillment Regression Customer",
+                    customer_phone="+256700000000",
+                    delivery_type="pickup",
+                    subtotal=10000,
+                    total=10000,
+                    tender_type="cash",
+                    payment_status="unpaid",
+                    created_at=datetime.utcnow(),
+                )
+                item = OrderItem(
+                    id=f"ITEM-FLOW-{suffix}",
+                    order_id=order_id,
+                    product_id=product_id,
+                    name=product.name,
+                    item_condition="BRAND_NEW",
+                    quantity_type="BRAND_NEW",
+                    unit_price=10000,
+                    unit_cost=4000,
+                    category="Tops & Shirts",
+                    qty=1,
+                    line_total=10000,
+                )
+                session.add_all([product, order, item])
+
+            status, assembling = self.api_request(
+                "PATCH", f"/api/orders/{order_id}",
+                {"fulfillment_status": "In Assembly"}, TEST_MASTER_KEY,
+            )
+            self.assertTrue(status.startswith("200"), assembling)
+            self.assertEqual(assembling["order"]["dispatch_status"], "In Assembly")
+
+            status, cancelled = self.api_request(
+                "PATCH", f"/api/orders/{order_id}",
+                {"fulfillment_status": "Cancelled"}, TEST_MASTER_KEY,
+            )
+            self.assertTrue(status.startswith("200"), cancelled)
+            self.assertEqual(cancelled["order"]["dispatch_status"], "Cancelled")
+            self.assertEqual(cancelled["stock_restored_units"], 1)
+
+            status, retry = self.api_request(
+                "PATCH", f"/api/orders/{order_id}",
+                {"fulfillment_status": "Cancelled"}, TEST_MASTER_KEY,
+            )
+            self.assertTrue(status.startswith("200"), retry)
+            self.assertEqual(retry["stock_restored_units"], 0, "Retry must not double-release inventory")
+            with get_db() as session:
+                restored = session.query(Product).filter_by(id=product_id).first()
+                self.assertIsNotNone(restored)
+                self.assertEqual(restored.in_stock_count, 1)
+                self.assertEqual(restored.inventory_status, "AVAILABLE")
+        finally:
+            with get_db() as session:
+                session.query(OrderItem).filter_by(order_id=order_id).delete(synchronize_session=False)
+                session.query(Order).filter_by(id=order_id).delete(synchronize_session=False)
+                session.query(Product).filter_by(id=product_id).delete(synchronize_session=False)
+
+        print("✅ PASS: Legacy order stages transition cleanly; cancellation restores inventory once and retry is safe.")
 
 
 if __name__ == "__main__":

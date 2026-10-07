@@ -47,26 +47,32 @@ const cssText = read("css/storefront.css");
 const ast = csstree.parse(cssText, { positions: true });
 
 /** Collect [{selector, declarations:{prop:{value, important}}, line}] */
-const rules = [];
-csstree.walk(ast, {
-  visit: "Rule",
-  enter(node) {
-    const selector = csstree.generate(node.prelude);
-    const declarations = {};
-    csstree.walk(node.block, {
-      visit: "Declaration",
-      enter(decl) {
-        declarations[decl.property.toLowerCase()] = {
-          value: csstree.generate(decl.value).trim().toLowerCase(),
-          important: !!decl.important
-        };
-      }
-    });
-    rules.push({ selector, declarations, line: node.loc ? node.loc.start.line : 0 });
-  }
-});
+function collectRules(parsedCss) {
+  const collected = [];
+  csstree.walk(parsedCss, {
+    visit: "Rule",
+    enter(node) {
+      const selector = csstree.generate(node.prelude);
+      const declarations = {};
+      csstree.walk(node.block, {
+        visit: "Declaration",
+        enter(decl) {
+          declarations[decl.property.toLowerCase()] = {
+            value: csstree.generate(decl.value).trim().toLowerCase(),
+            important: !!decl.important
+          };
+        }
+      });
+      collected.push({ selector, declarations, line: node.loc ? node.loc.start.line : 0 });
+    }
+  });
+  return collected;
+}
 
+const rules = collectRules(ast);
+const productRules = collectRules(csstree.parse(read("css/product.css"), { positions: true }));
 const ruleWhere = pred => rules.filter(pred);
+const productRuleWhere = pred => productRules.filter(pred);
 const selectorsMatching = re => ruleWhere(r => re.test(r.selector));
 
 console.log("\nCSS invariants (css/storefront.css)");
@@ -175,18 +181,22 @@ check("`[hidden]` cannot be overridden by a component's display rule", () => {
 });
 
 check("overlay scrollers contain their overscroll", () => {
-  for (const sel of [".drawer-body", ".prod-modal"]) {
-    const matched = ruleWhere(r =>
-      r.selector.split(",").some(s => s.trim() === sel)
+  const scrollers = [
+    { selector: ".drawer-body", findRules: ruleWhere },
+    { selector: ".plb-stage", findRules: productRuleWhere }
+  ];
+  for (const { selector, findRules } of scrollers) {
+    const matched = findRules(r =>
+      r.selector.split(",").some(s => s.trim() === selector)
     );
-    assert(matched.length > 0, `expected a \`${sel}\` rule`);
+    assert(matched.length > 0, `expected a \`${selector}\` rule`);
     assert(
       matched.some(r => {
         const ob = r.declarations["overscroll-behavior"];
         return ob && /contain|none/.test(ob.value);
       }),
-      `${sel} must set overscroll-behavior:contain so reaching its end does not ` +
-      `chain the scroll to the catalog behind it`
+      `${selector} must set overscroll-behavior:contain so reaching its end does not ` +
+      `chain the scroll to the page behind it`
     );
   }
 });
@@ -194,44 +204,46 @@ check("overlay scrollers contain their overscroll", () => {
 check("no scrollable overlay panel sits under a `touch-action: none` ancestor", () => {
   /* touch-action is resolved by intersecting the value of the touched
      element with every ancestor, so `none` anywhere above a scroller
-     computes to `none` on the scroller itself and kills it. This is the
-     generalised form of the original bug (`touch-action:none` on <body>);
-     it reappears any time a backdrop that WRAPS its panel gets the rule.
-     Checked against the real index.html tree, not just the selectors. */
-  const html = read("index.html");
-  const { window } = new JSDOM(html);
-  const doc = window.document;
-
-  /* Which selectors declare touch-action:none, ignoring state suffixes so
-     ".x.open" counts as "could apply to .x". */
-  const blockers = [];
-  for (const r of rules) {
-    const ta = r.declarations["touch-action"];
-    if (!ta || ta.value !== "none") continue;
-    for (const s of r.selector.split(",")) blockers.push(s.trim());
-  }
-
-  const scrollers = [".prod-modal", ".drawer-body", ".sidebar-drawer"];
+     computes to `none` on the scroller itself and kills it. Check the real
+     storefront and product-detail trees against their combined stylesheets. */
+  const pages = [
+    { html: read("index.html"), rules, scrollers: [".drawer-body", ".sidebar-drawer"] },
+    { html: read("product.html"), rules: [...rules, ...productRules], scrollers: [".plb-stage"] }
+  ];
   const offenders = [];
 
-  for (const sel of scrollers) {
-    const el = doc.querySelector(sel);
-    if (!el) continue;
-    for (let a = el.parentElement; a && a !== doc.documentElement; a = a.parentElement) {
-      for (const b of blockers) {
-        // Strip state classes to test "can this selector target the ancestor".
-        const base = b.replace(/\.(open|is-active|is-open|show)\b/g, "").trim();
-        if (!base || base === el.tagName.toLowerCase()) continue;
-        let hit = false;
-        try { hit = a.matches(base); } catch (e) { /* unsupported selector */ }
-        if (hit) {
-          offenders.push(
-            `${sel} is nested inside <${a.tagName.toLowerCase()}${a.id ? "#" + a.id : ""}> ` +
-            `which matches "${b}"`
-          );
+  for (const page of pages) {
+    const { window } = new JSDOM(page.html);
+    const doc = window.document;
+    /* Which selectors declare touch-action:none, ignoring state suffixes so
+       ".x.open" counts as "could apply to .x". */
+    const blockers = [];
+    for (const r of page.rules) {
+      const ta = r.declarations["touch-action"];
+      if (!ta || ta.value !== "none") continue;
+      for (const s of r.selector.split(",")) blockers.push(s.trim());
+    }
+
+    for (const sel of page.scrollers) {
+      const el = doc.querySelector(sel);
+      if (!el) continue;
+      for (let a = el.parentElement; a && a !== doc.documentElement; a = a.parentElement) {
+        for (const b of blockers) {
+          // Strip state classes to test "can this selector target the ancestor".
+          const base = b.replace(/\.(open|is-active|is-open|show)\b/g, "").trim();
+          if (!base || base === el.tagName.toLowerCase()) continue;
+          let hit = false;
+          try { hit = a.matches(base); } catch (e) { /* unsupported selector */ }
+          if (hit) {
+            offenders.push(
+              `${sel} is nested inside <${a.tagName.toLowerCase()}${a.id ? "#" + a.id : ""}> ` +
+              `which matches "${b}"`
+            );
+          }
         }
       }
     }
+    window.close();
   }
 
   assert(
