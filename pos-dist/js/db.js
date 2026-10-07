@@ -52,6 +52,15 @@
     refund: "Refund (Customer Return)",
     adjustment: "Adjustment (Drawer Recount / Correction)"
   };
+  const normalizeSaleRecord = sale => {
+    if (!sale || typeof sale !== "object") return sale;
+    const rider = sale.rider && typeof sale.rider === "object" ? sale.rider : {};
+    return Object.assign({}, sale, {
+      assigned_rider_id: sale.assigned_rider_id || sale.rider_id || rider.id || null,
+      assigned_rider_name: sale.assigned_rider_name || sale.rider_name || rider.name || null
+    });
+  };
+
   const orderLanes = s => {
     const status = String(s && s.status || "").trim().toLowerCase();
     const raw = String(s && s.dispatch_status || (s && s.channel === "web" ? "Unfulfilled" : "Completed"))
@@ -258,6 +267,7 @@
     if (!raw || !ok) { state = seedState(); save(); }
     if (state && Array.isArray(state.products)) {
       state.products.forEach(normalizeProductPolicy);
+      if (Array.isArray(state.sales)) state.sales = state.sales.map(normalizeSaleRecord);
       if (state.settings) {
         if (/Adonai Thrift Store/i.test(String(state.settings.store_name || ""))) state.settings.store_name = "Adonai Store";
         if (!state.settings.tagline || /only|curated pre-loved vintage/i.test(String(state.settings.tagline))) {
@@ -395,7 +405,7 @@
       }
       reload();
       state.products = data.products;
-      if (Array.isArray(data.sales)) state.sales = data.sales;
+      if (Array.isArray(data.sales)) state.sales = data.sales.map(normalizeSaleRecord);
       if (Array.isArray(data.ledger)) state.ledger = data.ledger.map(line => Object.assign({
         label: line.desc || `${line.kind} ${line.ref_id || ""}`,
         note: line.staff ? `Logged by ${line.staff}` : "",
@@ -1105,13 +1115,14 @@
         body: JSON.stringify(Object.assign({ fulfillment_status }, extra || {}))
       }, true);
       if (!data.order) throw new Error("The server did not return the updated order");
+      const remoteOrder = normalizeSaleRecord(data.order);
       return tx("sales", st => {
         const local = byId(st.sales, id);
-        if (local) Object.assign(local, data.order, {
-          delivery_address: data.order.customer_address || local.delivery_address || ""
+        if (local) Object.assign(local, remoteOrder, {
+          delivery_address: remoteOrder.customer_address || local.delivery_address || ""
         });
-        else st.sales.push(data.order);
-        return JSON.parse(JSON.stringify(data.order));
+        else st.sales.push(remoteOrder);
+        return JSON.parse(JSON.stringify(remoteOrder));
       });
     },
     cancelWebOrder(id) {

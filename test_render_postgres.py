@@ -1301,6 +1301,66 @@ class TestRenderPostgresHardening(unittest.TestCase):
 
         print("✅ PASS: Legacy order stages transition cleanly; cancellation restores inventory once and retry is safe.")
 
+    def test_20_fulfillment_rider_assignment_survives_order_sync(self):
+        """Assigned riders remain visible after dispatch and subsequent syncs."""
+        suffix = uuid.uuid4().hex[:10].upper()
+        order_id = f"AT-RIDER-{suffix}"
+        rider_id = f"RDR-TEST-{suffix}"
+        rider_name = "Fulfillment Regression Rider"
+        try:
+            with get_db() as session:
+                session.add(Order(
+                    id=order_id,
+                    channel="web",
+                    status="processing",
+                    dispatch_status="In Assembly",
+                    customer_name="Rider Assignment Regression Customer",
+                    customer_phone="+256700000001",
+                    delivery_type="boda",
+                    subtotal=12500,
+                    total=12500,
+                    tender_type="cash",
+                    payment_status="unpaid",
+                    created_at=datetime.utcnow(),
+                ))
+
+            status, dispatched = self.api_request(
+                "PATCH", f"/api/orders/{order_id}",
+                {
+                    "fulfillment_status": "Dispatched",
+                    "rider_id": rider_id,
+                    "rider_name": rider_name,
+                }, TEST_MASTER_KEY,
+            )
+            self.assertTrue(status.startswith("200"), dispatched)
+            order = dispatched["order"]
+            self.assertEqual(order["dispatch_status"], "Dispatched")
+            self.assertEqual(order["assigned_rider_id"], rider_id)
+            self.assertEqual(order["assigned_rider_name"], rider_name)
+            self.assertEqual(order["rider"], {"id": rider_id, "name": rider_name})
+
+            status, sync_data = self.api_request(
+                "POST", "/api/sync/pull", {}, TEST_MASTER_KEY,
+            )
+            self.assertTrue(status.startswith("200"), sync_data)
+            synced = next(row for row in sync_data["sales"] if row["id"] == order_id)
+            self.assertEqual(synced["assigned_rider_id"], rider_id)
+            self.assertEqual(synced["assigned_rider_name"], rider_name)
+
+            status, completed = self.api_request(
+                "PATCH", f"/api/orders/{order_id}",
+                {"fulfillment_status": "Completed"}, TEST_MASTER_KEY,
+            )
+            self.assertTrue(status.startswith("200"), completed)
+            self.assertEqual(completed["order"]["dispatch_status"], "Completed")
+            self.assertEqual(completed["order"]["assigned_rider_id"], rider_id)
+        finally:
+            with get_db() as session:
+                session.query(OrderItem).filter_by(order_id=order_id).delete(synchronize_session=False)
+                session.query(Order).filter_by(id=order_id).delete(synchronize_session=False)
+
+        print("✅ PASS: Rider assignment is returned on dispatch, preserved in order sync, and retained after completion.")
+
 
 if __name__ == "__main__":
     unittest.main()
