@@ -28,6 +28,14 @@ services:
       # Staff Terminal Key for cashier & POS register access from the website
       - key: STAFF_TERMINAL_KEY
         sync: false
+      # Flutterwave values are supplied in the Render dashboard; never commit
+      # test/live credentials in this blueprint or source repository.
+      - key: FLW_PUBLIC_KEY
+        sync: false
+      - key: FLW_SECRET_KEY
+        sync: false
+      - key: FLW_SECRET_HASH
+        sync: false
 
 databases:
   - name: adonai-postgres

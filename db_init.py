@@ -102,53 +102,80 @@ PRODUCT_POLICY_CONSTRAINTS: tuple[tuple[str, tuple[str, ...], str], ...] = (
 def _dual_inventory_backfill_statements(
     *,
     postgres: bool,
-    item_condition_is_enum: bool = False,
     quantity_type_is_enum: bool = False,
-) -> tuple[str, str, str]:
-    """Build portable, correctly typed dual-inventory repair statements.
+) -> tuple[str, str]:
+    """Build typed, quantity-preserving dual-inventory backfill statements.
 
-    Older Render databases can have VARCHAR policy columns; new databases use
-    two *different* native enum types.  Casting through text is intentional:
-    PostgreSQL has no implicit cast from `item_condition_enum` to
-    `quantity_type_enum`, and a CASE made only of string literals resolves to
-    text rather than to the destination enum.
+    Routine startup must not rewrite an invalid `item_condition` in order to
+    make a legacy stock row pass policy. Such rows stay untouched and are
+    logged for explicit operator review. Quantity-type backfills can still
+    repair a mismatch on rows whose item condition and stock are already valid.
     """
-    item_value = lambda value: (
-        f"'{value}'::item_condition_enum" if item_condition_is_enum else f"'{value}'"
-    )
-    item_as_text = "item_condition::text" if postgres else "item_condition"
     quantity_value = (
         "item_condition::text::quantity_type_enum"
         if quantity_type_is_enum
         else ("item_condition::text" if postgres else "item_condition")
     )
+    item_as_text = "item_condition::text" if postgres else "item_condition"
     quantity_as_text = "quantity_type::text" if postgres else "quantity_type"
 
     return (
         f"""
             UPDATE products
-            SET item_condition = CASE
-                    WHEN lower(coalesce(condition, '')) LIKE '%brand%new%'
-                      OR lower(coalesce(condition, '')) LIKE '%factory%'
-                    THEN {item_value('BRAND_NEW')}
-                    ELSE {item_value('PRE_LOVED')}
-                END
-            WHERE item_condition IS NULL
-               OR {item_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED')
-        """,
-        f"""
-            UPDATE products
             SET quantity_type = {quantity_value}
-            WHERE quantity_type IS NULL
-               OR {quantity_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED')
+            WHERE (quantity_type IS NULL
+                   OR {quantity_as_text} NOT IN ('BRAND_NEW', 'PRE_LOVED'))
+              AND {PRODUCT_STOCK_POLICY_VALID_SQL}
         """,
         f"""
             UPDATE products
             SET quantity_type = {quantity_value}
             WHERE {quantity_as_text} = 'PRE_LOVED'
               AND {item_as_text} = 'BRAND_NEW'
+              AND {PRODUCT_STOCK_POLICY_VALID_SQL}
         """,
     )
+
+
+# A NOT VALID PostgreSQL CHECK still runs for every row touched by a later
+# UPDATE. Keep startup backfills away from any row that would fail the stock
+# policy, and from rows that would violate the other dual-inventory checks.
+PRODUCT_STOCK_POLICY_VALID_SQL = """(
+    (CAST(item_condition AS TEXT) = 'PRE_LOVED' AND in_stock_count IN (0, 1))
+    OR (CAST(item_condition AS TEXT) = 'BRAND_NEW' AND in_stock_count >= 0)
+)"""
+
+PRODUCT_UPDATE_SAFE_SQL = f"""COALESCE((
+    CAST(item_condition AS TEXT) IN ('BRAND_NEW', 'PRE_LOVED')
+    AND CAST(quantity_type AS TEXT) = CAST(item_condition AS TEXT)
+    AND {PRODUCT_STOCK_POLICY_VALID_SQL}
+), FALSE)"""
+
+
+def log_legacy_inventory_policy_violations(connection) -> int:
+    """Report legacy rows that startup must leave untouched.
+
+    Inventory quantities are never clamped or discarded during startup. The
+    operator can reconcile these rows after physically verifying inventory;
+    any routine update (including status and slug backfills) skips them so
+    PostgreSQL's NOT VALID checks cannot turn an unrelated migration into a
+    failed UPDATE.
+    """
+    rows = list(connection.execute(text(f"""
+        SELECT id, CAST(item_condition AS TEXT) AS item_condition,
+               CAST(quantity_type AS TEXT) AS quantity_type, in_stock_count
+        FROM products
+        WHERE NOT {PRODUCT_UPDATE_SAFE_SQL}
+        ORDER BY id
+    """)))
+    for row in rows:
+        logger.warning(
+            "Skipping startup product updates for %s: dual-inventory policy violation "
+            "(condition=%s, quantity_type=%s, stock=%s). Stock was preserved; "
+            "verify physical inventory and reconcile explicitly.",
+            row.id, row.item_condition, row.quantity_type, row.in_stock_count,
+        )
+    return len(rows)
 
 
 def apply_additive_schema_migrations():
@@ -283,16 +310,16 @@ def apply_additive_schema_migrations():
         # savepoint isolation so a legacy-shape surprise can never again stop
         # the store from booting.
         postgres_types = _postgres_column_types(connection, "products") if IS_POSTGRES else {}
-        item_condition_is_enum = postgres_types.get("item_condition") == "item_condition_enum"
         quantity_type_is_enum = postgres_types.get("quantity_type") == "quantity_type_enum"
         for statement in _dual_inventory_backfill_statements(
             postgres=IS_POSTGRES,
-            item_condition_is_enum=item_condition_is_enum,
             quantity_type_is_enum=quantity_type_is_enum,
         ):
             run_isolated(statement, "dual-inventory backfill")
+        log_legacy_inventory_policy_violations(connection)
         run_isolated(
-            "UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF')",
+            f"UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END "
+            f"WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF') AND {PRODUCT_UPDATE_SAFE_SQL}",
             "inventory_status refresh",
         )
         if IS_POSTGRES:
@@ -321,7 +348,8 @@ def apply_additive_schema_migrations():
         # Existing catalog prices predate transport allocation: preserve them as
         # the base price and start with a zero transport allocation."}
         run_isolated(
-            "UPDATE products SET base_price = selling_price WHERE base_price = 0 AND selling_price > 0",
+            f"UPDATE products SET base_price = selling_price WHERE base_price = 0 AND selling_price > 0 "
+            f"AND {PRODUCT_UPDATE_SAFE_SQL}",
             "transport base price backfill",
         )
         for statement in (
@@ -342,11 +370,20 @@ def apply_additive_schema_migrations():
 
 
 def backfill_product_slugs():
-    """Give every legacy catalog row a shareable /product/<slug> permalink."""
+    """Backfill permalinks only for rows that satisfy inventory constraints."""
     with get_db() as session:
+        missing_slug = (Product.slug.is_(None)) | (Product.slug == "")
+        missing_count = session.query(Product.id).filter(missing_slug).count()
         rows = session.query(Product).filter(
-            (Product.slug.is_(None)) | (Product.slug == "")
+            missing_slug, text(PRODUCT_UPDATE_SAFE_SQL)
         ).all()
+        skipped_count = missing_count - len(rows)
+        if skipped_count:
+            logger.warning(
+                "Skipped permalink backfill for %d product(s) that violate dual-inventory "
+                "checks; their stock values were left unchanged.",
+                skipped_count,
+            )
         if not rows:
             return
         taken = {

@@ -128,9 +128,12 @@
   //                order is considered confirmed. Pieces stay reserved for the
   //                payment window the server announces (default 30 minutes).
   let paymentConfig = { enabled: false, provider: "flutterwave", currency: "UGX", payment_window_minutes: 30 };
+  let paymentConfigLoaded = false;
   let paymentMethod = "cod";
+  let paymentMethodTouched = false;
   let paymentBusy = false;
   function setPaymentMethod(method) {
+    paymentMethodTouched = true;
     paymentMethod = method === "flutterwave" && paymentConfig.enabled ? "flutterwave" : "cod";
     renderCart();
   }
@@ -503,6 +506,7 @@
   let formState = {
     name: "",
     phone: "",
+    email: "",
     address: "",
     dropoff: "",
     notes: "",
@@ -702,6 +706,11 @@
 
         <input class="claim-input" id="coName" placeholder="Your Full Name *" autocomplete="name" value="${esc(formState.name)}" required />
         <input class="claim-input" id="coPhone" placeholder="Phone Number (e.g. 0758873398) *" autocomplete="tel" value="${esc(formState.phone)}" required />
+        ${paymentMethod === "flutterwave" ? `
+          <label class="claim-field-label" for="coEmail">Email for your secure payment receipt *</label>
+          <input class="claim-input" id="coEmail" type="email" placeholder="name@example.com" autocomplete="email" value="${esc(formState.email)}" required />
+          <p class="checkout-payment-note">Flutterwave securely collects your card or mobile-money details. Adonai Store never sees or stores your card number.</p>
+        ` : ""}
 
         <div class="delivery-toggle-row">
           <button type="button" class="deliv-toggle-btn ${deliveryType === 'boda' ? 'active' : ''}" id="btnDelivBoda">Adonai Delivery</button>
@@ -709,9 +718,10 @@
         </div>
 
         <div class="delivery-toggle-row" ${paymentConfig.enabled ? "" : 'style="display:none"'}>
-          <button type="button" class="deliv-toggle-btn ${paymentMethod === 'flutterwave' ? 'active' : ''}" id="btnPayNow">Pay now — MoMo & Card</button>
+          <button type="button" class="deliv-toggle-btn ${paymentMethod === 'flutterwave' ? 'active' : ''}" id="btnPayNow">Pay now — Card & MoMo</button>
           <button type="button" class="deliv-toggle-btn ${paymentMethod === 'cod' ? 'active' : ''}" id="btnPayLater">Pay on ${deliveryType === 'pickup' ? 'pickup' : 'delivery'}</button>
         </div>
+        ${paymentConfigLoaded && !paymentConfig.enabled ? `<p class="payment-unavailable-note" role="status">Secure online payment is temporarily unavailable. You can still place an order and pay on delivery or pickup.</p>` : ""}
         ${paymentConfig.enabled && paymentMethod === 'flutterwave' ? `<p class="delivery-service-note">Secure checkout by Flutterwave — MTN MoMo, Airtel Money, Visa & Mastercard. Your pieces stay reserved for ${esc(String(paymentConfig.payment_window_minutes || 30))} minutes while you pay.</p>` : ""}
 
         <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
@@ -741,9 +751,10 @@
     `;
 
     // Bind form inputs
-    const elName = $("#coName"), elPhone = $("#coPhone"), elAddr = $("#coAddress"), elDropoff = $("#coDropoff"), elNotes = $("#coNotes"), elArea = $("#coArea");
+    const elName = $("#coName"), elPhone = $("#coPhone"), elEmail = $("#coEmail"), elAddr = $("#coAddress"), elDropoff = $("#coDropoff"), elNotes = $("#coNotes"), elArea = $("#coArea");
     if (elName) elName.addEventListener("input", e => { formState.name = e.target.value; });
     if (elPhone) elPhone.addEventListener("input", e => { formState.phone = e.target.value; });
+    if (elEmail) elEmail.addEventListener("input", e => { formState.email = e.target.value; });
     if (elAddr) elAddr.addEventListener("input", e => { formState.address = e.target.value; });
     if (elDropoff) elDropoff.addEventListener("input", e => { formState.dropoff = e.target.value; });
     if (elNotes) elNotes.addEventListener("input", e => { formState.notes = e.target.value; });
@@ -794,6 +805,7 @@
 
     const name = formState.name.trim();
     const phone = formState.phone.trim();
+    const email = String(formState.email || "").trim().toLowerCase();
     const address = formState.address.trim();
     const dropoff = formState.dropoff.trim();
     const notes = formState.notes.trim();
@@ -806,6 +818,16 @@
     if (!phone || phone.length < 7) {
       toast("Please enter your phone number");
       const el = $("#coPhone"); if (el) el.focus();
+      return;
+    }
+    if (paymentMethod === "flutterwave" && !email) {
+      toast("Please enter your email address for the Flutterwave payment receipt");
+      const el = $("#coEmail"); if (el) el.focus();
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast("Please enter a valid email address");
+      const el = $("#coEmail"); if (el) el.focus();
       return;
     }
     if (deliveryType === "boda" && !address && !dropoff) {
@@ -870,7 +892,8 @@
         method: paymentInfo ? "flutterwave" : "cod",
         paymentStatus: (paymentInfo && paymentInfo.status) || "unpaid",
         paymentToken: paymentInfo ? paymentInfo.token : "",
-        paymentWindow: paymentInfo ? paymentInfo.payment_window_minutes : null
+        paymentWindow: paymentInfo ? paymentInfo.payment_window_minutes : null,
+        customerEmail: paymentInfo ? email : ""
       };
 
       cart = [];
@@ -897,7 +920,7 @@
     paymentBusy = true;
     renderCart();
     try {
-      const sessionData = await DB.createFlutterwaveSession(orderResult.id, orderResult.paymentToken);
+      const sessionData = await DB.createFlutterwaveSession(orderResult.id, orderResult.paymentToken, orderResult.customerEmail);
 
       if (sessionData.mock) {
         // Local development mock (no real keys configured): approve through
@@ -927,6 +950,7 @@
         customer: {
           name: (sessionData.customer && sessionData.customer.name) || undefined,
           phone_number: (sessionData.customer && sessionData.customer.phone) || undefined,
+          email: (sessionData.customer && sessionData.customer.email) || orderResult.customerEmail,
         },
         customizations: {
           title: (S.store_name || "Adonai Store") + " — Secure checkout",
@@ -1044,13 +1068,22 @@
   renderCart();
 
   // Discover whether online payment is offered (keys configured server-side).
-  // When disabled, the "Pay now" toggle simply never renders.
+  // When disabled, show a clear availability note and leave delivery/pickup pay available.
   DB.getPaymentConfig().then(config => {
-    const wasEnabled = paymentConfig.enabled;
     paymentConfig = Object.assign(paymentConfig, config || {});
+    // If the gateway is ready, make secure pay-now the obvious default. The
+    // customer can still deliberately switch to pay on delivery/pickup.
+    if (paymentConfig.enabled && !paymentMethodTouched) paymentMethod = "flutterwave";
     if (!paymentConfig.enabled && paymentMethod === "flutterwave") paymentMethod = "cod";
-    if (paymentConfig.enabled !== wasEnabled) renderCart();
-  }).catch(() => {});
+    paymentConfigLoaded = true;
+    renderCart();
+    // Load the provider SDK before the customer submits. This makes a retry
+    // from the visible Pay button a direct user gesture on mobile browsers.
+    if (paymentConfig.enabled) DB.loadFlutterwaveScript().catch(() => {});
+  }).catch(() => {
+    paymentConfigLoaded = true;
+    renderCart();
+  });
 
   // "Checkout now" from a Product Detail Page lands on /?cart=1 — open the
   // bag drawer straight away so the shopper keeps their momentum.
