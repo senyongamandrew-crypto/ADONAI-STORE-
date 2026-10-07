@@ -88,9 +88,12 @@ AUTH_RATE_WINDOW = int(os.environ.get("AUTH_RATE_WINDOW", "300"))       # second
 API_RATE_LIMIT = int(os.environ.get("API_RATE_LIMIT", "300"))           # requests
 API_RATE_WINDOW = int(os.environ.get("API_RATE_WINDOW", "60"))          # seconds
 
+# STORE_MASTER_KEY is the canonical Render environment variable for the
+# store-owner passkey. Legacy admin variable names stay accepted for existing
+# deployments; the secret is compared server-side and never returned by APIs.
 ADMIN_ENV_VARS = [
-    "ADMIN_ACCESS_PIN", "ADMIN_PIN", "ADMIN_KEY", "ADMIN_ACCESS_KEY",
-    "ADMIN_MASTER_KEY", "MASTER_KEY", "MASTER_PIN", "STORE_MASTER_KEY",
+    "STORE_MASTER_KEY", "ADMIN_ACCESS_PIN", "ADMIN_PIN", "ADMIN_KEY",
+    "ADMIN_ACCESS_KEY", "ADMIN_MASTER_KEY", "MASTER_KEY", "MASTER_PIN",
     "RENDER_ADMIN_KEY", "TERMINAL_ADMIN_KEY"
 ]
 
@@ -152,6 +155,27 @@ def stock_status_for(product, quantity=None):
     if remaining > 0:
         return "AVAILABLE"
     return "OUT_OF_STOCK"
+
+
+def normalize_fulfillment_stage(value):
+    """Convert legacy/operator wording to the canonical order workflow labels."""
+    raw = str(value or "").strip()
+    key = re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", raw.lower()))
+    aliases = {
+        "pending": "Unfulfilled", "incoming": "Unfulfilled", "received": "Unfulfilled",
+        "new": "Unfulfilled", "new order": "Unfulfilled", "unfulfilled": "Unfulfilled",
+        "needs review": "Unfulfilled", "awaiting review": "Unfulfilled", "waiting review": "Unfulfilled",
+        "waiting for review": "Unfulfilled", "received and waiting for review": "Unfulfilled",
+        "awaiting fulfillment": "Unfulfilled", "awaiting processing": "Unfulfilled",
+        "assembly": "In Assembly", "assembling": "In Assembly", "in assembly": "In Assembly",
+        "in progress": "In Assembly", "processing": "In Assembly", "packing": "In Assembly", "packed": "In Assembly",
+        "ready": "Ready for Pickup", "ready for pickup": "Ready for Pickup",
+        "ready for dispatch": "Dispatched", "ready to dispatch": "Dispatched",
+        "with rider": "Dispatched", "handed over": "Dispatched", "out for delivery": "Dispatched", "dispatched": "Dispatched",
+        "delivered": "Completed", "complete": "Completed", "completed": "Completed",
+        "canceled": "Cancelled", "cancelled": "Cancelled", "void": "Cancelled",
+    }
+    return aliases.get(key, raw)
 
 
 def public_store_settings(rows) -> dict:
@@ -1278,14 +1302,23 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not order:
                     return json_response({"ok": False, "error": "Order not found"}, status=404)
 
-                next_stage = body.get("fulfillment_status") or body.get("dispatch_status")
+                next_stage = body.get("fulfillment_status")
+                if next_stage is None:
+                    next_stage = body.get("dispatch_status")
+                restored_units = 0
                 if next_stage is not None:
-                    next_stage = str(next_stage).strip()
+                    next_stage = normalize_fulfillment_stage(next_stage)
                     if next_stage not in lifecycle:
                         return json_response({"ok": False, "error": "Unknown fulfillment status"}, status=400)
-                    current = order.dispatch_status or "Unfulfilled"
+                    current = normalize_fulfillment_stage(
+                        order.dispatch_status or ("Unfulfilled" if order.channel == "web" else "Completed")
+                    )
+                    # Legacy databases can have a cancelled lifecycle flag but a
+                    # missing dispatch label. Treat that as cancelled so retries
+                    # never restore the same stock twice.
+                    if str(order.status or "").strip().lower() in {"cancelled", "canceled", "void"}:
+                        current = "Cancelled"
                     allowed = {
-                        "Pending": {"Unfulfilled", "In Assembly", "Cancelled"},
                         "Unfulfilled": {"In Assembly", "Cancelled"},
                         "In Assembly": {"Ready for Pickup", "Dispatched", "Cancelled"},
                         "Ready for Pickup": {"Completed", "Cancelled"},
@@ -1299,8 +1332,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         for item in order.items:
                             product = session.query(Product).filter_by(id=item.product_id).with_for_update().first()
                             if product:
-                                product.in_stock_count = int(product.in_stock_count or 0) + int(item.qty or 0)
-                                if product.inventory_status == "OUT_OF_STOCK":
+                                quantity = max(0, int(item.qty or 0))
+                                product.in_stock_count = int(product.in_stock_count or 0) + quantity
+                                restored_units += quantity
+                                if product.inventory_status == "OUT_OF_STOCK" and product.in_stock_count > 0:
                                     product.inventory_status = "AVAILABLE"
                     order.dispatch_status = next_stage
                     order.status = (
@@ -1317,7 +1352,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     order.tender_type = str(body.get("payment_method") or "cash").strip().lower()
                 order.updated_at = datetime.utcnow()
                 session.flush()
-                return json_response({"ok": True, "order": order.to_dict()})
+                return json_response({"ok": True, "order": order.to_dict(), "stock_restored_units": restored_units})
 
         if clean_path == "/api/orders" and method == "POST":
             channel = str(body.get("channel", "web")).lower()
@@ -2743,7 +2778,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 "status": "active",
                 "has_env_admin_key": has_admin_env,
                 "has_env_staff_key": has_staff_env,
-                "supported_keys": ["ADMIN_ACCESS_PIN", "STAFF_TERMINAL_KEY", "TERMINAL_KEY", "ADMIN_KEY", "STAFF_KEY", "MASTER_KEY"]
+                "supported_keys": ["STORE_MASTER_KEY", "ADMIN_ACCESS_PIN", "STAFF_TERMINAL_KEY", "TERMINAL_KEY", "ADMIN_KEY", "STAFF_KEY", "MASTER_KEY"]
             })
 
         if clean_path == "/api/auth/verify" and method == "POST":

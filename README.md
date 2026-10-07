@@ -5,7 +5,7 @@ A production-grade unified retail and e-commerce system for **Adonai Store** (Pl
 1. 🛍️ **Public Web Storefront (Render Deployment)**: Lightweight, mobile-responsive, customer-facing e-commerce application served at `/` on Render. Public storefront contains **zero POS/admin links or authentication triggers**.
 2. 📱 **Android POS App (Native APK shell)**: Standalone cashier register and catalog intake terminal packaged into a real, signed Android APK (`com.adonaithrift.pos`).
 3. 🌐 **Cross-Navigation (POS to Website Only)**: The Android POS app includes a **"🌐 Open Live Web Storefront ↗"** button that triggers an external Android intent to open the live Render site in the phone's default browser. The public website has no return mechanism to the POS app.
-4. 🔒 **Real-Time Data Sync & Endpoint Security**: Atomically decrements database stock across both channels. POS backend endpoints are secured via JWT and Staff Terminal Keys (`STAFF_TERMINAL_KEY` / `ADMIN_ACCESS_PIN`).
+4. 🔒 **Real-Time Data Sync & Endpoint Security**: Atomically decrements database stock across both channels. POS backend endpoints are secured via JWT and terminal credentials (`STAFF_TERMINAL_KEY` / `STORE_MASTER_KEY`; legacy admin aliases remain supported).
 
 ---
 
@@ -200,11 +200,14 @@ details, delivery fees, checkout messages, and browser title without requiring a
 redeploy. Admin and Master Key values remain excluded from every public settings response.
 
 ### Render Environment Variables
-Configure in your Render Dashboard (**Environment** tab):
-- `STAFF_TERMINAL_KEY=ADONAI-POS-2026` (Authorizes POS Cashier Register terminals)
-- `ADMIN_ACCESS_PIN=246810` (Authorizes Store Admin & full operations console)
-- `JWT_SECRET=your-secure-signing-secret`
+Configure these in your Render Dashboard (**Environment** tab); never commit real secrets:
+- `STORE_MASTER_KEY=<long-unique-secret>` (preferred store-owner passkey; unlocks the Admin Suite and is checked server-side)
+- `STAFF_TERMINAL_KEY=<long-unique-secret>` (direct POS Cashier Register access)
+- `ADMIN_ACCESS_PIN` / `ADMIN_KEY` remain accepted as backward-compatible admin credential aliases
+- `JWT_SECRET=<long-random-secret>`
 - `DATABASE_URL=postgresql://...` (Render Managed PostgreSQL)
+
+The master passkey is not embedded in the frontend or returned by public settings APIs.
 
 ---
 
@@ -241,8 +244,9 @@ Every request in the console is protected by a 30-second network timeout with a 
 ## 4c. Admin Suite — One Gate, One Passkey
 
 The operations console (`/admin`) is consolidated as the **Admin Suite**: a
-single full-screen gate asks for **one store master passkey** (the
-`ADMIN_ACCESS_PIN`/configured master key, or an admin-role staff PIN). After
+single full-screen gate asks for **one store master passkey** (the server-side
+`STORE_MASTER_KEY` environment variable, a backward-compatible admin environment
+key/configured database key, or an admin-role staff PIN). After
 that single unlock, every dashboard inside — Sales Analytics, Fulfillment &
 Orders, Inventory Rack, Catalog Intake, Posting Audit Logs, Delivery Dispatch,
 Financial Ledgers (all six workspaces), Staff & Permissions, and Store Settings —

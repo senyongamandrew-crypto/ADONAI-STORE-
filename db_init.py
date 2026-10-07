@@ -675,9 +675,9 @@ def seed_settings(session):
         "currency": "UGX",
         "base_delivery_fee": "7000",
         "boda_base_fee": "7000",
-        # SECURITY: no default master_key is seeded. Admin access comes from
-        # the ADMIN_ACCESS_PIN / ADMIN_KEY environment variables, or a key the
-        # owner sets in System Parameters after signing in.
+        # SECURITY: no default master_key is seeded. The preferred store-owner
+        # passkey is the server-only STORE_MASTER_KEY environment variable;
+        # legacy admin env aliases and a System Parameters key remain supported.
         "receipt_footer": "Thank you for shopping at Adonai Store! Returns accepted within 2 days with valid receipt."
     }
     for k, v in defaults.items():

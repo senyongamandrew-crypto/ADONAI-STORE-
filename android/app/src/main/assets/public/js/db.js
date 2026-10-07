@@ -53,12 +53,17 @@
     adjustment: "Adjustment (Drawer Recount / Correction)"
   };
   const orderLanes = s => {
-    if (s.status === "cancelled" || s.dispatch_status === "Cancelled") return "completed";
-    const d = s.dispatch_status || (s.channel === "web" ? "Unfulfilled" : "Completed");
-    if (d === "Unfulfilled" || d === "Pending" || d === "Incoming") return "incoming";
-    if (d === "In Assembly" || d === "Packed") return "fulfillment";
-    if (d === "Ready for Pickup" || d === "Dispatched" || d === "With rider" || d === "Handed over") return "ready";
-    return "completed";
+    const status = String(s && s.status || "").trim().toLowerCase();
+    const raw = String(s && s.dispatch_status || (s && s.channel === "web" ? "Unfulfilled" : "Completed"))
+      .trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+    if (["cancelled", "canceled", "void"].includes(status) || ["cancelled", "canceled", "void"].includes(raw)) return "cancelled";
+    if (["unfulfilled", "pending", "incoming", "received", "new", "new order", "needs review", "awaiting review", "waiting review", "waiting for review", "received and waiting for review", "awaiting fulfillment", "awaiting processing"].includes(raw)) return "incoming";
+    if (["in assembly", "assembly", "assembling", "in progress", "processing", "packing", "packed"].includes(raw)) return "fulfillment";
+    if (["ready", "ready for pickup", "ready for dispatch", "ready to dispatch", "dispatched", "with rider", "handed over", "out for delivery"].includes(raw)) return "ready";
+    if (["completed", "complete", "delivered"].includes(raw) || status === "completed") return "completed";
+    // Unknown web stages stay visible in the operator's intake queue instead
+    // of silently disappearing into the completed lane.
+    return s && s.channel === "web" ? "incoming" : "completed";
   };
   // SECURITY: there is no default/sandbox master key. Admin access requires a
   // key explicitly configured by the owner (environment variable on the server
@@ -369,6 +374,9 @@
   }
 
   let operationalSyncInFlight = null;
+  let operationalSyncOnline = null;
+  let operationalSyncLastSyncedAt = null;
+  let operationalSyncStatusCode = 0;
   function pullOperationalData() {
     if (operationalSyncInFlight || typeof fetch === "undefined") return operationalSyncInFlight || Promise.resolve(false);
     const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
@@ -379,7 +387,12 @@
     }).then(async response => {
       let data = null;
       try { data = await response.json(); } catch (e) {}
-      if (!response.ok || !data || !Array.isArray(data.products)) return false;
+      if (!response.ok || !data || !Array.isArray(data.products)) {
+        operationalSyncOnline = false;
+        operationalSyncStatusCode = response.status || 502;
+        broadcast("sync");
+        return false;
+      }
       reload();
       state.products = data.products;
       if (Array.isArray(data.sales)) state.sales = data.sales;
@@ -391,9 +404,17 @@
       }, line));
       save();
       if (data.settings) applyRemoteSettings(data.settings);
+      operationalSyncOnline = true;
+      operationalSyncStatusCode = 200;
+      operationalSyncLastSyncedAt = new Date().toISOString();
       broadcast("*");
       return true;
-    }).catch(() => false).finally(() => { operationalSyncInFlight = null; });
+    }).catch(() => {
+      operationalSyncOnline = false;
+      operationalSyncStatusCode = 0;
+      broadcast("sync");
+      return false;
+    }).finally(() => { operationalSyncInFlight = null; });
     return operationalSyncInFlight;
   }
 
@@ -677,6 +698,14 @@
 
     on(table, cb) { const s = { table, cb }; subs.push(s); return () => { const i = subs.indexOf(s); if (i >= 0) subs.splice(i, 1); }; },
     reloadNow() { state = null; reload(); },
+    refreshOperationalData() { return pullOperationalData(); },
+    operationalSyncStatus() {
+      return {
+        online: operationalSyncOnline,
+        last_synced_at: operationalSyncLastSyncedAt,
+        status: operationalSyncStatusCode
+      };
+    },
 
     /* ----- settings ----- */
     getSettings() { reload(); return Object.assign({}, state.settings); },
