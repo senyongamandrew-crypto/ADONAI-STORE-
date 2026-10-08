@@ -299,7 +299,8 @@
         <h4 class="sec">3. Pricing Structure (UGX)</h4>
         <div class="fgrid">
           <div class="field full"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
-          <div class="field"><label>Cost price (UGX)</label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
+          <div class="field full" id="inLotGradeField" hidden><label>Graded tier<span class="fhint" id="inLotGradeHint">Pre-graded tier · locks the unit COGS</span></label><select class="sel-full" id="inLotGrade"><option value="">Choose tier…</option></select></div>
+          <div class="field"><label>Cost price (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
           <div class="field"><label>Base price (UGX)<span class="fhint">Before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
           <div class="field"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
@@ -467,18 +468,37 @@
         <div class="finance-split">
           <form class="card finance-form" id="stockLotForm" novalidate>
             <div class="finance-card-head"><div><p class="kicker">INVENTORY LANDED COST</p><h3>Register a stock lot / bale</h3></div><span class="finance-icon">▦</span></div>
-            <p class="muted small">The landed unit cost is available in POS Intake so every tagged piece receives accurate COGS.</p>
+            <p class="muted small">Apportion the landed investment across grade tiers — every tagged piece then receives an accurate, locked unit COGS from its tier.</p>
             <div class="finance-form-grid">
               <div class="field"><label for="lotSupplier">Supplier</label><input class="sel-full" id="lotSupplier" required maxlength="150" placeholder="Supplier or market source" /></div>
               <div class="field"><label for="lotDescription">Lot description</label><input class="sel-full" id="lotDescription" required maxlength="500" placeholder="e.g. Grade A mixed denim bale" /></div>
               <div class="field"><label for="lotAcquisition">Acquisition cost (UGX)</label><input class="sel-full" id="lotAcquisition" type="number" min="0" step="1" required /></div>
               <div class="field"><label for="lotShipping">Shipping / handling (UGX)</label><input class="sel-full" id="lotShipping" type="number" min="0" step="1" value="0" required /></div>
-              <div class="field"><label for="lotItemCount">Saleable item count</label><input class="sel-full" id="lotItemCount" type="number" min="1" step="1" required /></div>
               <div class="field"><label for="lotPayment">Paid from</label><select class="sel-full" id="lotPayment"><option value="cash">Cash Drawer</option><option value="mobile_money">Mobile Money</option><option value="bank">Bank Account</option></select></div>
               <div class="field"><label for="lotDate">Acquisition date &amp; time</label><input class="sel-full" id="lotDate" type="datetime-local" required /></div>
-              <div class="field unit-cost-field"><label>Calculated unit cost</label><output id="lotUnitCost">UGX 0 / item</output></div>
             </div>
-            <button class="btn primary big finance-submit" type="submit" id="lotSubmit">Register lot &amp; cost allocation</button>
+
+            <div class="lot-landed-banner" aria-live="polite">
+              <div><span>Total landed investment</span><strong id="lotLandedTotal">UGX 0</strong></div>
+              <div class="banner-side"><span>Pieces graded</span><strong id="lotTotalPcs">0 pcs</strong></div>
+              <div class="banner-side"><span>Blended unit cost</span><strong id="lotUnitCost">UGX 0 / item</strong></div>
+            </div>
+
+            <div class="lot-grade-builder">
+              <div class="lot-grade-head"><h4>In-batch tier grading breakdown</h4><button type="button" id="btnAddGradeRow">+ Add grade tier</button></div>
+              <div class="lot-grade-table-wrap">
+                <table class="lot-grade-table">
+                  <thead><tr><th class="w-name">Grade / tier</th><th class="w-num">Expected pcs</th><th class="w-num">Cost weight %</th><th>Calculated unit COGS</th><th class="w-price">Target retail (UGX)</th><th></th></tr></thead>
+                  <tbody id="lotGradeRows"></tbody>
+                </table>
+              </div>
+              <div class="lot-weight-check bad" id="lotWeightCheck">
+                <span class="w-label">Weight allocation check</span>
+                <span class="w-hint" id="lotWeightHint">Tier weights must total exactly 100% before the lot can be saved.</span>
+                <span class="w-value" id="lotWeightValue">0% / 100%</span>
+              </div>
+            </div>
+            <button class="btn primary big finance-submit" type="submit" id="lotSubmit">Register lot &amp; lock grading</button>
           </form>
           <div class="card finance-table-card">
             <div class="finance-card-head"><div><p class="kicker">COST ALLOCATION</p><h3>Registered lots</h3></div><span class="muted small">Newest first</span></div>

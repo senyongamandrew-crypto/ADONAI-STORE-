@@ -217,7 +217,16 @@ The Admin → **Financial Ledgers** view is a six-workspace, audit-grade operati
 
 ### Posting workspaces (reliable, validated data entry)
 - **01 Daily Expense** — one tap posts a cash-out and its balanced double-entry journal atomically. Inline plain-language validation blocks empty categories, zero/negative amounts, future dates, and vendor-less cash-outs of UGX 500,000+ so the books stay meaningful for reporting and tax.
-- **02 Bale Costs** — registers supplier bales with landed unit-cost allocation, again with guard-rails on counts, costs, and dates. The unit cost flows straight into POS Intake COGS.
+- **02 Bale Costs** — registers supplier bales with **multi-tier in-batch grading**: staff split the landed investment (acquisition + shipping) across named grade tiers by cost-weight percentages. The form blocks saving unless the weights total exactly 100%, previews each tier's calculated unit COGS live, and books the balanced double-entry journal in the same transaction. The API recomputes every tier's unit COGS server-side (largest-remainder budgets, reconciled to the shilling) — client-supplied COGS is never trusted. Legacy un-graded lots keep a single blended unit cost.
+
+### Multi-tier lot grading → locked-COGS catalog tagging
+Bales rarely contain one quality level, so pricing a mixed bale at one blended cost quietly misprices every piece. The grading flow fixes that end to end:
+
+1. **Register** the lot in Bale Costs with tiers (e.g. *Tier 1 — Premium* 40% × 10 pcs, *Tier 2 — Standard* 40% × 30 pcs, *Tier 3 — Clearance* 20% × 20 pcs). Tier budgets must partition the landed investment exactly; per-piece rounding drift is folded into the highest-budget tier so selling every graded piece recovers the investment to the shilling.
+2. **Tag** pieces in Intake (or the Android POS): picking the lot exposes a tier dropdown; the tier **locks the unit COGS** (read-only — manual edits are impossible and the server re-locks regardless) and pre-fills the retail price from the tier's target selling price. A graded lot refuses tagging without a tier, and both the tier and lot enforce per-tier piece capacity (`409` when a tier is fully tagged).
+3. **Trace**: products persist `stock_lot_id` + `lot_grade_id`, so COGS on every sale is attributable back to the exact bale and tier.
+
+Endpoints: `POST/GET /api/finance/stock-lots` (graded creation accepts a `grades[]` array; responses embed tier breakdowns with remaining counts) and `POST /api/products` with `lot_grade_id`. Schema: `migrations/20261008_multi_tier_lot_grading.sql` (also auto-applied on boot via SQLAlchemy `create_all` + the additive column migration). Tests: `python3 tests/test_multi_tier_grading.py`.
 - **05 General Journal** — searchable/filterable double-entry ledger with running balances.
 
 ### Control workspaces

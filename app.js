@@ -1446,18 +1446,78 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const demo = $("#inDemo").value || "Men";
     return `ADN-${DEMO_CODES[demo] || "GEN"}-${1000 + Math.floor(Math.random() * 9000)}`;
   }
+  /* Intake-side cache of registered lots so the tier dropdown can render
+     without another round trip. Server-side math remains authoritative. */
+  let intakeLotsCache = [];
+  const findIntakeLot = id => intakeLotsCache.find(lot => lot.id === id) || null;
+
   async function loadIntakeStockLots() {
     const select = $("#inStockLot");
     if (!select) return;
     try {
       const data = await DB.financeRequest("stock-lots", { method:"GET" });
       const current = select.value;
-      const lots = (data.stock_lots || []).filter(lot => lot.remaining_count > 0);
-      select.innerHTML = `<option value="">No registered lot selected</option>` + lots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left · ${ugx(lot.unit_cost)}/item</option>`).join("");
+      intakeLotsCache = data.stock_lots || [];
+      const lots = intakeLotsCache.filter(lot => lot.remaining_count > 0);
+      select.innerHTML = `<option value="">No registered lot selected</option>` + lots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left${(lot.grades || []).length ? ` · ${lot.grades.length} tiers` : ` · ${ugx(lot.unit_cost)}/item`}</option>`).join("");
       select.value = current;
+      syncIntakeLotGradeUI();
     } catch (error) {
       select.innerHTML = `<option value="">Sign in to load registered lots</option>`;
     }
+  }
+
+  /* ---- Locked-COGS intake helpers --------------------------------------
+     Selecting a pre-graded tier fixes the unit cost to the tier's locked
+     COGS (recomputed server-side at lot registration) and suggests the
+     tier's target retail price. Clearing the lot/tier unlocks the field. */
+  function lockIntakeCost(locked, note) {
+    const cost = $("#inCost");
+    if (!cost) return;
+    cost.readOnly = !!locked;
+    cost.classList.toggle("locked-money", !!locked);
+    const hint = $("#inCostHint");
+    if (hint) hint.textContent = locked ? (note || "Locked by lot tier") : "";
+  }
+
+  function syncIntakeLotGradeUI() {
+    const field = $("#inLotGradeField");
+    const select = $("#inLotGrade");
+    if (!field || !select) return;
+    const lot = findIntakeLot($("#inStockLot") && $("#inStockLot").value);
+    const grades = ((lot && lot.grades) || []).filter(g => g.remaining_count > 0);
+    if (!lot || !((lot.grades || []).length)) {
+      field.hidden = true;
+      select.innerHTML = `<option value="">Choose tier…</option>`;
+      lockIntakeCost(false);
+      return;
+    }
+    field.hidden = false;
+    select.innerHTML = `<option value="">Choose tier…</option>` + grades.map(g => `<option value="${esc(g.id)}">${esc(g.grade_name)} · ${g.remaining_count} left · COGS ${ugx(g.unit_cogs)}</option>`).join("");
+    const hint = $("#inLotGradeHint");
+    if (hint) hint.textContent = grades.length ? "Pre-graded tier · locks the unit COGS" : "All tiers fully tagged — no pieces left";
+    if (!grades.some(g => g.id === select.value)) select.value = "";
+    applyIntakeGradeSelection();
+  }
+
+  function applyIntakeGradeSelection() {
+    const lot = findIntakeLot($("#inStockLot") && $("#inStockLot").value);
+    const gradeId = $("#inLotGrade") ? $("#inLotGrade").value : "";
+    const grade = lot ? ((lot.grades || []).find(g => g.id === gradeId) || null) : null;
+    if (!grade) {
+      lockIntakeCost(false);
+      return;
+    }
+    $("#inCost").value = grade.unit_cogs;
+    lockIntakeCost(true, `Locked · ${grade.grade_name} tier COGS`);
+    // Pre-fill the retail price from the tier target unless the staff member
+    // already typed a deliberate price for this piece.
+    const sell = $("#inSell");
+    if (grade.target_selling_price && (!Number(sell.value) || sell.dataset.gradeSuggested === "1")) {
+      sell.value = grade.target_selling_price;
+      sell.dataset.gradeSuggested = "1";
+    }
+    paintTag();
   }
   /* ------------------------------------------------------------------
      FLAT-LAY MEASUREMENTS (intake → product detail page)
@@ -1533,10 +1593,19 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
     $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; paintTag(); });
     $("#inStockLot").addEventListener("change", () => {
-      const option = $("#inStockLot").options[$("#inStockLot").selectedIndex];
-      if (option && option.dataset.unitCost) $("#inCost").value = option.dataset.unitCost;
+      syncIntakeLotGradeUI();
+      const lot = findIntakeLot($("#inStockLot").value);
+      if (lot && !((lot.grades || []).length)) {
+        // Legacy un-graded lot: fill the blended landed unit cost (editable).
+        const option = $("#inStockLot").options[$("#inStockLot").selectedIndex];
+        if (option && option.dataset.unitCost) $("#inCost").value = option.dataset.unitCost;
+        lockIntakeCost(false);
+      }
       paintTag();
     });
+    $("#inLotGrade").addEventListener("change", applyIntakeGradeSelection);
+    // A deliberately typed price overrides the tier's suggested target.
+    $("#inSell").addEventListener("input", () => { $("#inSell").dataset.gradeSuggested = "0"; });
     $("#inCat").addEventListener("change", () => {
       const g = Object.keys(GROUPS).find(k => GROUPS[k].includes($("#inCat").value));
       if (g) $("#inGroup").value = g;
@@ -1639,6 +1708,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       fabric_grading_notes: $("#inFabricNotes").value.trim(),
       cost_price: Number($("#inCost").value) || 0,
       stock_lot_id: $("#inStockLot").value,
+      lot_grade_id: ($("#inLotGradeField") && !$("#inLotGradeField").hidden && $("#inLotGrade")) ? $("#inLotGrade").value : "",
       base_price: Number($("#inSell").value) || 0,
       selling_price: Number($("#inSell").value) || 0,
       total_transport_cost: Number($("#inTransport").value) || 0,
@@ -1663,6 +1733,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     };
     if (!vals.name) return toast("Item title is required", false);
     if (!vals.selling_price) return toast("Set a sell price first", false);
+    if (vals.stock_lot_id && !vals.lot_grade_id) {
+      const lot = findIntakeLot(vals.stock_lot_id);
+      if (lot && (lot.grades || []).length) {
+        if ($("#inLotGrade")) $("#inLotGrade").focus();
+        return toast("This lot is tier-graded — choose a grade tier so COGS stays locked", false);
+      }
+    }
     try {
       const p = await DB.addProduct(vals);
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
@@ -1670,15 +1747,20 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes",
          "inFabric", "inCare", "inMeasureNote", "inFlaws"].forEach(id => $("#" + id).value = "");
         $("#inFlawPhoto").value = "-1";
+        $("#inSell").dataset.gradeSuggested = "0";
         buildMeasureFields($("#inMeasureSet").value);
         intakePhotos.fill(""); paintAngles();
         $("#inStockLot").value = "";
+        syncIntakeLotGradeUI();
+        lockIntakeCost(false);
         // Next item restarts from the global System Parameters base fee.
         syncIntakeTransportDefault(true);
         $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();
       } else {
         renderAll();
       }
+      // Tier remaining counts moved — refresh the intake lot cache.
+      loadIntakeStockLots();
     } catch (err) { toast(err.message, false); }
   }
 
@@ -2030,6 +2112,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     });
   }
 
+  function lotGradesSummary(lot) {
+    const grades = lot.grades || [];
+    if (!grades.length) return "";
+    return `<table class="lot-grade-summary"><thead><tr><th>Tier</th><th class="num">Pcs</th><th class="num">Weight</th><th class="num">Locked COGS</th><th class="num">Target</th><th class="num">Left</th></tr></thead><tbody>${grades.map(g => `
+      <tr><td>${esc(g.grade_name)}</td><td class="num">${g.expected_count}</td><td class="num">${g.cost_weight_percentage}%</td><td class="num">${ugx(g.unit_cogs)}</td><td class="num">${ugx(g.target_selling_price)}</td><td class="num ${g.remaining_count ? "" : "depleted"}">${g.remaining_count}</td></tr>`).join("")}</tbody></table>`;
+  }
+
   async function loadStockLots() {
     const host = $("#stockLotList");
     if (!host) return;
@@ -2038,7 +2127,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const data = await DB.financeRequest("stock-lots", { method:"GET" });
       const rows = data.stock_lots || [];
       host.innerHTML = rows.length ? `<div class="fin-list">${rows.map(row => `
-        <article class="fin-list-row"><div><div class="fin-list-title">${esc(row.lot_code)} <span class="fin-status">${esc(row.status)}</span></div><div class="fin-list-meta">${esc(row.supplier)} · ${esc(row.description)}<br/>${row.allocated_count} allocated · ${row.remaining_count} remaining · ${readableDateTime(row.acquired_at)}</div></div><div class="fin-list-side"><strong>${ugx(row.unit_cost)} / item</strong><span class="small muted">Landed ${ugx(row.total_landed_cost)}</span></div></article>`).join("")}</div>` : `<div class="finance-empty"><div><strong>No lots registered</strong><p class="small">Register a bale before tagging its items.</p></div></div>`;
+        <article class="fin-list-row"><div><div class="fin-list-title">${esc(row.lot_code)} <span class="fin-status">${esc(row.status)}</span>${(row.grades || []).length ? ` <span class="lot-grade-pill">${row.grades.length} tiers</span>` : ""}</div><div class="fin-list-meta">${esc(row.supplier)} · ${esc(row.description)}<br/>${row.allocated_count} allocated · ${row.remaining_count} remaining · ${readableDateTime(row.acquired_at)}</div>${lotGradesSummary(row)}</div><div class="fin-list-side"><strong>${ugx(row.unit_cost)} / item</strong><span class="small muted">Landed ${ugx(row.total_landed_cost)}</span></div></article>`).join("")}</div>` : `<div class="finance-empty"><div><strong>No lots registered</strong><p class="small">Register a bale before tagging its items.</p></div></div>`;
     } catch (error) { host.innerHTML = financeError(error); }
   }
 
@@ -2454,7 +2543,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
      ============================================================ */
   function setFieldError(input, message) {
     const field = input.closest(".field");
-    if (!field) return;
+    if (!field) {
+      // Table-embedded inputs (lot tier builder) have no .field wrapper —
+      // flag the input directly and surface the message on the weight panel.
+      input.classList.toggle("invalid-input", !!message);
+      const panelHint = $("#lotWeightHint");
+      if (message && panelHint && input.closest("#lotGradeRows")) panelHint.textContent = message;
+      return;
+    }
     field.classList.toggle("invalid", !!message);
     let hint = field.querySelector(".field-error-text");
     if (message) {
@@ -2506,25 +2602,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
   function validateLotForm(show = true) {
     let firstBad = null;
-    const unitCost = ((asInt($("#lotAcquisition").value) + asInt($("#lotShipping").value)) / Math.max(1, asInt($("#lotItemCount").value)));
-    const rules = [
-      [$("#lotSupplier"), $("#lotSupplier").value.trim().length >= 3 ? "" : "Name the supplier or market (min 3 characters)"],
-      [$("#lotDescription"), $("#lotDescription").value.trim().length >= 3 ? "" : "Describe the bale contents so intake tags make sense"],
-      [$("#lotAcquisition"), asInt($("#lotAcquisition").value) >= 1 ? "" : "Acquisition cost must be at least UGX 1"],
-      [$("#lotShipping"), asInt($("#lotShipping").value) >= 0 ? "" : "Shipping cannot be negative"],
-      [$("#lotItemCount"), (() => {
-        const count = asInt($("#lotItemCount").value);
-        if (count < 1) return "A bale must contain at least 1 saleable item";
-        if (count > 10000) return "Count looks too high for one bale — verify before registering";
-        if (unitCost > 5000000) return `Unit cost of ${ugxCompact(unitCost)} per piece looks unrealistic — check cost and count`;
+    const mark = (input, message) => {
+      if (show && input) setFieldError(input, message);
+      if (message && !firstBad && input) firstBad = input;
+    };
+    mark($("#lotSupplier"), $("#lotSupplier").value.trim().length >= 3 ? "" : "Name the supplier or market (min 3 characters)");
+    mark($("#lotDescription"), $("#lotDescription").value.trim().length >= 3 ? "" : "Describe the bale contents so intake tags make sense");
+    mark($("#lotAcquisition"), asInt($("#lotAcquisition").value) >= 1 ? "" : "Acquisition cost must be at least UGX 1");
+    mark($("#lotShipping"), asInt($("#lotShipping").value) >= 0 ? "" : "Shipping cannot be negative");
+    mark($("#lotDate"), (() => {
+      if (!$("#lotDate").value) return "Pick the acquisition date";
+      return notFuture($("#lotDate"), "Acquisition date");
+    })());
+    // Per-tier integrity: names, piece counts and weights must be usable,
+    // then the weights must partition the investment to exactly 100%.
+    lotGradeRows.forEach((row, index) => {
+      const input = field => $(`#lotGradeRows [data-grade-field="${field}"][data-idx="${index}"]`);
+      mark(input("grade_name"), String(row.grade_name || "").trim().length >= 3 ? "" : `Tier ${index + 1} needs a name (min 3 characters)`);
+      mark(input("expected_count"), (() => {
+        const count = asInt(row.expected_count);
+        if (count < 1) return `Tier ${index + 1} must expect at least 1 piece`;
+        if (count > 10000) return `Tier ${index + 1} count looks too high — verify before registering`;
         return "";
-      })()],
-      [$("#lotDate"), (() => {
-        if (!$("#lotDate").value) return "Pick the acquisition date";
-        return notFuture($("#lotDate"), "Acquisition date");
-      })()],
-    ];
-    rules.forEach(([input, message]) => { if (show) setFieldError(input, message); if (message && !firstBad) firstBad = input; });
+      })());
+      mark(input("cost_weight_percentage"), (Number(row.cost_weight_percentage) > 0 && Number(row.cost_weight_percentage) <= 100) ? "" : `Tier ${index + 1} weight must be between 0 and 100%`);
+    });
+    if (!lotWeightValid()) {
+      const weightInput = $(`#lotGradeRows [data-grade-field="cost_weight_percentage"][data-idx="${lotGradeRows.length - 1}"]`);
+      mark(weightInput, `Tier weights total ${lotWeightTotal().toFixed(2)}% — they must equal exactly 100%`);
+    }
+    const blended = lotLandedTotal() / Math.max(1, lotGradedPieces());
+    if (!firstBad && blended > 5000000) {
+      mark($("#lotAcquisition"), `Blended unit cost of ${ugxCompact(blended)} per piece looks unrealistic — check cost and piece counts`);
+    }
     if (firstBad) firstBad.focus();
     return !firstBad;
   }
@@ -2538,7 +2648,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       });
     };
     clearOn($("#expenseForm"), ["#expenseCategory", "#expenseAmount", "#expenseVendor", "#expenseDate"]);
-    clearOn($("#stockLotForm"), ["#lotSupplier", "#lotDescription", "#lotAcquisition", "#lotShipping", "#lotItemCount", "#lotDate"]);
+    clearOn($("#stockLotForm"), ["#lotSupplier", "#lotDescription", "#lotAcquisition", "#lotShipping", "#lotDate"]);
   }
   installFinanceFormGuards();
 
@@ -2570,25 +2680,117 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     } catch (error) { toast(error.message, false); }
     finally { setButtonBusy(button, false); }
   });
-  const updateLotUnitCost = () => {
-    const total = (Number($("#lotAcquisition").value) || 0) + (Number($("#lotShipping").value) || 0);
-    const count = Number($("#lotItemCount").value) || 0;
-    $("#lotUnitCost").textContent = count > 0 ? `${ugx(Math.round(total / count))} / item` : "UGX 0 / item";
+  /* ----------------------------------------------------------
+     MULTI-TIER LOT GRADING BUILDER (Financial Ledgers → Bale Costs)
+     The table previews exactly what the server will lock:
+     tier unit COGS = (landed investment × tier weight%) ÷ pieces.
+     The API recomputes it authoritatively on save — this is only
+     a live draft so staff can balance the weights to exactly 100%.
+     ---------------------------------------------------------- */
+  const defaultLotGradeRows = () => [
+    { grade_name:"Tier 1 — Premium",   expected_count:10, cost_weight_percentage:40, target_selling_price:35000 },
+    { grade_name:"Tier 2 — Standard",  expected_count:30, cost_weight_percentage:40, target_selling_price:20000 },
+    { grade_name:"Tier 3 — Clearance", expected_count:20, cost_weight_percentage:20, target_selling_price:10000 },
+  ];
+  let lotGradeRows = defaultLotGradeRows();
+  const lotLandedTotal = () => asInt($("#lotAcquisition").value) + asInt($("#lotShipping").value);
+  const lotGradedPieces = () => lotGradeRows.reduce((sum, row) => sum + asInt(row.expected_count), 0);
+  const lotWeightTotal = () => lotGradeRows.reduce((sum, row) => sum + (Number(row.cost_weight_percentage) || 0), 0);
+  const lotWeightValid = () => lotGradeRows.length > 0 && Math.abs(lotWeightTotal() - 100) <= 0.01;
+  const previewGradeCogs = row => {
+    const count = asInt(row.expected_count);
+    const weight = Number(row.cost_weight_percentage) || 0;
+    if (!count || !lotLandedTotal()) return 0;
+    return Math.round((lotLandedTotal() * (weight / 100)) / count);
   };
-  ["#lotAcquisition", "#lotShipping", "#lotItemCount"].forEach(selector => $(selector).addEventListener("input", updateLotUnitCost));
+
+  function updateGradeCogsCells() {
+    $$("#lotGradeRows [data-cogs-idx]").forEach(span => {
+      const row = lotGradeRows[Number(span.dataset.cogsIdx)];
+      if (row) span.textContent = ugx(previewGradeCogs(row));
+    });
+  }
+
+  function refreshLotComputed() {
+    const landed = lotLandedTotal();
+    const pieces = lotGradedPieces();
+    const ok = lotWeightValid();
+    if ($("#lotLandedTotal")) $("#lotLandedTotal").textContent = ugx(landed);
+    if ($("#lotTotalPcs")) $("#lotTotalPcs").textContent = `${pieces} pc${pieces === 1 ? "" : "s"}`;
+    if ($("#lotUnitCost")) $("#lotUnitCost").textContent = pieces > 0 ? `${ugx(Math.round(landed / pieces))} / piece blended` : "UGX 0 / item";
+    const check = $("#lotWeightCheck");
+    if (check) {
+      check.classList.toggle("ok", ok);
+      check.classList.toggle("bad", !ok);
+      $("#lotWeightValue").textContent = `${lotWeightTotal().toFixed(2)}% / 100%`;
+      $("#lotWeightHint").textContent = ok
+        ? "Balanced — every tier COGS above is locked on save."
+        : "Tier weights must total exactly 100% before the lot can be saved.";
+    }
+    updateGradeCogsCells();
+  }
+
+  function renderLotGradeTable() {
+    const host = $("#lotGradeRows");
+    if (!host) return;
+    host.innerHTML = lotGradeRows.map((row, index) => `
+      <tr>
+        <td class="w-name"><input data-grade-field="grade_name" data-idx="${index}" value="${esc(row.grade_name)}" placeholder="e.g. Tier 1 — Premium" maxlength="100" /></td>
+        <td class="w-num"><input data-grade-field="expected_count" data-idx="${index}" type="number" min="1" step="1" value="${row.expected_count || ""}" placeholder="30" /></td>
+        <td class="w-num"><input data-grade-field="cost_weight_percentage" data-idx="${index}" type="number" min="0.01" max="100" step="0.01" value="${row.cost_weight_percentage || ""}" placeholder="40" /></td>
+        <td><span class="lot-grade-cogs" data-cogs-idx="${index}">${ugx(previewGradeCogs(row))}</span></td>
+        <td class="w-price"><input data-grade-field="target_selling_price" data-idx="${index}" type="number" min="0" step="1" value="${row.target_selling_price || ""}" placeholder="20000" /></td>
+        <td>${lotGradeRows.length > 1 ? `<button type="button" class="lot-grade-remove" data-remove-grade="${index}" aria-label="Remove tier">✕</button>` : ""}</td>
+      </tr>`).join("");
+    refreshLotComputed();
+  }
+
+  ["#lotAcquisition", "#lotShipping"].forEach(selector => $(selector).addEventListener("input", refreshLotComputed));
+  $("#btnAddGradeRow").addEventListener("click", () => {
+    if (lotGradeRows.length >= 12) return toast("Keep grading to 12 tiers or fewer per lot", false);
+    lotGradeRows.push({ grade_name:"", expected_count:1, cost_weight_percentage:0, target_selling_price:0 });
+    renderLotGradeTable();
+    const last = $(`#lotGradeRows [data-grade-field="grade_name"][data-idx="${lotGradeRows.length - 1}"]`);
+    if (last) last.focus();
+  });
+  $("#lotGradeRows").addEventListener("input", event => {
+    const input = event.target.closest("[data-grade-field]");
+    if (!input) return;
+    const row = lotGradeRows[Number(input.dataset.idx)];
+    if (!row) return;
+    const numeric = input.type === "number";
+    row[input.dataset.gradeField] = numeric ? Number(input.value) : input.value;
+    setFieldError(input, "");
+    refreshLotComputed();
+  });
+  $("#lotGradeRows").addEventListener("click", event => {
+    const remove = event.target.closest("[data-remove-grade]");
+    if (!remove) return;
+    lotGradeRows.splice(Number(remove.dataset.removeGrade), 1);
+    renderLotGradeTable();
+  });
+  renderLotGradeTable();
+
   $("#stockLotForm").addEventListener("submit", async event => {
     event.preventDefault();
     if (!validateLotForm()) { toast("Fix the highlighted fields first — clean data keeps reports honest", false); return; }
-    const button = $("#lotSubmit"); setButtonBusy(button, true, "Registering lot…");
+    const button = $("#lotSubmit"); setButtonBusy(button, true, "Registering lot & locking grading…");
     try {
       await DB.financeRequest("stock-lots", { method:"POST", body:JSON.stringify({
         supplier:$("#lotSupplier").value.trim(), description:$("#lotDescription").value.trim(),
-        acquisition_cost:Number($("#lotAcquisition").value), shipping_cost:Number($("#lotShipping").value),
-        item_count:Number($("#lotItemCount").value), payment_method:$("#lotPayment").value,
-        acquired_at:$("#lotDate").value
+        acquisition_cost:asInt($("#lotAcquisition").value), shipping_cost:asInt($("#lotShipping").value),
+        item_count:lotGradedPieces(), payment_method:$("#lotPayment").value,
+        acquired_at:$("#lotDate").value,
+        grades:lotGradeRows.map(row => ({
+          grade_name:String(row.grade_name || "").trim(),
+          expected_count:asInt(row.expected_count),
+          cost_weight_percentage:Number(row.cost_weight_percentage) || 0,
+          target_selling_price:asInt(row.target_selling_price)
+        }))
       }) });
-      event.target.reset(); $("#lotShipping").value = 0; $("#lotDate").value = localISODateTime(); updateLotUnitCost();
-      toast("Stock lot registered — unit cost is ready in POS Intake"); await loadStockLots();
+      event.target.reset(); $("#lotShipping").value = 0; $("#lotDate").value = localISODateTime();
+      lotGradeRows = defaultLotGradeRows(); renderLotGradeTable();
+      toast("Stock lot registered — tier COGS locked & ready in POS Intake"); await loadStockLots();
     } catch (error) { toast(error.message, false); }
     finally { setButtonBusy(button, false); }
   });

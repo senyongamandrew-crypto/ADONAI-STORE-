@@ -875,6 +875,48 @@ html[data-pointer="touch"] .lnk { padding: 6px 2px; }
 .finance-form-grid .full { grid-column:1/-1; }
 .finance-submit { width:100%; margin-top:18px; min-height:47px; }
 .unit-cost-field output { display:flex; align-items:center; min-height:43px; padding:0 13px; border:1px dashed #D1D5DB; border-radius:8px; background:#ECFDF5; color:var(--fin-green); font:700 16px var(--serif); }
+
+/* --- Multi-tier lot grading: landed banner + tier builder ---------------- */
+.lot-landed-banner { display:flex; align-items:stretch; justify-content:space-between; gap:14px; margin-top:16px; padding:14px 16px; border:1px solid #A7F3D0; border-radius:12px; background:#ECFDF5; }
+.lot-landed-banner > div { display:flex; flex-direction:column; gap:2px; }
+.lot-landed-banner span { font:700 10px var(--sans); letter-spacing:.08em; text-transform:uppercase; color:#047857; }
+.lot-landed-banner strong { font:800 19px var(--serif); color:#064E3B; }
+.lot-landed-banner .banner-side { text-align:right; }
+.lot-grade-builder { margin-top:16px; }
+.lot-grade-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; }
+.lot-grade-head h4 { margin:0; font:700 13px var(--sans); color:var(--fin-ink); }
+.lot-grade-head button { border:0; border-radius:8px; padding:7px 11px; background:var(--fin-mint); color:var(--fin-green); font:700 12px var(--sans); cursor:pointer; transition:background .15s; }
+.lot-grade-head button:hover { background:#C9F2DD; }
+.lot-grade-table-wrap { border:1px solid #E5E7EB; border-radius:10px; overflow-x:auto; }
+.lot-grade-table { width:100%; min-width:640px; border-collapse:collapse; }
+.lot-grade-table th { padding:9px 10px; border-bottom:1px solid #E5E7EB; background:#F9FAFB; color:var(--muted); font:700 10.5px var(--sans); letter-spacing:.05em; text-transform:uppercase; text-align:left; }
+.lot-grade-table td { padding:8px 10px; border-top:1px solid #F1F5F9; vertical-align:middle; }
+.lot-grade-table tr:first-child td { border-top:0; }
+.lot-grade-table input { width:100%; min-height:36px; padding:6px 9px; border:1px solid #D1D5DB; border-radius:7px; font:600 13px var(--sans); color:var(--fin-ink); background:#fff; }
+.lot-grade-table input:focus { border-color:var(--fin-green); outline:2px solid rgba(4,120,87,.18); }
+.lot-grade-table .w-name { min-width:150px; }
+.lot-grade-table .w-num { width:76px; }
+.lot-grade-table .w-price { width:112px; }
+.lot-grade-cogs { font:800 13px var(--serif); color:#064E3B; white-space:nowrap; }
+.lot-grade-table input.invalid-input { border-color:#EF4444; outline:2px solid rgba(239,68,68,.18); }
+.lot-grade-remove { border:0; background:none; color:#EF4444; font:800 15px var(--sans); cursor:pointer; padding:4px 6px; border-radius:6px; }
+.lot-grade-remove:hover { background:#FEF2F2; }
+.lot-weight-check { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:10px; padding:9px 12px; border-radius:9px; background:#F3F4F6; }
+.lot-weight-check.ok { background:#ECFDF5; }
+.lot-weight-check.bad { background:#FEF2F2; }
+.lot-weight-check .w-label { font:600 11px var(--sans); color:var(--muted); }
+.lot-weight-check .w-value { font:800 13px var(--sans); }
+.lot-weight-check.ok .w-value { color:#047857; }
+.lot-weight-check.bad .w-value { color:#B91C1C; }
+.lot-weight-check .w-hint { font-size:11px; color:#B91C1C; }
+.lot-intake-tiers { border-top:1px dashed #E5E7EB; margin-top:10px; padding-top:10px; }
+.locked-money { background:#F3F4F6 !important; color:#4B5563 !important; cursor:not-allowed; border-style:dashed !important; }
+.lot-grade-summary { width:100%; border-collapse:collapse; margin-top:8px; }
+.lot-grade-summary th, .lot-grade-summary td { padding:5px 8px; font-size:11.5px; text-align:left; border-top:1px solid #F1F5F9; }
+.lot-grade-summary th { color:var(--muted); font:700 10px var(--sans); letter-spacing:.05em; text-transform:uppercase; border-top:0; }
+.lot-grade-summary td.num, .lot-grade-summary th.num { text-align:right; }
+.lot-grade-summary .depleted { color:#B91C1C; }
+.lot-grade-pill { display:inline-block; padding:1px 7px; border-radius:99px; background:var(--fin-mint); color:var(--fin-green); font:700 10px var(--sans); }
 .finance-list-state { min-height:120px; color:var(--muted); }
 .finance-empty, .finance-error { display:grid; place-items:center; min-height:130px; padding:25px; border:1px dashed #D1D5DB; border-radius:12px; text-align:center; color:var(--muted); background:#F9FAFB; }
 .finance-error { border-color:#FECACA; background:#FEF2F2; color:#B91C1C; }
