@@ -51,6 +51,7 @@ from models import (
     InventoryLock,
     ItemCondition,
     LedgerEntry,
+    LotGrade,
     Order,
     OrderItem,
     PaymentTransaction,
@@ -373,6 +374,89 @@ def parse_positive_int(value, field: str, allow_zero: bool = False) -> int:
     if result < 0 or (result == 0 and not allow_zero):
         raise ValueError(f"{field} must be {'zero or greater' if allow_zero else 'greater than zero'}")
     return result
+
+
+def parse_lot_grades(raw_grades) -> list[dict]:
+    """Validate the multi-tier in-batch grading payload for a new stock lot.
+
+    Every tier declares its expected piece count, the percentage of the landed
+    investment it should absorb, and the target retail price that pre-fills
+    catalog tagging. The weight check mirrors the intake UI rule: tiers must
+    partition the invested money exactly — nothing unallocated, nothing twice.
+    """
+    if not isinstance(raw_grades, list) or not raw_grades:
+        raise ValueError("Add at least one grade tier for this lot")
+    if len(raw_grades) > 12:
+        raise ValueError("Keep grading to 12 tiers or fewer per lot")
+
+    cleaned = []
+    total_weight = 0.0
+    for index, raw in enumerate(raw_grades, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Grade tier {index} is malformed")
+        name = str(raw.get("grade_name") or "").strip()
+        if len(name) < 3:
+            raise ValueError(f"Grade tier {index} needs a name of at least 3 characters")
+        try:
+            count = int(raw.get("expected_count"))
+        except (TypeError, ValueError):
+            raise ValueError(f"Grade tier {index} piece count must be a whole number")
+        if count < 1 or count > 100000:
+            raise ValueError(f"Grade tier {index} piece count must be between 1 and 100,000")
+        try:
+            weight = float(raw.get("cost_weight_percentage"))
+        except (TypeError, ValueError):
+            raise ValueError(f"Grade tier {index} cost weight must be a number")
+        if not (0 < weight <= 100):
+            raise ValueError(f"Grade tier {index} cost weight must be between 0 and 100%")
+        price = parse_positive_int(
+            raw.get("target_selling_price", 0),
+            f"Grade tier {index} target retail price",
+            allow_zero=True,
+        )
+        total_weight += weight
+        cleaned.append({
+            "grade_name": name[:100],
+            "expected_count": count,
+            "cost_weight_percentage": weight,
+            "target_selling_price": price,
+        })
+    if abs(total_weight - 100.0) > 0.01:
+        raise ValueError(
+            f"Tier cost weights must total exactly 100% — currently {total_weight:.2f}%"
+        )
+    return cleaned
+
+
+def compute_grade_unit_costs(total_landed: int, grades: list[dict]) -> list[int]:
+    """Lock each tier's unit COGS from the landed investment and its weight.
+
+    Selling every graded piece must recover the investment to the shilling, so
+    rounding is resolved exactly instead of left to float drift:
+    1. Tier budgets use the largest-remainder method (budgets total exactly
+       `total_landed`).
+    2. Per-piece rounding drift is folded into the highest-budget tier.
+    """
+    weights = [float(g["cost_weight_percentage"]) for g in grades]
+    raw_budgets = [total_landed * (weight / 100.0) for weight in weights]
+    budgets = [int(raw) for raw in raw_budgets]  # floor — all values are >= 0
+    remainder = total_landed - sum(budgets)
+    by_fraction = sorted(range(len(grades)), key=lambda i: raw_budgets[i] - budgets[i], reverse=True)
+    for i in by_fraction[:remainder]:
+        budgets[i] += 1
+
+    units = [int(round(budgets[i] / grades[i]["expected_count"])) for i in range(len(grades))]
+    drift = sum(units[i] * grades[i]["expected_count"] for i in range(len(grades))) - total_landed
+    if drift and units:
+        # Fold the per-piece rounding drift into the highest-budget tier. The
+        # adjustment is per-piece, so it scales by that tier's piece count —
+        # exactly divisible drift reconciles the books to the shilling, and
+        # any sub-piece leftover stays below one piece's shillings per tier.
+        biggest = max(range(len(grades)), key=lambda i: budgets[i])
+        piece_count = max(1, grades[biggest]["expected_count"])
+        adjust, _leftover_shillings = divmod(drift, piece_count)
+        units[biggest] = max(0, units[biggest] - adjust)
+    return units
 
 
 def lookup_product(session, identifier: str):
@@ -890,7 +974,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
             try:
                 supplied_base = body.get("base_price", body.get("selling_price"))
-                base_price = parse_positive_int(supplied_base, "Base price")
+                # A graded tier pre-fills the retail price from its target —
+                # only then is a blank/missing base price tolerated up front.
+                tier_link = bool(str(body.get("lot_grade_id") or "").strip())
+                if tier_link and supplied_base in (None, "", 0):
+                    base_price = 0
+                else:
+                    base_price = parse_positive_int(supplied_base, "Base price", allow_zero=tier_link)
                 if body.get("total_transport_cost") is None:
                     # Global default: inherit the System Parameters base
                     # delivery fee so intake forms never require re-typing it.
@@ -920,24 +1010,54 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 sku = clean_text(body.get("sku"), 50) or generate_uid("ADN-GEN")
                 barcode_id = clean_text(body.get("barcode_id"), 50) or generate_uid("ADT")
                 lot_id = str(body.get("stock_lot_id") or "").strip() or None
+                grade = None
+                grade_id = str(body.get("lot_grade_id") or "").strip() or None
+                if grade_id:
+                    # The selected tier is the source of truth for its parent
+                    # lot — staff pick the tier, never a mismatched pair.
+                    grade = session.query(LotGrade).filter_by(id=grade_id).with_for_update().first()
+                    if not grade:
+                        return json_response({"ok": False, "error": "Selected grade tier was not found"}, status=404)
+                    lot_id = grade.lot_id
                 lot = None
                 if lot_id:
                     lot = session.query(StockLot).filter_by(id=lot_id).with_for_update().first()
                     if not lot:
                         return json_response({"ok": False, "error": "Selected stock lot was not found"}, status=404)
+                    if grade is None and lot.grades:
+                        return json_response({
+                            "ok": False,
+                            "error": "This lot is tier-graded — select a grade tier so this piece's COGS stays locked"
+                        }, status=400)
+                    if grade is not None:
+                        if grade.allocated_count + stock_count > grade.expected_count:
+                            return json_response({
+                                "ok": False,
+                                "error": f'Tier "{grade.grade_name}" only has {grade.remaining_count} piece(s) left to tag'
+                            }, status=409)
+                        grade.allocated_count += stock_count
                     if lot.allocated_count + stock_count > lot.item_count:
                         return json_response({"ok": False, "error": "Selected stock lot does not have enough unallocated items"}, status=409)
                     lot.allocated_count += stock_count
                     if lot.allocated_count >= lot.item_count:
                         lot.status = "ALLOCATED"
-                    if supplied_cost <= 0:
+                    if grade is not None:
+                        # Locked per-tier unit COGS: recomputed from the landed
+                        # investment at lot registration, immune to manual edits.
+                        supplied_cost = grade.unit_cogs
+                        if base_price <= 0 and grade.target_selling_price:
+                            base_price = int(grade.target_selling_price)
+                    elif supplied_cost <= 0:
                         supplied_cost = lot.unit_cost
                     # Bale breakdowns allocate the lot's transport evenly per
                     # item when intake did not provide an item-level override.
                     if "total_transport_cost" not in body:
                         transport_cost = (lot.shipping_cost or 0) / max(1, lot.item_count)
-                        allocation = transport_allocation(base_price, transport_cost)
-                        selling_price = whole_money(allocation["final_selling_price"])
+                if base_price <= 0:
+                    return json_response({"ok": False, "error": "Base price must be greater than zero"}, status=400)
+                # Final pricing pass with the post-resolution base + transport.
+                allocation = transport_allocation(base_price, transport_cost)
+                selling_price = whole_money(allocation["final_selling_price"])
 
                 prod = Product(
                     id=pid,
@@ -969,6 +1089,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     images=[safe_image_url(u) for u in (body.get("images") or []) if safe_image_url(u)][:12] if isinstance(body.get("images"), list) else [],
                     rack_location=clean_text(body.get("rack_location", "Rail A-1"), 50),
                     stock_lot_id=lot_id,
+                    lot_grade_id=(grade.id if grade else None),
                     inventory_status=("AVAILABLE" if stock_count > 0 else "OUT_OF_STOCK"),
                 )
                 # Shareable permalink + thrift-specific PDP detail fields.
@@ -1986,18 +2107,33 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             if method == "GET":
                 with get_db() as session:
                     rows = session.query(StockLot).order_by(StockLot.acquired_at.desc()).limit(250).all()
-                    return json_response({"ok": True, "stock_lots": [row.to_dict() for row in rows]})
+                    return json_response({"ok": True, "stock_lots": [row.to_dict(include_grades=True) for row in rows]})
             try:
                 supplier = str(body.get("supplier") or "").strip()
                 description = str(body.get("description") or "").strip()
                 acquisition_cost = parse_positive_int(body.get("acquisition_cost"), "Acquisition cost", allow_zero=True)
                 shipping_cost = parse_positive_int(body.get("shipping_cost", 0), "Shipping cost", allow_zero=True)
-                item_count = parse_positive_int(body.get("item_count"), "Item count")
+                # Multi-tier in-batch grading is optional: legacy one-price lots
+                # still work, but a tiered intake gets locked per-tier COGS.
+                grades = parse_lot_grades(body.get("grades")) if body.get("grades") is not None else None
+                if grades:
+                    derived_count = sum(g["expected_count"] for g in grades)
+                    supplied_count = body.get("item_count")
+                    if supplied_count not in (None, "", 0) and int(supplied_count) != derived_count:
+                        raise ValueError(
+                            "Item count does not match the tier piece counts "
+                            f"({supplied_count} vs {derived_count})"
+                        )
+                    item_count = derived_count
+                else:
+                    item_count = parse_positive_int(body.get("item_count"), "Item count")
                 if not supplier or not description:
                     raise ValueError("Supplier and lot description are required")
                 total_landed = acquisition_cost + shipping_cost
                 if total_landed <= 0:
                     raise ValueError("Total landed cost must be greater than zero")
+                # Blended fallback unit cost (used when a legacy un-graded lot
+                # is tagged without selecting a specific tier).
                 unit_cost = int(round(total_landed / item_count))
                 acquired_at = parse_operator_datetime(body.get("acquired_at"))
             except (ValueError, TypeError) as exc:
@@ -2031,8 +2167,25 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     created_by_id=staff_info.get("id"), created_by_name=staff_info.get("name"),
                 )
                 session.add(lot)
+                # Parent lot AND its grade tiers commit in one transaction: the
+                # bale can never exist with a half-written cost breakdown.
+                # Unit COGS is locked here, server-side — clients never supply it.
+                if grades:
+                    unit_costs = compute_grade_unit_costs(total_landed, grades)
+                    for sort_order, (grade_input, locked_cogs) in enumerate(zip(grades, unit_costs)):
+                        session.add(LotGrade(
+                            id=generate_uid("LGR"),
+                            lot_id=lot_id,
+                            sort_order=sort_order,
+                            grade_name=grade_input["grade_name"],
+                            expected_count=grade_input["expected_count"],
+                            cost_weight_percentage=grade_input["cost_weight_percentage"],
+                            unit_cogs=locked_cogs,
+                            target_selling_price=grade_input["target_selling_price"],
+                            allocated_count=0,
+                        ))
                 session.flush()
-                return json_response({"ok": True, "status": "registered", "stock_lot": lot.to_dict()}, status=201)
+                return json_response({"ok": True, "status": "registered", "stock_lot": lot.to_dict(include_grades=True)}, status=201)
 
         if clean_path == "/api/finance/dashboard" and method == "GET":
             staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)

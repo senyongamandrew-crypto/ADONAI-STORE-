@@ -1,5 +1,13 @@
 # Render PostgreSQL migrations
 
+## Multi-tier lot grading — 2026-10-08
+
+Run `20261008_multi_tier_lot_grading.sql` after the financial ledger migration. It creates `financial_lot_grades` (per-lot grade tiers with cost-weight percentages and locked per-piece unit COGS) and links `products.lot_grade_id` so catalog tagging attributes every bale piece to its tier. The API recomputes tier COGS server-side at lot registration, requires tier weights to total exactly 100%, and refuses tagging a graded lot without picking a tier — client-supplied COGS is never trusted.
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20261008_multi_tier_lot_grading.sql
+```
+
 ## Dual inventory architecture — 2026-10-03
 
 Run `20261003_dual_inventory.sql` after the financial and transport migrations. It creates the native `item_condition_enum` and `quantity_type_enum` values (`BRAND_NEW` and `PRE_LOVED`), adds variant/specification fields, snapshots the policy on order items, and installs database enforcement plus `pg_notify('adonai_inventory', ...)` triggers. `PRE_LOVED` rows are constrained to quantity 1 (or 0 after sale); `BRAND_NEW` rows support multi-quantity stock. The API and browser/POS polling layer consume the same authoritative stock and expiring cart/POS reservations.

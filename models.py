@@ -226,6 +226,10 @@ class Product(Base):
     # Additive financial-ledger fields.  These are also installed safely by the
     # Render migration for databases that already contain the products table.
     stock_lot_id = Column(String(64), nullable=True, index=True)
+    # Grade tier inside the lot. When set, `cost_price` is the tier-locked unit
+    # COGS — the server recomputes it from the lot's landed investment and the
+    # tier's cost weight, so manual entry can never drift from the bale books.
+    lot_grade_id = Column(String(64), nullable=True, index=True)
     inventory_status = Column(String(30), default="AVAILABLE", nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -332,6 +336,7 @@ class Product(Base):
             "staff_notes": self.staff_notes or "",
             "rack_location": self.rack_location or "Rail A-1",
             "stock_lot_id": self.stock_lot_id or "",
+            "lot_grade_id": self.lot_grade_id or "",
             "inventory_status": self.inventory_status or "AVAILABLE",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
@@ -726,14 +731,21 @@ class StockLot(Base):
     created_by_name = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    grades = relationship(
+        "LotGrade",
+        back_populates="lot",
+        cascade="all, delete-orphan",
+        order_by="LotGrade.sort_order",
+    )
+
     __table_args__ = (
         CheckConstraint("acquisition_cost >= 0", name="ck_stock_lot_acquisition_nonnegative"),
         CheckConstraint("shipping_cost >= 0", name="ck_stock_lot_shipping_nonnegative"),
         CheckConstraint("item_count > 0", name="ck_stock_lot_items_positive"),
     )
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_grades: bool = False):
+        data = {
             "id": self.id,
             "lot_code": self.lot_code,
             "supplier": self.supplier,
@@ -750,6 +762,69 @@ class StockLot(Base):
             "acquired_at": self.acquired_at.isoformat() + "Z" if self.acquired_at else None,
             "journal_entry_id": self.journal_entry_id or "",
             "created_by_name": self.created_by_name or "",
+        }
+        if include_grades:
+            data["grades"] = [grade.to_dict() for grade in (self.grades or [])]
+        return data
+
+
+class LotGrade(Base):
+    """One cost tier inside a stock lot (multi-tier in-batch grading).
+
+    The parent lot books the landed investment once; each tier receives a
+    weighted share of it, so a mixed bale (Premium / Standard / Clearance
+    pieces) prices every tag from an accurate, LOCKED unit COGS. The API
+    recomputes `unit_cogs` at registration and refuses weights that do not
+    total 100% — the client table is a preview, never the source of truth.
+    """
+    __tablename__ = "financial_lot_grades"
+
+    id = Column(String(64), primary_key=True)
+    lot_id = Column(
+        String(64),
+        ForeignKey("financial_stock_lots.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sort_order = Column(Integer, default=0, nullable=False)
+    grade_name = Column(String(100), nullable=False)
+    expected_count = Column(Integer, nullable=False)
+    cost_weight_percentage = Column(Numeric(6, 3), nullable=False)
+    unit_cogs = Column(Integer, nullable=False)  # server-computed, locked
+    target_selling_price = Column(Integer, nullable=False, default=0)
+    allocated_count = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    lot = relationship("StockLot", back_populates="grades")
+
+    __table_args__ = (
+        CheckConstraint("expected_count > 0", name="ck_lot_grade_items_positive"),
+        CheckConstraint(
+            "cost_weight_percentage > 0 AND cost_weight_percentage <= 100",
+            name="ck_lot_grade_weight_range",
+        ),
+        CheckConstraint("unit_cogs >= 0", name="ck_lot_grade_cogs_nonnegative"),
+        CheckConstraint("allocated_count >= 0", name="ck_lot_grade_allocated_nonnegative"),
+        Index("idx_lot_grade_lot_sort", "lot_id", "sort_order"),
+    )
+
+    @property
+    def remaining_count(self) -> int:
+        return max(0, int(self.expected_count or 0) - int(self.allocated_count or 0))
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "lot_id": self.lot_id,
+            "sort_order": self.sort_order,
+            "grade_name": self.grade_name,
+            "expected_count": self.expected_count,
+            "cost_weight_percentage": float(self.cost_weight_percentage or 0),
+            "unit_cogs": self.unit_cogs,
+            "target_selling_price": self.target_selling_price,
+            "allocated_count": self.allocated_count,
+            "remaining_count": self.remaining_count,
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
         }
 
 

@@ -167,6 +167,9 @@ def apply_additive_schema_migrations():
             ("measurements_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("fabric_grading_notes", "TEXT"),
             ("stock_lot_id", "VARCHAR(64)"),
+            # Multi-tier lot grading: the grade tier that locked this piece's
+            # unit COGS at intake (financial_lot_grades.id).
+            ("lot_grade_id", "VARCHAR(64)"),
             ("inventory_status", "VARCHAR(30) NOT NULL DEFAULT 'AVAILABLE'"),
             ("base_price", "NUMERIC(14,2) NOT NULL DEFAULT 0"),
             ("total_transport_cost", "NUMERIC(14,2) NOT NULL DEFAULT 0"),
@@ -326,6 +329,7 @@ def apply_additive_schema_migrations():
         )
         for statement in (
             "CREATE INDEX IF NOT EXISTS ix_products_stock_lot_id ON products(stock_lot_id)",
+            "CREATE INDEX IF NOT EXISTS ix_products_lot_grade_id ON products(lot_grade_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
             "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
