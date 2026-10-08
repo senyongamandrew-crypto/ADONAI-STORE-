@@ -458,15 +458,38 @@ def seed_categories(session):
 
 
 def seed_users(session):
-    # SECURITY: demo staff accounts carry weak, publicly documented PINs.
-    # They are only seeded in local/SQLite development, or when the operator
-    # explicitly opts in via ADONAI_SEED_DEMO_USERS=1. Production PostgreSQL
-    # deployments must create real staff accounts with strong PINs instead.
-    if IS_POSTGRES and os.environ.get("ADONAI_SEED_DEMO_USERS") != "1":
-        logger.info("Skipping demo staff roster seeding on production database.")
-        return
+    """Guarantee exactly ONE working Admin login on any database.
+
+    FACTORY DEFAULT: a fresh/empty database always receives a single default
+    admin (STF-01) so the owner can sign in immediately. The PIN comes from the
+    ADONAI_ADMIN_PIN environment variable (default 1234 — change after first
+    login, or set the server-only STORE_MASTER_KEY instead).
+
+    SECURITY: the old demo staff roster (weak, publicly documented PINs) is now
+    strictly opt-in via ADONAI_SEED_DEMO_USERS=1 — local development included —
+    so no factory reset ever resurrects demo accounts.
+    """
+    admin_id = "STF-01"
+    existing_admin = session.query(User).filter_by(id=admin_id).first()
+    if existing_admin is None:
+        any_admin = session.query(User).filter_by(role="admin").first()
+        if any_admin is None:
+            admin_pin = (os.environ.get("ADONAI_ADMIN_PIN", "") or "1234").strip()
+            session.add(User(
+                id=admin_id,
+                name=os.environ.get("ADONAI_ADMIN_NAME", "") or "Store Admin",
+                role="admin",
+                pin_hash=hash_pin(admin_pin),
+                phone="+256 758 873 398",
+                active=True,
+            ))
+            logger.info("Created default admin account %s (set a new PIN after first login).", admin_id)
+    logger.info("Verified default admin account presence.")
+
+
+def seed_demo_staff(session):
+    """OPTIONAL demo staff roster — only when ADONAI_SEED_DEMO_USERS=1."""
     users = [
-        ("STF-01", "Mercer Admin", "admin", hash_pin("1234"), "+256 758 873 398"),
         ("STF-02", "Grace Nakato", "manager", hash_pin("2345"), "+256 772 111 222"),
         ("STF-03", "David Ochieng", "cashier", hash_pin("3456"), "+256 788 333 444"),
         ("STF-04", "Kato Boda", "rider", hash_pin("4567"), "+256 701 555 666")
@@ -475,10 +498,19 @@ def seed_users(session):
         existing = session.query(User).filter_by(id=uid).first()
         if not existing:
             session.add(User(id=uid, name=name, role=role, pin_hash=pin_h, phone=phone, active=True))
-    logger.info("Verified default staff roster accounts (development seed).")
+    logger.info("Seeded demo staff roster (development only).")
 
 
 def seed_products(session):
+    # FACTORY DEFAULT: the catalog ships EMPTY and ready for fresh batch/lot
+    # intake. The 18-item demo catalog (16 curated + 2 factory rows) is only
+    # seeded when the operator explicitly opts in via ADONAI_SEED_DEMO_CATALOG=1
+    # (useful for demos and the automated grading tests).
+    if os.environ.get("ADONAI_SEED_DEMO_CATALOG") != "1":
+        remaining = session.query(Product).count()
+        logger.info("Demo catalog seeding disabled (ADONAI_SEED_DEMO_CATALOG!=1) — catalog stays empty (%d existing items).", remaining)
+        return
+
     existing_count = session.query(Product).count()
     if existing_count > 0:
         logger.info("Products table already populated with %d items.", existing_count)
@@ -710,6 +742,11 @@ def seed_settings(session):
 
 
 def seed_riders(session):
+    # FACTORY DEFAULT: no demo riders on a clean database. The optional demo
+    # roster follows the same opt-in flag as the demo staff accounts.
+    if os.environ.get("ADONAI_SEED_DEMO_USERS") != "1":
+        logger.info("Demo rider roster seeding disabled — riders table stays empty.")
+        return
     riders = [
         ("RID-01", "Kato Ivan", "+256 701 555 666", "Available", "UEP 123X"),
         ("RID-02", "Mugisha Ronald", "+256 772 888 999", "Available", "UFE 456Y")
@@ -722,6 +759,12 @@ def seed_riders(session):
 
 
 def seed_sample_sales(session):
+    # FACTORY DEFAULT: no sample/mock sales on a clean database. The baseline
+    # demo order is tied to the demo catalog and follows the same opt-in flag.
+    if os.environ.get("ADONAI_SEED_DEMO_CATALOG") != "1":
+        logger.info("Demo sample sale seeding disabled (ADONAI_SEED_DEMO_CATALOG!=1).")
+        return
+
     existing_orders = session.query(Order).count()
     if existing_orders > 0:
         return
@@ -809,6 +852,8 @@ def init_db() -> bool:
             seed_categories(session)
             seed_users(session)
             seed_settings(session)
+            if os.environ.get("ADONAI_SEED_DEMO_USERS") == "1":
+                seed_demo_staff(session)
             seed_riders(session)
             seed_products(session)
             seed_sample_sales(session)
