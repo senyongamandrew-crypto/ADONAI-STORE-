@@ -13,9 +13,41 @@
 (function (global) {
   "use strict";
 
-  const LS_KEY   = "adonai-db-v6";   // v6: guest book, riders, ledger, staff roster, master-key
-  const CHANNEL  = "adonai-db-v6-sync";
+  const LS_KEY   = "adonai-db-v7";   // v7: FACTORY DEFAULT — clean Day-1 seed (no demo data)
+  const CHANNEL  = "adonai-db-v7-sync";
   const LOCK     = "adonai-store-db-tx";
+  const PURGE_FLAG = "adonai-db-v7-factory-purged";   // one-time cache-wipe marker
+
+  /* ---------- factory cache purge (one-time, on first v7 boot) ----------
+     v7 is the factory-reset release. On the FIRST load after this upgrade the
+     engine wipes EVERY `adonai*` key from localStorage/sessionStorage — the
+     old v1–v6 offline databases, carts, sessions, tokens, notification
+     history and analytics queues — so no leftover items or cart state can
+     reappear on load. It then seeds a clean Day-1 database below. */
+  function purgeLegacyCaches() {
+    const hits = [];
+    const wipe = store => {
+      if (!store) return;
+      try {
+        const doomed = [];
+        for (let i = 0; i < store.length; i++) {
+          const k = store.key(i);
+          if (k && /^adonai/i.test(k) && k !== PURGE_FLAG) doomed.push(k);
+        }
+        doomed.forEach(k => { try { store.removeItem(k); hits.push(k); } catch (e) {} });
+      } catch (e) {}
+    };
+    wipe(storage);
+    try { wipe(typeof sessionStorage !== "undefined" ? sessionStorage : null); } catch (e) {}
+    // Best-effort: drop any Cache Storage buckets (service-worker precache).
+    try {
+      if (typeof caches !== "undefined" && caches && caches.keys) {
+        caches.keys().then(keys => keys.forEach(k => caches.delete(k))).catch(() => {});
+      }
+    } catch (e) {}
+    try { storage.setItem(PURGE_FLAG, String(Math.floor(Date.now() / 1000))); } catch (e) {}
+    return hits;
+  }
 
   /* ---------- storage (localStorage, in-memory fallback for tests) ---------- */
   const _mem = {};
@@ -83,136 +115,27 @@
   // APK shell (appassets origin) or another non-web container.
   const DEFAULT_WEB_APP_URL = "https://adonai-store.onrender.com";
 
-  /* ---------- seed data ---------- */
-  function seedProducts() {
-    const A = "Grade A — Excellent", B = "Grade B — Good", V = "Vintage / Collector";
-    const raw = [
-      ["Indigo Type III Trucker Jacket", "Levi's", "Indigo", "Men", "Outerwear & Jackets", "L", A, 40000, 68000, 120000, 1, "1980s trucker jacket. Authentic vintage wash with whiskers and brass buttons intact."],
-      ["Olive Waxed Field Jacket", "Barbour Style", "Olive", "Men", "Outerwear & Jackets", "XL", B, 55000, 85000, 150000, 1, "Matte waxed cotton with a corduroy collar. Windproof and rain-resistant."],
-      ["Cream Silk Slip Dress", "Unbranded", "Cream", "Women", "Dresses & Skirts", "S", V, 45000, 78000, 130000, 1, "Bias-cut silk slip from the 90s — fluid drape, adjustable straps."],
-      ["Black Leather Chelsea Boots", "Clarks", "Black", "Men", "Shoes", "43", B, 60000, 95000, 170000, 1, "Polished leather uppers with elastic gussets. Resoled once — plenty of life left."],
-      ["White Oxford Button-Down", "Ralph Lauren", "White", "Men", "Tops & Shirts", "L", A, 20000, 38000, 75000, 2, "Crisp cotton oxford with single-needle stitching. Lightly worn."],
-      ["Emerald Velvet Tailored Blazer", "Vintage Boutique", "Emerald Green", "Women", "Outerwear & Jackets", "M", A, 35000, 60000, 110000, 1, "Plush cotton-velvet tailored blazer in deep emerald with satin lapels and structured shoulders."],
-      ["Pleated Midi Skirt", "Unbranded", "Rust", "Women", "Dresses & Skirts", "M", A, 18000, 35000, 65000, 1, "Satin pleats with a comfortable elastic waist — moves beautifully."],
-      ["Ankara Print Wrap Dress", "Hand-made", "Multi", "Women", "Dresses & Skirts", "M", A, 32000, 55000, 95000, 1, "Kitenge wax-print wrap tailored in Kampala. Wears like new."],
-      ["High-Waist 501 Jeans", "Levi's", "Mid-wash", "Women", "Pants & Jeans", "30", B, 26000, 48000, 85000, 2, "Classic straight leg with button fly. Honest fade at the knees."],
-      ["Khaki Pleated Chinos", "Dockers", "Khaki", "Men", "Pants & Jeans", "32", B, 15000, 30000, 55000, 1, "Relaxed pleat-front, freshly hemmed. Office-ready."],
-      ["Canvas Field Tote", "Unbranded", "Natural", "Women", "Accessories", "-", A, 10000, 22000, 40000, 1, "Heavy canvas tote with leather handles and a spotless interior."],
-      ["Tan Leather Belt", "Unbranded", "Tan", "Men", "Accessories", "34", B, 9000, 18000, 32000, 2, "Full-grain leather with a brass buckle — broken in just right."],
-      ["Kids' Denim Jacket", "OshKosh", "Light wash", "Children", "Children Wear", "8y", B, 13000, 25000, 45000, 1, "Sturdy kids' denim with room to grow. All snaps working."],
-      ["Silk Printed Scarf", "Unbranded", "Paisley", "Women", "Accessories", "-", V, 13000, 26000, 48000, 1, "Hand-rolled 70s silk square. No pulls, no stains."],
-      ["Retro Running Trainers", "Nike", "White / Gum", "Men", "Shoes", "44", B, 30000, 55000, 98000, 1, "Retro runner on a gum sole. Cleaned and disinfected."],
-      ["Floral Summer Blouse", "Unbranded", "Floral", "Women", "Tops & Shirts", "S", A, 14000, 28000, 50000, 1, "Airy rayon blouse with covered buttons. Zero pilling."],
-      ["Essential Cotton Crew Tee", "Adonai Basics", "Optic White", "Unisex", "Tops & Shirts", "S / M / L / XL", "Factory Fresh", 18000, 32000, 42000, 12, "Factory-fresh heavyweight cotton tee with intact brand tags.", "BRAND_NEW", ["S", "M", "L", "XL"], ["Optic White", "Black"], "Factory tag attached; 100% cotton.", "intact", {}, "New factory cotton; no wear or defects."],
-      ["Everyday Straight-Leg Denim", "Adonai Basics", "Dark Indigo", "Women", "Pants & Jeans", "26 / 28 / 30 / 32", "Factory Fresh", 42000, 72000, 85000, 8, "Brand-new straight-leg denim with factory sizing tags and original inner packaging.", "BRAND_NEW", ["26", "28", "30", "32"], ["Dark Indigo"], "Factory sizing and care tags intact.", "intact", {}, "Factory-fresh denim; no marks, fading, or alterations."]
-    ];
-    /* Flat-lay measurements (inches), fabric, care and mandatory flaw
-       disclosure — mirrors db_init.py so the offline seed matches the API. */
-    const PDP = [
-      // Hero piece: four angles (front, back, fabric, flaw) demonstrate the gallery.
-      { m: { shoulder: 18.5, chest: 22, sleeve: 25, length: 26 }, f: "100% Cotton denim · 12.5oz", c: "Machine wash cold inside out. Hang dry. Do not bleach.",
-        x: "Light fraying along the left cuff hem and a small pale wear mark just above it. The denim is intact — no holes, and every button and rivet is original.",
-        fp: 3, imgs: ["assets/products/p1001.jpg", "assets/products/p1001-back.jpg", "assets/products/p1001-fabric.jpg", "assets/products/p1001-flaw.jpg"] },
-      { m: { shoulder: 19.5, chest: 24, sleeve: 26, length: 31 }, f: "Waxed cotton shell · corduroy collar · polyester lining", c: "Do not machine wash. Sponge clean with cold water and re-wax once a year.", x: "Wax finish has faded slightly at both cuffs and there is a neat 1-inch seam repair inside the left pocket. Fully weatherproof and structurally sound." },
-      { m: { chest: 17, waist: 16, length: 51 }, f: "100% Silk", c: "Dry clean, or cold hand wash with silk detergent and dry flat.", x: "Two faint pin marks beside the left strap from the original hemming — only visible up close." },
-      { m: { insole: 11, heel: 1.2 }, f: "Full-grain leather upper · leather sole · elastic gusset", c: "Wipe with a damp cloth and polish monthly. Use shoe trees between wears.", x: "Resoled once by a cobbler and light creasing across the toe box. Uppers are crack-free." },
-      { m: { shoulder: 18, chest: 22.5, sleeve: 25, length: 30 }, f: "100% Cotton oxford", c: "Machine wash warm, tumble dry low, iron on medium.", x: "" },
-      { m: { shoulder: 15.5, chest: 19, sleeve: 23, length: 26 }, f: "Cotton velvet · satin lapels · viscose lining", c: "Dry clean only. Steam lightly to lift the pile.", x: "" },
-      { m: { waist: 13, hip: 19, length: 31 }, f: "Polyester satin · elastic waistband", c: "Hand wash cold, hang dry, cool iron on the reverse.", x: "" },
-      { m: { shoulder: 14.5, chest: 18, sleeve: 9, length: 44 }, f: "100% Cotton wax print (Kitenge)", c: "Wash separately on the first wash — wax-print colours may run.", x: "" },
-      { m: { waist: 15, hip: 20, inseam: 29, rise: 11.5, thigh: 11, leg_opening: 7.5 }, f: "100% Cotton rigid denim", c: "Machine wash cold inside out. Line dry to keep the fade.", x: "Honest fade across both knees and a small frayed edge on the right back pocket. No holes or repairs." },
-      { m: { waist: 16.5, hip: 21, inseam: 30, rise: 11, thigh: 12, leg_opening: 8 }, f: "Cotton twill", c: "Machine wash warm, tumble dry low, iron the pleats.", x: "Faint shadow at the original hem line where the leg was let down. Hem professionally re-stitched." },
-      { m: { length: 15, notes: "Body 14in wide x 15in tall x 5in deep · 11in handle drop" }, f: "Heavy cotton canvas · leather handles", c: "Spot clean with mild soap. Air dry out of direct sun.", x: "" },
-      { m: { length: 42, notes: "Fits a 32in–36in waist · 1.5in strap width" }, f: "Full-grain leather · solid brass buckle", c: "Condition with leather balm twice a year.", x: "Buckle carries a light patina and the third hole shows normal wear." },
-      { m: { shoulder: 12.5, chest: 15, sleeve: 17, length: 17 }, f: "Cotton denim", c: "Machine wash cold, tumble dry low.", x: "One snap shows minor tarnish. Every snap opens and closes properly." },
-      { m: { length: 26, notes: "26in x 26in square with a hand-rolled hem" }, f: "100% Silk", c: "Dry clean only.", x: "" },
-      { m: { insole: 11.2 }, f: "Suede and mesh upper · gum rubber outsole", c: "Brush suede dry. Spot clean the midsole with mild soap.", x: "Even tread wear across the outsole. Interior washed, disinfected and odour-free." },
-      { m: { shoulder: 14, chest: 18, sleeve: 7, length: 24 }, f: "100% Rayon", c: "Hand wash cold, line dry, cool iron.", x: "" }
-    ];
-    const slugify = v => String(v || "").toLowerCase().normalize("NFKD")
-      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    const IMGS = Array.from({ length: 16 }, (_, i) => `assets/products/p${1001 + i}.jpg`);
-    return raw.map((r, i) => {
-      const sku = "ADN-" + (DEMO_CODES[r[3]] || "GEN") + "-" + String(1001 + i);
-      const extra = PDP[i] || { m: {}, f: "", c: "", x: "" };
-      return {
-        id: "PRD-" + String(1001 + i),
-        sku,
-        slug: slugify(r[0]) + "-" + slugify(sku),
-        barcode_id: "ADT-" + String(10001 + i),
-        name: r[0], brand: r[1], color: r[2], demographic: r[3],
-        category: r[4], size: r[5], condition: r[6],
-        cost_price: r[7], selling_price: r[8], compare_price: r[9],
-        in_stock_count: r[10], desc: r[11],
-        // Product Detail Page specifications
-        measurements: extra.m, fabric: extra.f, care_notes: extra.c,
-        flaw_notes: extra.x, flaw_photo_index: extra.fp != null ? extra.fp : -1, staff_notes: "",
-        // Curated local photography — staff replace with the real photo(s) at intake.
-        image_url: IMGS[i], images: extra.imgs || [],
-        created_at: new Date(Date.now() - (30 - i) * 86400000).toISOString()
-      };
-    });
-  }
-
-  /* Slim reference dataset: ONE register sale + ONE ledger expense (matches the
-     accepted console walkthrough screens — clean book for go-live). */
-  function seedSales(products) {
-    const jacket = products[0]; // Indigo Type III Trucker Jacket — UGX 68,000
-    const when = new Date(Date.now() - 26 * 3600000).toISOString();
-    const items = [{ product_id: jacket.id, barcode_id: jacket.barcode_id, name: jacket.name, qty: 1, unit_price: jacket.selling_price, line_total: jacket.selling_price }];
-    return { sales: [{
-      id: "AT-1841", channel: "pos", status: "completed", created_at: when,
-      customer_name: "Amina Namubiru", customer_phone: "+256772123456",
-      cashier: { name: "Priya Shah", id: "STF-06" },
-      items, total: jacket.selling_price, dispatch_status: "Delivered",
-      tender: { type: "cash", tendered: 70000, change: 2000 }
-    }], posN: 1841, webN: 1000 };
-  }
-
-  function seedLedger(sale) {
-    return [
-      { id: "LED-1001", kind: "sale", amount: sale.total,
-        label: "Register sale " + sale.id + " · " + sale.items[0].name.replace("Indigo Type III ", "Indigo "),
-        note: "Logged by " + sale.cashier.name + " · Cash",
-        channel: "cash", by: sale.cashier.name, created_at: sale.created_at, sale_id: sale.id },
-      { id: "LED-1002", kind: "expense", amount: -15000,
-        label: "Rider fuel float — Central & Nakasero zone",
-        note: "Logged by Luis Ortega · Cash",
-        channel: "cash", by: "Luis Ortega",
-        created_at: new Date(Date.now() - 25 * 3600000).toISOString(), sale_id: null }
-    ];
-  }
-
-  const seedGuests = () => ([
-    { id: "GUS-1001", name: "Noor Batte",       phone: "+256 7545 67890", email: "",                      address: "Tank Hill Road", neighborhood: "Muyenga",  notes: "Deliver with care. Loves vintage knitwear.",        created_at: new Date(Date.now() - 21 * 86400000).toISOString() },
-    { id: "GUS-1002", name: "Chris Mukasa",     phone: "+256 7823 45678", email: "chrismukasa@gmail.com", address: "Ntinda View Heights, Block B", neighborhood: "Ntinda", notes: "Pickup or boda delivery after 5 PM.",                 created_at: new Date(Date.now() - 15 * 86400000).toISOString() },
-    { id: "GUS-1003", name: "Amina Namubiru",   phone: "+256 7721 23456", email: "amina.namubiru@gmail.com", address: "Plot 8 Kololo Terrace", neighborhood: "Kololo", notes: "Prefers WhatsApp delivery alerts. Regular buyer of vintage dresses.", created_at: new Date(Date.now() - 9 * 86400000).toISOString() },
-    { id: "GUS-1004", name: "Beatrice Kiconco", phone: "+256 7012 34567", email: "",                      address: "Bugolobi Flats, Block 12", neighborhood: "Bugolobi", notes: "Pays via MTN Mobile Money on delivery.",             created_at: new Date(Date.now() - 4 * 86400000).toISOString() }
-  ]);
-
-  /* Open-access roster — identities seeded for assignment/notes only; passkeys
-     stay EMPTY until the admin sets them and flips the access lock. */
-  const seedStaff = () => ([
-    { id: "STF-01", name: "Amara Adeyemi", email: "amara@adonaithrift.store",  phone: "+256 7588 73398",  role: "admin",   pin: "", active: true,  created_at: new Date(Date.now() - 40 * 86400000).toISOString() },
-    { id: "STF-02", name: "Elena Varga",   email: "elena@adonaithrift.store",  phone: "+256 7023 45678",  role: "rider",   pin: "", active: true,  created_at: new Date(Date.now() - 38 * 86400000).toISOString() },
-    { id: "STF-03", name: "Jonah Hale",    email: "jonah@adonaithrift.store",  phone: "+256 7588 73390",  role: "cashier", pin: "", active: true,  created_at: new Date(Date.now() - 35 * 86400000).toISOString() },
-    { id: "STF-04", name: "Kofi Mensah",   email: "kofi@adonaithrift.store",   phone: "+256 7012 34567",  role: "rider",   pin: "", active: true,  created_at: new Date(Date.now() - 33 * 86400000).toISOString() },
-    { id: "STF-05", name: "Luis Ortega",   email: "luis@adonaithrift.store",   phone: "+256 7656 52403",  role: "manager", pin: "", active: true,  created_at: new Date(Date.now() - 30 * 86400000).toISOString() },
-    { id: "STF-06", name: "Priya Shah",    email: "priya@adonaithrift.store",  phone: "+256 7588 73399",  role: "cashier", pin: "", active: true,  created_at: new Date(Date.now() - 28 * 86400000).toISOString() },
-    { id: "STF-07", name: "Samir Okello",  email: "samir@adonaithrift.store",  phone: "+256 7034 56789",  role: "rider",   pin: "", active: false, created_at: new Date(Date.now() - 25 * 86400000).toISOString() }
-  ]);
-
-  const seedRiders = () => ([
-    { id: "RDR-1001", name: "Elena Varga",  phone: "+256 7023 45678", vehicle: "Boda express",   zone: "Ntinda & Bukoto",              status: "On delivery" },
-    { id: "RDR-1002", name: "Kofi Mensah",  phone: "+256 7012 34567", vehicle: "Motorbike (Boda)", zone: "Central Kampala & Nakasero", status: "Available"   },
-    { id: "RDR-1003", name: "Samir Okello", phone: "+256 7034 56789", vehicle: "Motorbike (Boda)", zone: "Entebbe & Mukono corridor",  status: "Available"   }
-  ]);
+  /* ---------- factory Day-1 seed (v7) ----------
+     Clean 'Day 1' state: the catalog, sales, ledger, guest book and rider
+     roster all start EMPTY and the counters restart at their factory
+     baselines, so the first receipt is AT-1001, first guest GUS-1001, first
+     ledger entry LED-1001, first rider RDR-1001. Only ONE staff identity is
+     provisioned — the STF-01 admin — and the suite stays in open-access mode
+     until the owner sets a master key in System Parameters. Store settings
+     (system configuration) are preserved. */
+  const factoryCounters = () => ({
+    product: 1000,      // next local product number → 1001
+    sale_seq: 1000,     // general sale sequence
+    sale_pos: 1000,     // next POS receipt number  → AT-1001
+    sale_web: 1000,     // next web order number
+    guest: 1000,        // next guest profile       → GUS-1001
+    rider: 1000,        // next rider               → RDR-1001
+    ledger: 1000        // next ledger entry        → LED-1001
+  });
 
   function seedState() {
-    const products = seedProducts();
-    const { sales, posN, webN } = seedSales(products);
     return {
-      version: 3,
+      version: 4,
       settings: {
         store_name: "Adonai Store",
         tagline: "Brand-new apparel + curated vintage pieces · Kampala, Uganda",
@@ -230,13 +153,16 @@
         access_locked: false,               // OPEN ACCESS MODE until admin sets a key crew & flips the lock
         admin_key: ""                       // set a strong master key in System Parameters after onboarding
       },
-      products,
-      sales,
-      ledger: seedLedger(sales[0]),
-      guests: seedGuests(),
-      riders: seedRiders(),
-      staff: seedStaff(),
-      counters: { product: 1018, sale_seq: 1861, sale_pos: posN, sale_web: webN, guest: 1004, rider: 1003, ledger: 1002 }
+      products: [],                         // catalog empty — ready for fresh batch/lot intake
+      sales: [],                            // no sales history
+      ledger: [],                           // no ledger entries
+      guests: [],                           // no customer profiles
+      riders: [],                           // no rider roster
+      staff: [{
+        id: "STF-01", name: "Store Admin", email: "", phone: "+256 7588 73398",
+        role: "admin", pin: "", active: true, created_at: new Date().toISOString()
+      }],
+      counters: factoryCounters()
     };
   }
 
@@ -476,6 +402,10 @@
       }, 0);
     }
   }
+  /* One-time factory cache wipe on the first v7 boot (must run before the
+     first reload() so the old cached database can never be re-read). */
+  try { purgeLegacyCaches(); } catch (e) {}
+
   initRealtime();
 
   /* Cross-tab atomic transaction. */
@@ -1273,6 +1203,18 @@
     /* ----- admin ----- */
     resetToSeed() {
       return tx("*", st => { const fresh = seedState(); Object.keys(st).forEach(k => delete st[k]); Object.assign(st, fresh); return true; });
+    },
+    /** HARD FACTORY RESET — wipes every adonai* browser key (old DB copies,
+        carts, sessions, tokens, notifications, analytics) and reseeds the
+        clean Day-1 state. Reload after calling. */
+    factoryReset() {
+      try { storage.removeItem(LS_KEY); } catch (e) {}
+      try { storage.removeItem(PURGE_FLAG); } catch (e) {}
+      purgeLegacyCaches();
+      state = null;
+      reload();
+      broadcast("*");
+      return true;
     },
     ugx(n) { return "UGX " + money(n).toLocaleString("en-US"); },
     laneOf: orderLanes,

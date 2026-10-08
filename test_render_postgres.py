@@ -20,6 +20,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 import uuid
 
@@ -32,6 +33,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("ADONAI_RATE_LIMIT_DISABLED", "1")
 TEST_MASTER_KEY = "TEST-MASTER-KEY-9271-SECURE"
 os.environ.setdefault("STORE_MASTER_KEY", TEST_MASTER_KEY)
+
+# Integration-suite contract: these tests exercise the SEEDED demo dataset
+# (18-item catalog, sample sale, demo staff roles). Factory-default boots ship
+# an EMPTY catalog with a single admin, so the suite must explicitly opt in —
+# the same flags documented in .env.example.
+os.environ["ADONAI_SEED_DEMO_CATALOG"] = "1"
+os.environ["ADONAI_SEED_DEMO_USERS"] = "1"
+
+# Isolation: bind the whole suite to a throwaway SQLite database BEFORE the
+# database engine is imported, so test runs can never read or pollute a
+# developer's adonai.db, a live preview database, or production data.
+_TEST_TMPDIR = tempfile.mkdtemp(prefix="adonai-backend-tests-")
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_TMPDIR}/adonai-test.db"
 
 from database import get_formatted_database_url, mask_database_url, get_db, engine
 from models import (

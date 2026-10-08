@@ -438,6 +438,11 @@ def api_cors_headers(origin: str) -> list[tuple[str, str]]:
 
 def get_cache_headers(filepath: str) -> list[tuple[str, str]]:
     """Generates optimal caching headers for static assets vs dynamic pages."""
+    # Preview/review sessions can force revalidation of every asset so browsers
+    # and sandbox proxies never serve a stale JS/CSS bundle (production default
+    # keeps the fast immutable cache; opt in via environment).
+    if os.environ.get("ADONAI_NO_CACHE_ASSETS") == "1":
+        return [("Cache-Control", "no-cache, no-store, must-revalidate")]
     rel = os.path.relpath(filepath, ROOT)
     is_static = (
         rel.startswith("assets/") or
