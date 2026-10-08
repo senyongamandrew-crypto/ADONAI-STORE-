@@ -326,6 +326,7 @@
 
   function setView(v, updateUrl = true) {
     if (!VALID_VIEWS.includes(v)) v = "overview";
+    const previousView = currentView;
     currentView = v;
     const routeAlreadyActive = new URLSearchParams(location.search).get("view") === v && !location.hash;
     if (updateUrl && !routeAlreadyActive) history.pushState({ view: v }, "", viewUrl(v));
@@ -333,6 +334,9 @@
     $$(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
     shell.classList.remove("sb-open");
     render();
+    // Lots can be registered/allocated while another dashboard is open. Refresh
+    // on entry, not on every background DB poll (which runs every two seconds).
+    if (v === "intake" && previousView !== v) loadIntakeStockLots();
   }
 
   $$(".nav-item[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
@@ -1419,6 +1423,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const GROUPS = { "Apparel": ["Tops & Shirts", "Dresses & Skirts", "Pants & Jeans"], "Outerwear": ["Outerwear & Jackets"], "Footwear": ["Shoes"], "Accessories": ["Accessories"], "Kids": ["Children Wear"] };
   const intakePhotos = ["", "", "", ""];   // front, back, fabric, tag
   let intakeBound = false;
+  let intakeLotsLoadInFlight = null;
 
   /* The System Parameters base delivery fee is the single source of truth for
      transport pricing. New catalog items prefill from it so staff never re-type
@@ -1451,20 +1456,43 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   let intakeLotsCache = [];
   const findIntakeLot = id => intakeLotsCache.find(lot => lot.id === id) || null;
 
-  async function loadIntakeStockLots() {
+  function loadIntakeStockLots(force = false) {
     const select = $("#inStockLot");
-    if (!select) return;
-    try {
-      const data = await DB.financeRequest("stock-lots", { method:"GET" });
-      const current = select.value;
-      intakeLotsCache = data.stock_lots || [];
-      const lots = intakeLotsCache.filter(lot => lot.remaining_count > 0);
-      select.innerHTML = `<option value="">No registered lot selected</option>` + lots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left${(lot.grades || []).length ? ` · ${lot.grades.length} tiers` : ` · ${ugx(lot.unit_cost)}/item`}</option>`).join("");
-      select.value = current;
-      syncIntakeLotGradeUI();
-    } catch (error) {
-      select.innerHTML = `<option value="">Sign in to load registered lots</option>`;
+    if (!select) return Promise.resolve();
+    // A dashboard sync can complete while this request is still in flight.
+    // Coalesce ordinary refreshes; after saving a tagged piece, wait for any
+    // older request and then fetch again so its pre-save counts cannot win.
+    if (intakeLotsLoadInFlight) {
+      return force
+        ? intakeLotsLoadInFlight.then(() => loadIntakeStockLots())
+        : intakeLotsLoadInFlight;
     }
+
+    let request;
+    request = Promise.resolve()
+      .then(() => DB.financeRequest("stock-lots", { method:"GET" }))
+      .then(data => {
+        if (!data || !Array.isArray(data.stock_lots)) throw new Error("Invalid stock lot response");
+        // Read the current value after the request resolves so a selection made
+        // while loading is preserved. Only a lot that is no longer available
+        // should fall back to the empty option.
+        const current = select.value;
+        intakeLotsCache = data.stock_lots;
+        const lots = intakeLotsCache.filter(lot => Number(lot.remaining_count) > 0);
+        select.innerHTML = `<option value="">No registered lot selected</option>` + lots.map(lot => `<option value="${esc(lot.id)}" data-unit-cost="${lot.unit_cost}">${esc(lot.lot_code)} · ${esc(lot.supplier)} · ${lot.remaining_count} left${(lot.grades || []).length ? ` · ${lot.grades.length} tiers` : ` · ${ugx(lot.unit_cost)}/item`}</option>`).join("");
+        select.value = lots.some(lot => String(lot.id) === current) ? current : "";
+        syncIntakeLotGradeUI();
+      })
+      .catch(() => {
+        // Keep a populated select intact during transient auth/network errors;
+        // otherwise the selected lot visibly disappears on every retry.
+        if (!intakeLotsCache.length) select.innerHTML = `<option value="">Sign in to load registered lots</option>`;
+      })
+      .finally(() => {
+        if (intakeLotsLoadInFlight === request) intakeLotsLoadInFlight = null;
+      });
+    intakeLotsLoadInFlight = request;
+    return request;
   }
 
   /* ---- Locked-COGS intake helpers --------------------------------------
@@ -1485,7 +1513,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const select = $("#inLotGrade");
     if (!field || !select) return;
     const lot = findIntakeLot($("#inStockLot") && $("#inStockLot").value);
-    const grades = ((lot && lot.grades) || []).filter(g => g.remaining_count > 0);
+    const currentGrade = select.value;
+    const grades = ((lot && lot.grades) || []).filter(g => Number(g.remaining_count) > 0);
     if (!lot || !((lot.grades || []).length)) {
       field.hidden = true;
       select.innerHTML = `<option value="">Choose tier…</option>`;
@@ -1496,7 +1525,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     select.innerHTML = `<option value="">Choose tier…</option>` + grades.map(g => `<option value="${esc(g.id)}">${esc(g.grade_name)} · ${g.remaining_count} left · COGS ${ugx(g.unit_cogs)}</option>`).join("");
     const hint = $("#inLotGradeHint");
     if (hint) hint.textContent = grades.length ? "Pre-graded tier · locks the unit COGS" : "All tiers fully tagged — no pieces left";
-    if (!grades.some(g => g.id === select.value)) select.value = "";
+    select.value = grades.some(g => String(g.id) === currentGrade) ? currentGrade : "";
     applyIntakeGradeSelection();
   }
 
@@ -1577,16 +1606,18 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   }
 
   function initIntakeForm() {
+    // renderIntake() also runs for background sync events. Populate defaults and
+    // attach handlers once only, or each poll overwrites live form selections.
+    if (intakeBound) return;
     $("#inDemo").innerHTML = DB.DEMOGRAPHICS.map(d => `<option>${d}</option>`).join("");
     $("#inCat").innerHTML = DB.CATEGORIES.map(c => `<option>${c}</option>`).join("");
     $("#inCond").innerHTML = INTAKE_CONDITIONS.map(c => `<option>${c}</option>`).join("");
     $("#inGroup").innerHTML = Object.keys(GROUPS).map(g => `<option>${g}</option>`).join("");
     $("#inSizePreset").innerHTML = `<option value="">Preset</option>` + ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"].map(s => `<option value="${s}">${s}</option>`).join("");
     $("#inSku").value = demoSku();
+    intakeBound = true;
     loadIntakeStockLots();
 
-    if (intakeBound) return;
-    intakeBound = true;
     $$('[data-intake-condition]').forEach(button => button.addEventListener("click", () => setIntakeCondition(button.dataset.intakeCondition)));
     $("#btnRollSku").addEventListener("click", () => { $("#inSku").value = demoSku(); paintTag(); });
     $("#inDemo").addEventListener("change", () => { $("#inSku").value = demoSku(); paintTag(); });
@@ -1759,8 +1790,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       } else {
         renderAll();
       }
-      // Tier remaining counts moved — refresh the intake lot cache.
-      loadIntakeStockLots();
+      // Tier remaining counts moved — force a fresh count after any in-flight
+      // pre-save request has settled.
+      loadIntakeStockLots(true);
     } catch (err) { toast(err.message, false); }
   }
 

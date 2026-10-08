@@ -4,8 +4,9 @@
   "description": "Adonai Store \u2014 Android POS Cashier Terminal App & Hybrid Mobile Architecture",
   "main": "pos.html",
   "scripts": {
-    "test": "node tests/mobile-scroll.test.js",
+    "test": "node tests/mobile-scroll.test.js && node tests/intake-lot-selection.test.js",
     "test:mobile-scroll": "node tests/mobile-scroll.test.js",
+    "test:intake-lot-selection": "node tests/intake-lot-selection.test.js",
     "bundle:pos": "node scripts/bundle-pos.js",
     "build:apk": "node scripts/build-pos-apk.js",
     "build:apk:debug": "node scripts/build-pos-apk.js --debug",
