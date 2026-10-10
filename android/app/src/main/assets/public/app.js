@@ -116,6 +116,9 @@
           if (after) after(result.credential);
           return;
         }
+        input.classList.add("err"); toast(result.message || "Incorrect master key", false);
+        setTimeout(() => input.classList.remove("err"), 700);
+        return;
       } catch (err) {}
       input.classList.add("err"); toast("Incorrect master key", false);
       setTimeout(() => input.classList.remove("err"), 700);
@@ -153,7 +156,13 @@
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin: val, key: val, terminal_key: val })
       });
-      const data = await r.json();
+      let data = {};
+      try { data = await r.json(); } catch (e) { data = {}; }
+      if (r.status === 429) {
+        const wait = Math.max(1, Number(data.retry_after_seconds) || 60);
+        const mins = Math.ceil(wait / 60);
+        return { ok: false, message: `Too many sign-in attempts — wait about ${mins} minute${mins === 1 ? "" : "s"} and try again.` };
+      }
       if (data && data.ok && data.staff) {
         if (String(data.staff.role || "").toLowerCase() === "admin") {
           return { ok: true, credential: data.token || val, staff: data.staff };
@@ -163,6 +172,7 @@
           message: `That PIN belongs to ${data.staff.name || "a staff member"} (${data.staff.role || "staff"}) — the Admin Suite requires the store master passkey.`
         };
       }
+      if (r.status >= 500) return { ok: false, message: "The server could not verify the passkey right now — try again shortly." };
       return { ok: false, message: "Incorrect passkey — try again." };
     } catch (e) {
       return { ok: false, message: "Could not verify right now — check your connection." };

@@ -199,6 +199,24 @@ class RateLimiter:
             q.append(now)
             return True, 0
 
+    def peek(self, bucket: str, key: str, limit: int, window_seconds: float) -> tuple[bool, int]:
+        """Like check(), but read-only: reports whether the bucket is currently
+        exhausted without consuming a slot. Use it before a credential check and
+        call check() only for failed attempts, so successful sign-ins never
+        count against the brute-force budget."""
+        now = time.monotonic()
+        composite = (bucket, str(key or "unknown"))
+        with self._lock:
+            q = self._hits.get(composite)
+            if not q:
+                return True, 0
+            cutoff = now - window_seconds
+            live = [t for t in q if t > cutoff]
+            if len(live) >= limit:
+                retry_after = max(1, int(live[0] + window_seconds - now) + 1)
+                return False, retry_after
+            return True, 0
+
     def _evict_stale(self, now: float, window_seconds: float) -> None:
         cutoff = now - max(window_seconds, 3600)
         stale = [k for k, q in self._hits.items() if not q or q[-1] <= cutoff]
