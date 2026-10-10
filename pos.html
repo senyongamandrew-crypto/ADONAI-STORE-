@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="css/pos.css?v=7.3" />
 <link rel="stylesheet" href="css/notifications.css?v=1.0" />
+<link rel="stylesheet" href="css/pos-overhaul.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -171,6 +172,22 @@
   <!-- phone: scrim behind the Current Sale drawer (web-storefront cart pattern) -->
   <div class="pos-cart-scrim" id="posCartScrim"></div>
 
+  <!-- Touch-first quick checkout dock. Its controls forward to the existing
+       cart drawer and payment action without changing sale state or logic. -->
+  <div class="pos-checkout-bar" id="posCheckoutBar" aria-label="Quick checkout" aria-hidden="true">
+    <button class="pos-checkout-cart" id="posQuickCart" type="button" aria-controls="posCart" aria-expanded="false" aria-label="Review current sale">
+      <span class="pos-checkout-icon" aria-hidden="true"><i data-icon="shopping-bag" data-size="18"></i></span>
+      <span class="pos-checkout-copy"><span>Current sale</span><strong><span id="posQuickCount">0</span> items</strong></span>
+    </button>
+    <div class="pos-checkout-total" aria-live="polite">
+      <span>Total</span>
+      <strong id="posQuickTotal">UGX 0</strong>
+    </div>
+    <button class="pos-checkout-pay" id="posQuickCharge" type="button" disabled>
+      <span>Charge</span><i data-icon="arrow-right" data-size="17"></i>
+    </button>
+  </div>
+
   <!-- ============ TENDER MODAL ============ -->
   <div class="modal-backdrop" id="tenderBackdrop">
     <div class="tender-modal">
@@ -277,5 +294,6 @@
 <script src="js/db.js?v=4.0"></script>
 <script src="js/auth.js?v=2.7"></script>
 <script src="js/pos.js?v=6.3"></script>
+<script src="js/pos-ui.js?v=1.0"></script>
 </body>
 </html>

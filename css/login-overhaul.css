@@ -1,0 +1,74 @@
+/* Adonai terminal sign-in — matching POS/operations design language */
+:root {
+  color-scheme:light;
+  --page:#F3F6FA;
+  --card:#FFFFFF;
+  --ink:#0F172A;
+  --muted:#64748B;
+  --line:#E2E8F0;
+  --tint:#F8FAFC;
+  --rust:#15803D;
+  --rust-dark:#166534;
+  --green:#15803D;
+  --shadow:0 24px 70px rgba(15,23,42,.14);
+  --font-display:"Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-text:"Plus Jakarta Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+html, body { max-width:100%; min-height:100%; }
+body {
+  min-height:100vh; min-height:100dvh; padding:20px;
+  background:radial-gradient(900px 560px at 15% 4%,rgba(34,197,94,.11),transparent 62%),
+             radial-gradient(700px 500px at 100% 100%,rgba(15,23,42,.06),transparent 62%),
+             #F3F6FA;
+  color:#334155; font:400 14px/1.55 var(--font-text);
+}
+.card {
+  width:min(100%,440px); padding:clamp(22px,5vw,36px); border:1px solid rgba(226,232,240,.95);
+  border-radius:24px; background:rgba(255,255,255,.96); box-shadow:var(--shadow);
+  -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px);
+}
+.login-brand-logo { max-height:58px; margin-bottom:18px; }
+h1 { color:#0F172A; font:850 clamp(23px,6vw,27px)/1.15 var(--font-display); letter-spacing:-.04em; }
+.sub { margin-bottom:21px; color:#64748B; font-size:10px; letter-spacing:.13em; }
+.auth-tabs { gap:5px; padding:5px; border-color:#E2E8F0; border-radius:14px; background:#F1F5F9; }
+.auth-tab { min-height:46px; border-radius:10px; color:#64748B; font-weight:750; }
+.auth-tab.active { background:#fff; color:#0F172A; box-shadow:0 3px 8px rgba(15,23,42,.08); }
+.pin-display { min-height:58px; margin-bottom:11px; border-color:#DCE5ED; border-radius:13px; background:#F8FAFC; color:#0F172A; }
+.keypad { gap:9px; }
+.keypad button, .keypad .key, .pin-key {
+  min-height:54px; border:1px solid #E2E8F0; border-radius:14px; background:#fff;
+  color:#0F172A; font-size:18px; font-weight:800; box-shadow:0 2px 6px rgba(15,23,42,.035);
+}
+.keypad button:hover, .keypad .key:hover, .pin-key:hover { border-color:#86EFAC; background:#F0FDF4; }
+.btn {
+  min-height:50px; display:flex; align-items:center; justify-content:center; gap:8px;
+  border:1px solid #DCE5ED; border-radius:12px; color:#334155; font-weight:800;
+  transition:transform .16s,box-shadow .16s,border-color .16s,background .16s;
+}
+.btn.primary { border-color:#15803D; background:#15803D; color:#fff; box-shadow:0 6px 15px rgba(21,128,61,.18); }
+.btn.primary:hover { background:#166534; box-shadow:0 8px 18px rgba(21,128,61,.22); }
+.btn.ghost { color:#64748B; }
+.session-card { border-color:#DCE5ED; border-radius:16px; background:#F8FAFC; }
+.session-avatar { background:#15803D; box-shadow:0 0 0 4px rgba(34,197,94,.12); }
+.session-role { border-radius:999px; background:#ECFDF5; color:#047857; }
+.notice { border-color:#BBF7D0; border-radius:14px; background:#ECFDF5; color:#166534; }
+.notice.warn { background:#FFFBEB; }
+.input-wrap { min-height:54px; border-color:#DCE5ED; border-radius:13px; background:#F8FAFC; }
+.text-key-in { min-height:52px; background:transparent; color:#0F172A; font-size:16px; }
+.input-wrap:focus-within { border-color:#4ADE80; box-shadow:0 0 0 3px rgba(34,197,94,.18); }
+.btn-toggle-show { min-width:48px; min-height:48px; border-radius:10px; color:#047857; font-weight:800; }
+.hint { color:#64748B; }
+.back { display:inline-flex; align-items:center; justify-content:center; min-height:44px; color:#047857; font-weight:750; }
+:focus-visible { outline:3px solid rgba(34,197,94,.58); outline-offset:2px; }
+@media (max-width:480px) {
+  body { padding:14px; }
+  .card { padding:23px 18px; border-radius:21px; }
+  .sub { margin-bottom:17px; }
+  .auth-tab { padding:7px 5px; font-size:11px; }
+  .keypad { gap:7px; }
+  .keypad button, .keypad .key, .pin-key { min-height:52px; }
+  .session-actions { gap:7px; }
+}
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+}
