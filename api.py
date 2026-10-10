@@ -806,7 +806,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "retry_after_seconds": retry_after,
                 }, status=429)
             if path.rstrip("/") == "/api/auth/verify" and method == "POST":
-                allowed, retry_after = _rate_limiter.check(
+                # Peek only: a correct passkey must never be locked out by its
+                # own earlier successful sign-ins. Failures are recorded below.
+                allowed, retry_after = _rate_limiter.peek(
                     "auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW
                 )
                 if not allowed:
@@ -2948,6 +2950,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             if not candidate:
                 return json_response({"ok": False, "error": "Staff Terminal Key or PIN required"}, status=400)
             if len(candidate) > 1024:
+                _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
                 return json_response({"ok": False, "error": "Invalid Staff Terminal Key or PIN"}, status=401)
 
             # 1. Check Admin Environment Variables (constant-time, exact match)
@@ -3023,6 +3026,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                                 "staff": staff_data
                             })
 
+            # Record the failed attempt against the brute-force budget.
+            _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
             logger.warning("[AUTH] Failed sign-in attempt from %s", client_ip)
             return json_response({"ok": False, "error": "Invalid Staff Terminal Key or PIN"}, status=401)
 
