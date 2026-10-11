@@ -26,22 +26,26 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    },
-    {
-      "src": "assets/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
     }
   ],
-  "categories": ["shopping", "lifestyle", "fashion"],
+  "categories": [
+    "shopping",
+    "lifestyle",
+    "fashion"
+  ],
   "shortcuts": [
     {
       "name": "Browse Collection",
       "short_name": "Catalog",
       "description": "View live rail inventory",
       "url": "/#shop",
-      "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "assets/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }
