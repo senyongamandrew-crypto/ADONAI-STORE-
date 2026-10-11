@@ -152,7 +152,8 @@ needed. Existing credential variables alone do not re-enable the login lock.
 The repository includes a GitHub Actions workflow in `.github/workflows/build-pos-apk.yml`.
 
 ### Key Capabilities:
-- **Automatic Builds**: On every push to `main` and PR, the workflow automatically validates backend test suites and builds the Android POS APK.
+- **Automatic Builds**: On pushes to `main` / `arena/**` and PRs, CI validates web/backend tests and compiles a signed APK.
+- **Automatic Preview Downloads**: Successful `arena/**` pushes publish a unique `v2.5.0-preview.<run-number>` prerelease with the verified APK. This does not replace the latest stable release, merge the branch or deploy the backend.
 - **Artifact Downloads**: The compiled `dist/adonai-pos-v2.apk` is uploaded as an artifact to each GitHub Action run. You can download the latest APK directly from the **Actions** tab on GitHub without local build tooling.
 - **Automated Releases**: Pushing a version tag (e.g., `git tag v2.4.0 && git push origin v2.4.0`) or triggering the action manually (`workflow_dispatch`) creates a GitHub Release with `adonai-pos-v2.apk` attached.
 

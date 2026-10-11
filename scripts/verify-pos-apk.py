@@ -71,8 +71,8 @@ def main() -> int:
     service = re.search(r"E: service\b[^\n]*\n(?P<attrs>(?:[^\n]*\bA: [^\n]*\n)+)", tree)
     if not service or "com.adonaithrift.pos.RiderTrackingService" not in service["attrs"]:
         raise ValueError("Built manifest has no native RiderTrackingService")
-    if not re.search(r"android:exported[^\n]*0x0\b", service["attrs"]) or not re.search(r"android:foregroundServiceType[^\n]*0x8\b", service["attrs"]):
-        raise ValueError("Rider service must be non-exported and location-typed")
+    if not re.search(r"android:exported[^\n]*(?:0x0+\b|=\s*false\b)", service["attrs"]) or not re.search(r"android:foregroundServiceType[^\n]*(?:0x0*8\b|=\s*\"location\")", service["attrs"]):
+        raise ValueError("Rider service must be non-exported and location-typed: " + service["attrs"].replace("\n", " "))
     signature = subprocess.check_output([str(tools / "apksigner"), "verify", "--verbose", "--print-certs", str(apk)], text=True)
     cert = re.search(r"Signer #1 certificate SHA-256 digest: ([a-fA-F0-9]+)", signature)
     if not cert:

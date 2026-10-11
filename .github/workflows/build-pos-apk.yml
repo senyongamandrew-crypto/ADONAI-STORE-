@@ -21,7 +21,7 @@ on:
         description: 'Release Tag (e.g. v2.4.0)'
         required: false
         type: string
-        default: 'v2.5.0-preview.1'
+        default: 'v2.5.0'
 
 concurrency:
   group: pos-apk-${{ github.ref }}
@@ -32,7 +32,7 @@ permissions:
 
 # Branch/PR install candidates use a separate app ID: existing app data is safe.
 env:
-  ADONAI_PREVIEW_BUILD: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
+  ADONAI_PREVIEW_BUILD: ${{ (startsWith(github.ref, 'refs/heads/arena/') || github.event_name == 'pull_request' || contains(github.ref, '-preview.')) && '1' || '0' }}
 
 jobs:
   backend-tests:
@@ -87,7 +87,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -198,12 +198,27 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Name installation release
+        id: install_release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/'))
+        env:
+          REQUESTED_TAG: ${{ github.event.inputs.release_tag }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && -n "$REQUESTED_TAG" ]]; then
+            TAG="$REQUESTED_TAG"
+          else
+            TAG="v2.5.0-preview.$GITHUB_RUN_NUMBER"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release & Attach APK
-        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/'))
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
-          name: "Adonai POS ${{ github.event.inputs.release_tag || github.ref_name }}"
+          tag_name: ${{ steps.install_release.outputs.tag }}
+          name: "Adonai POS ${{ steps.install_release.outputs.tag }}"
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: ${{ env.ADONAI_PREVIEW_BUILD == '1' }}
