@@ -221,3 +221,20 @@ a.nd-item:focus-visible, .nd-refresh:focus-visible, .notif-bell:focus-visible {
   .nd-head { flex-wrap: wrap; }
   .nd-actions { margin-left: auto; }
 }
+
+/* Received / On hold collections, selection and bulk actions */
+.nd-tabs { display: flex; gap: 6px; padding: 10px 12px 0; background: #FFFFFF; border-bottom: 1px solid #E5E7EB; }
+.nd-tab { flex: 1 1 0; min-height: 40px; border: 0; border-bottom: 3px solid transparent; background: transparent; font-family: inherit; font-weight: 800; font-size: 13px; line-height: 1.2; color: #6B7280; cursor: pointer; }
+.nd-tab.active { color: #111827; border-bottom-color: #111827; }
+.nd-tab:focus-visible, .nd-tool:focus-visible, .nd-selall input:focus-visible, .nd-check input:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+.nd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; background: #FFFFFF; border-bottom: 1px solid #E5E7EB; }
+.nd-toolbar:empty { display: none; }
+.nd-selall { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #374151; min-height: 36px; }
+.nd-selall input, .nd-check input { width: 18px; height: 18px; accent-color: #111827; cursor: pointer; }
+.nd-tool { min-height: 36px; padding: 0 10px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 12.5px; font-weight: 700; color: #111827; cursor: pointer; }
+.nd-tool:disabled { opacity: .45; cursor: not-allowed; }
+.nd-tool.nd-danger { color: #B91C1C; border-color: #FCA5A5; }
+.nd-row { display: flex; align-items: stretch; gap: 0; border-bottom: 1px solid #F3F4F6; }
+.nd-row > .nd-item { flex: 1 1 auto; min-width: 0; }
+.nd-check { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; cursor: pointer; background: #FFFFFF; }
+.nd-note { margin: 10px 14px; font-size: 12px; color: #6B7280; line-height: 1.45; }
