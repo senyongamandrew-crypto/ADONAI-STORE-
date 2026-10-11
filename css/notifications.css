@@ -223,10 +223,7 @@ a.nd-item:focus-visible, .nd-refresh:focus-visible, .notif-bell:focus-visible {
 }
 
 /* Received / On hold collections, selection and bulk actions */
-.nd-tabs { display: flex; gap: 6px; padding: 10px 12px 0; background: #FFFFFF; border-bottom: 1px solid #E5E7EB; }
-.nd-tab { flex: 1 1 0; min-height: 40px; border: 0; border-bottom: 3px solid transparent; background: transparent; font-family: inherit; font-weight: 800; font-size: 13px; line-height: 1.2; color: #6B7280; cursor: pointer; }
-.nd-tab.active { color: #111827; border-bottom-color: #111827; }
-.nd-tab:focus-visible, .nd-tool:focus-visible, .nd-selall input:focus-visible, .nd-check input:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+.nd-tool:focus-visible, .nd-selall input:focus-visible, .nd-check input:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
 .nd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; background: #FFFFFF; border-bottom: 1px solid #E5E7EB; }
 .nd-toolbar:empty { display: none; }
 .nd-selall { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #374151; min-height: 36px; }

@@ -8,10 +8,9 @@
   "use strict";
 
   const READ_KEY = "adonai.notifications.read-ids.v2";
-  // Collections are per browser and hold IDs only (no alert text), so they can't leak payloads.
-  const HOLD_KEY = "adonai.notifications.hold.v1";
+  // Deleted-on-this-device IDs only (no alert text), so they can't leak payloads.
   const DELETED_KEY = "adonai.notifications.deleted.v1";
-  const HOLD_MAX = 200;
+  const HOLD_KEY = "adonai.notifications.hold.v1"; // retired: removed on load
   const DELETED_MAX = 300;
   const MAX_LOCAL = 100;
   const MAX_READ = 300;
@@ -56,13 +55,10 @@
       this.history = [];
       this.seenIds = new Set();
       this.readIds = this.restoreReadIds();
-      this.holdIds = loadIdSet(HOLD_KEY, HOLD_MAX);
       this.deletedIds = loadIdSet(DELETED_KEY, DELETED_MAX);
-      // Trim stored collections on load so local storage stays bounded even after old versions.
-      saveIdSet(HOLD_KEY, this.holdIds, HOLD_MAX);
       saveIdSet(DELETED_KEY, this.deletedIds, DELETED_MAX);
-      this.tab = "received";
       this.selected = new Set();
+      try { localStorage.removeItem(HOLD_KEY); } catch (e) {}
       this.unreadCount = 0;
       this.hasSynced = false;
       this.failures = 0;
@@ -224,58 +220,44 @@
         return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === "string").slice(-MAX_READ) : []);
       } catch (e) { return new Set(); }
     }
-    // Items in a collection, newest first. "received" excludes held and deleted items.
-    visibleItems(tab) {
-      return this.history.filter(n => !this.deletedIds.has(n.id) &&
-        (tab === "hold" ? this.holdIds.has(n.id) : !this.holdIds.has(n.id)));
+    // One list: everything the server returned, minus messages deleted on this device.
+    visibleItems() {
+      return this.history.filter(n => !this.deletedIds.has(n.id));
     }
     recountUnread() {
-      this.unreadCount = this.visibleItems("received").filter(n => !this.readIds.has(n.id)).length;
+      this.unreadCount = this.visibleItems().filter(n => !this.readIds.has(n.id)).length;
       this.updateBadgeUI();
-    }
-    setTab(tab) {
-      this.tab = tab === "hold" ? "hold" : "received";
-      this.selected.clear();
-      this.renderDrawerList();
     }
     toggleSelected(id, on) {
       if (on) this.selected.add(id); else this.selected.delete(id);
       this.renderDrawerList();
     }
     selectAllVisible() {
-      const items = this.visibleItems(this.tab);
+      const items = this.visibleItems();
       const allSelected = items.length > 0 && items.every(n => this.selected.has(n.id));
       this.selected = allSelected ? new Set() : new Set(items.map(n => n.id));
       this.renderDrawerList();
     }
-    holdSelected() {
-      this.selected.forEach(id => { if (!this.deletedIds.has(id)) this.holdIds.add(id); });
-      this.selected.clear();
-      saveIdSet(HOLD_KEY, this.holdIds, HOLD_MAX);
-      this.recountUnread(); this.renderDrawerList();
-    }
-    restoreSelected() {
-      this.selected.forEach(id => this.holdIds.delete(id));
-      this.selected.clear();
-      saveIdSet(HOLD_KEY, this.holdIds, HOLD_MAX);
-      this.recountUnread(); this.renderDrawerList();
-    }
     deleteIds(ids, message) {
       if (!ids.length) return;
       if (typeof window.confirm === "function" && !window.confirm(message)) return;
-      ids.forEach(id => { this.deletedIds.add(id); this.holdIds.delete(id); this.selected.delete(id); });
+      ids.forEach(id => { this.deletedIds.add(id); this.selected.delete(id); });
       saveIdSet(DELETED_KEY, this.deletedIds, DELETED_MAX);
-      saveIdSet(HOLD_KEY, this.holdIds, HOLD_MAX);
       this.recountUnread(); this.renderDrawerList();
     }
     deleteSelected() {
       const ids = Array.from(this.selected);
       this.deleteIds(ids, `Delete ${ids.length} selected notification${ids.length === 1 ? "" : "s"} from this device? The store keeps its own records.`);
     }
-    deleteReadReceived() {
-      const ids = this.visibleItems("received").filter(n => this.readIds.has(n.id)).map(n => n.id);
+    deleteReadMessages() {
+      const ids = this.visibleItems().filter(n => this.readIds.has(n.id)).map(n => n.id);
       this.deleteIds(ids, `Delete ${ids.length} read notification${ids.length === 1 ? "" : "s"} from this device?`);
     }
+    deleteAllMessages() {
+      const ids = this.visibleItems().map(n => n.id);
+      this.deleteIds(ids, `Delete all ${ids.length} notification${ids.length === 1 ? "" : "s"} from this device?`);
+    }
+
     markAllRead() {
       this.history.forEach(n => this.readIds.add(n.id));
       this.readIds = new Set(Array.from(this.readIds).slice(-MAX_READ));
@@ -322,7 +304,7 @@
           '<button type="button" class="nd-close" id="notifDrawerClose" aria-label="Close notifications">&times;</button></div></div>' +
           '<div class="nd-feedbar"><span class="nd-feed-status" id="notifFeedStatus" data-state="loading" role="status">Connecting to updates…</span>' +
           '<button type="button" class="nd-refresh" id="notifRefresh" aria-label="Refresh notifications">Refresh</button></div>' +
-          '<div class="nd-tabs" id="notifTabs" role="tablist"></div><div class="nd-toolbar" id="notifToolbar"></div>' +
+          '<div class="nd-toolbar" id="notifToolbar"></div>' +
           '<div class="nd-list" id="notifDrawerList"></div>';
         document.body.appendChild(d);
         const scrim = document.createElement("div");
@@ -352,42 +334,29 @@
     }
     renderDrawerList() {
       const box = document.getElementById("notifDrawerList");
-      const tabsEl = document.getElementById("notifTabs");
       const toolbar = document.getElementById("notifToolbar");
       if (!box) return;
-      const received = this.visibleItems("received"), held = this.visibleItems("hold");
-      const items = this.tab === "hold" ? held : received;
-      const unreadReceived = received.filter(n => !this.readIds.has(n.id)).length;
+      const items = this.visibleItems();
       // Selection only ever refers to rows currently on screen.
       this.selected = new Set(Array.from(this.selected).filter(id => items.some(n => n.id === id)));
       const selectedCount = this.selected.size;
       const allSelected = items.length > 0 && selectedCount === items.length;
-      if (tabsEl) {
-        tabsEl.innerHTML = '<button type="button" role="tab" class="nd-tab' + (this.tab === "received" ? " active" : "") + '" data-nd-tab="received" aria-selected="' + (this.tab === "received") + '">Received (' + received.length + (unreadReceived ? ', ' + unreadReceived + ' new' : '') + ')</button>' +
-          '<button type="button" role="tab" class="nd-tab' + (this.tab === "hold" ? " active" : "") + '" data-nd-tab="hold" aria-selected="' + (this.tab === "hold") + '">On hold (' + held.length + ')</button>';
-      }
+      const readCount = items.filter(n => this.readIds.has(n.id)).length;
       if (toolbar) {
-        const hasItems = items.length > 0;
-        const readCount = this.tab === "received" ? received.filter(n => this.readIds.has(n.id)).length : 0;
-        toolbar.innerHTML = hasItems ? '<label class="nd-selall"><input type="checkbox" data-nd-action="select-all"' + (allSelected ? " checked" : "") + '> All</label>' +
-          (this.tab === "received" ? '<button type="button" class="nd-tool" data-nd-action="hold" ' + (selectedCount ? "" : "disabled") + '>Put on hold' + (selectedCount ? ' (' + selectedCount + ')' : '') + '</button>'
-            : '<button type="button" class="nd-tool" data-nd-action="restore" ' + (selectedCount ? "" : "disabled") + '>Move to received' + (selectedCount ? ' (' + selectedCount + ')' : '') + '</button>') +
-          '<button type="button" class="nd-tool nd-danger" data-nd-action="delete" ' + (selectedCount ? "" : "disabled") + '>Delete' + (selectedCount ? ' (' + selectedCount + ')' : '') + '</button>' +
-          (readCount ? '<button type="button" class="nd-tool nd-danger" data-nd-action="clear-read">Delete read (' + readCount + ')</button>' : "") : "";
+        toolbar.innerHTML = items.length ? '<label class="nd-selall"><input type="checkbox" data-nd-action="select-all"' + (allSelected ? " checked" : "") + '> Select all</label>' +
+          '<button type="button" class="nd-tool nd-danger" data-nd-action="delete" ' + (selectedCount ? "" : "disabled") + '>Delete selected' + (selectedCount ? ' (' + selectedCount + ')' : '') + '</button>' +
+          (readCount ? '<button type="button" class="nd-tool" data-nd-action="clear-read">Delete read (' + readCount + ')</button>' : "") +
+          '<button type="button" class="nd-tool" data-nd-action="clear-all">Clear all</button>' : "";
       }
       let html;
-      const orphanHeld = Array.from(this.holdIds).filter(id => !this.deletedIds.has(id) && !this.history.some(n => n.id === id)).length;
-      const note = this.tab === "hold" && orphanHeld ? '<p class="nd-note">' + orphanHeld + ' held message' + (orphanHeld === 1 ? " is" : "s are") + ' older than the latest ' + MAX_LOCAL + ' alerts and can no longer be shown.</p>' : "";
       if (!items.length) {
-        html = this.tab === "hold"
-          ? '<p class="nd-empty">Nothing on hold.<br/>Select messages in Received and tap "Put on hold" to keep them here.</p>' + note
-          : !this.history.length
-            ? (this.status === "offline"
-              ? '<p class="nd-empty">Notifications could not be loaded.<br/>Tap Refresh to retry. Updates will also reconnect automatically.</p>'
-              : this.status === "loading"
-                ? '<p class="nd-empty">Checking for store activity…</p>'
-                : '<p class="nd-empty">No notifications yet.<br/>Completed checkouts, new orders, stock changes and other store activity will appear here.</p>')
-            : '<p class="nd-empty">Everything here is on hold or deleted.</p>';
+        html = !this.history.length
+          ? (this.status === "offline"
+            ? '<p class="nd-empty">Notifications could not be loaded.<br/>Tap Refresh to retry. Updates will also reconnect automatically.</p>'
+            : this.status === "loading"
+              ? '<p class="nd-empty">Checking for store activity…</p>'
+              : '<p class="nd-empty">No notifications yet.<br/>Completed checkouts, new orders, stock changes and other store activity will appear here.</p>')
+          : '<p class="nd-empty">All notifications on this device are deleted.<br/>New activity will appear here.</p>';
       } else html = items.map(n => {
         const meta = TYPE_META[n.type] || { label: "Alert", icon: "🔔" };
         const when = n.timestamp ? new Date(n.timestamp * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
@@ -400,7 +369,7 @@
           '<span class="nd-ico" aria-hidden="true">' + meta.icon + '</span><span class="nd-body"><strong>' + esc(n.title) + '</strong>' +
           '<span class="nd-msg">' + esc(n.message) + '</span><span class="nd-time">' + esc(meta.label) + ' · ' + esc(when) + (n.protected ? ' · 🔒 Details protected' : '') + '</span></span>' +
           (href ? '<span class="nd-link" aria-hidden="true">›</span>' : '') + '</' + tag + '></div>';
-      }).join("") + note;
+      }).join("");
       if (box.innerHTML !== html) box.innerHTML = html;
     }
 
@@ -459,15 +428,12 @@
         if (e.target.closest("#notifDrawerClose") || e.target.id === "notifScrim") { this.toggleDrawer(false); return; }
         if (e.target.closest("#notifMarkAllRead")) this.markAllRead();
         if (e.target.closest("#notifRefresh")) this.syncHistory();
-        const tab = e.target.closest("[data-nd-tab]");
-        if (tab) { this.setTab(tab.dataset.ndTab); return; }
         const action = e.target.closest("[data-nd-action]");
         if (action && action.tagName === "BUTTON") {
           const name = action.dataset.ndAction;
-          if (name === "hold") this.holdSelected();
-          else if (name === "restore") this.restoreSelected();
-          else if (name === "delete") this.deleteSelected();
-          else if (name === "clear-read") this.deleteReadReceived();
+          if (name === "delete") this.deleteSelected();
+          else if (name === "clear-read") this.deleteReadMessages();
+          else if (name === "clear-all") this.deleteAllMessages();
           return;
         }
         if (e.target.matches && e.target.matches("[data-nd-action='select-all']")) this.selectAllVisible();
