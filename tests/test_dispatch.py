@@ -255,4 +255,14 @@ class DispatchTests(unittest.TestCase):
         self.assertIsNone(self.call("POST","/api/orders/O1/list-restore",{},HEADERS)["order"]["list_archived_at"])
         self.call("POST","/api/orders/MISSING/list-archive",{},HEADERS,404)
 
+    def test_sync_pull_returns_tiny_unchanged_reply_until_the_store_changes(self):
+        first=self.call("POST","/api/sync/pull",{},HEADERS)
+        self.assertIn("products",first);self.assertTrue(first["revision"])
+        same=self.call("POST","/api/sync/pull",{"if_revision":first["revision"]},HEADERS)
+        self.assertTrue(same.get("unchanged"));self.assertNotIn("products",same)
+        with get_db() as s:
+            s.add(Product(id="P-REV",sku="REV-1",barcode_id="BC-REV",name="Revision probe",demographic="Women",category="Dress",cost_price=5000,selling_price=20000,base_price=20000,in_stock_count=1))
+        changed=self.call("POST","/api/sync/pull",{"if_revision":first["revision"]},HEADERS)
+        self.assertNotEqual(changed["revision"],first["revision"]);self.assertIn("products",changed)
+
 if __name__=="__main__":unittest.main()

@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from sqlalchemy import and_, func, inspect, or_, text
+from sqlalchemy.orm import selectinload
 import time
 import urllib.parse
 import uuid
@@ -2975,9 +2976,29 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
             with get_db() as session:
                 area_access = access_control.state(headers, session)
+                blocked = sorted(area for area in access_control.AREAS if not access_control.allowed(area, area_access))
+                # Cheap fingerprint of everything the payload contains. Clients that already hold this
+                # revision get a tiny "unchanged" reply instead of the whole store (polled every few seconds).
+                revision_parts = [
+                    list(session.query(func.count(Product.id), func.max(Product.updated_at)).one()),
+                    list(session.query(func.count(Order.id), func.max(Order.updated_at)).one()),
+                    list(session.query(func.count(OrderItem.id)).one()),
+                    list(session.query(func.count(Inventory.id), func.sum(Inventory.quantity)).one()),
+                    list(session.query(func.count(LedgerEntry.id), func.max(LedgerEntry.created_at)).one()),
+                    list(session.query(func.count(Category.id)).one()),
+                    list(session.query(func.count(Rider.id)).one()),
+                    list(session.query(func.count(StoreSetting.key), func.max(StoreSetting.updated_at)).one()),
+                    blocked,
+                ]
+                revision = hashlib.sha256(json.dumps(revision_parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+                client_revision = ""
+                if isinstance(body, dict):
+                    client_revision = str(body.get("if_revision") or "")
+                if client_revision and client_revision == revision:
+                    return json_response({"unchanged": True, "revision": revision, "synced_at": datetime.utcnow().isoformat()})
                 products = [access_control.sanitize_product(p.to_dict(), area_access) for p in session.query(Product).order_by(Product.created_at.desc()).all()]
                 categories = [c.to_dict() for c in session.query(Category).order_by(Category.sort_order.asc()).all()]
-                orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in session.query(Order).order_by(Order.created_at.desc()).all()] if (access_control.allowed("orders", area_access) or access_control.allowed("finance", area_access)) else []
+                orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in session.query(Order).options(selectinload(Order.items)).order_by(Order.created_at.desc()).all()] if (access_control.allowed("orders", area_access) or access_control.allowed("finance", area_access)) else []
                 inventory = [i.to_dict() for i in session.query(Inventory).all()] if access_control.allowed("stock", area_access) else []
                 riders = [r.to_dict() for r in session.query(Rider).filter_by(archived=False).all()] if access_control.allowed("orders", area_access) else []
                 ledger = [l.to_dict() for l in session.query(LedgerEntry).order_by(LedgerEntry.created_at.desc()).all()] if access_control.allowed("finance", area_access) else []
@@ -2986,6 +3007,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
                 return json_response({
                     "synced_at": datetime.utcnow().isoformat(),
+                    "revision": revision,
                     "products": products,
                     "categories": categories,
                     "sales": orders,

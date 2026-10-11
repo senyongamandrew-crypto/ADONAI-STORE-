@@ -379,13 +379,19 @@
     viewReady = false;
     $$(".view").forEach(section => section.classList.remove("active"));
     if (typeof PosAccess !== "undefined") {
-      try {
-        await PosAccess.ready();
-        const area = PosAccess.areaForView(v);
-        if (!await PosAccess.ensure(area)) { if (requestId === viewRequest) showProtectedArea(v); return; }
-      } catch (error) {
-        if (requestId === viewRequest) showProtectedArea(v, error.message + " Check your connection and try again.");
-        return;
+      // Fast path: the cached access policy already allows this view, so switch immediately and
+      // refresh the policy in the background. Protected views still wait for a fresh check.
+      if (typeof PosAccess.fastViewAllowed === "function" && PosAccess.fastViewAllowed(v) === true) {
+        PosAccess.ready().catch(() => {});
+      } else {
+        try {
+          await PosAccess.ready();
+          const area = PosAccess.areaForView(v);
+          if (!await PosAccess.ensure(area)) { if (requestId === viewRequest) showProtectedArea(v); return; }
+        } catch (error) {
+          if (requestId === viewRequest) showProtectedArea(v, error.message + " Check your connection and try again.");
+          return;
+        }
       }
     }
     if (requestId !== viewRequest) return;
