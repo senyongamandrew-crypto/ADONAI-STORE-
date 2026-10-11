@@ -14,6 +14,7 @@ import logging
 import os
 import re
 from sqlalchemy import and_, func, inspect, or_, text
+from sqlalchemy.orm import selectinload
 import time
 import urllib.parse
 import uuid
@@ -1527,12 +1528,34 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in q.order_by(Order.created_at.desc()).all()]
                 return json_response({"count": len(orders), "orders": orders})
 
+        if clean_path.startswith("/api/orders/") and clean_path.endswith(("/list-archive", "/list-restore")) and method == "POST":
+            # Removes an assigned/completed order from the working Orders list only. The order row,
+            # its items, payments, dispatch history and exports are untouched.
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            parts = clean_path.split("/")
+            order_id, restore = parts[-2], parts[-1] == "list-restore"
+            with get_db() as session:
+                order = session.query(Order).filter_by(id=order_id).with_for_update().first()
+                if not order:
+                    return json_response({"ok": False, "error": "Order not found"}, status=404)
+                if restore:
+                    order.list_archived_at = None
+                elif order.dispatch_status not in {"Dispatched", "Ready for Pickup", "Completed"}:
+                    return json_response({"ok": False, "error": "Only assigned or completed orders can be removed from the list. Their records are kept."}, status=409)
+                else:
+                    order.list_archived_at = datetime.utcnow()
+                session.flush()
+                return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session))})
+
         if clean_path.startswith("/api/orders/") and method in ("PUT", "PATCH"):
             staff_info, auth_error = authenticated_or_response(headers, body, query_params)
             if auth_error:
                 return auth_error
             order_id = clean_path.split("/")[-1]
             lifecycle = {"Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed", "Cancelled"}
+            outbox = []
             with get_db() as session:
                 order = session.query(Order).filter_by(id=order_id).with_for_update().first()
                 if not order:
@@ -1583,7 +1606,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                                 restored_units += quantity
                                 if product.inventory_status == "OUT_OF_STOCK" and product.in_stock_count > 0:
                                     product.inventory_status = "AVAILABLE"
+                    if next_stage == "Dispatched" and not assignment and not order.rider_id and order.channel == "web" and str(order.delivery_type or "").strip().lower() != "pickup":
+                        return json_response({"ok": False, "error": "Choose a delivery partner, then dispatch. Assigning the rider sends them the WhatsApp job message."}, status=409)
                     order.dispatch_status = next_stage
+                    if next_stage in {"Dispatched", "Ready for Pickup", "Completed"} and order.dispatched_at is None:
+                        order.dispatched_at = datetime.utcnow()
                     order.status = (
                         "completed" if next_stage == "Completed"
                         else "cancelled" if next_stage == "Cancelled"
@@ -1592,7 +1619,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     )
 
                 if assignment:
-                    dispatch.assign(session, order, assignment.id, (staff_info or {}).get("name","Dispatcher"))
+                    dispatch.assign(session, order, assignment.id, (staff_info or {}).get("name","Dispatcher"), outbox)
                 if "payment_method" in body:
                     order.tender_type = str(body.get("payment_method") or "cash").strip().lower()
                 order.updated_at = datetime.utcnow()
@@ -1601,7 +1628,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     broadcast_event("ORDER_UPDATED", f"Order {order.id} updated",
                         f"{order.dispatch_status or order.status}" + (f" · Rider: {order.rider_name}" if order.rider_name else ""),
                         {"order_id": order.id, "status": order.status, "fulfillment_status": order.dispatch_status}, session=session)
-                return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session)), "stock_restored_units": restored_units})
+                result = json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session)), "stock_restored_units": restored_units})
+            # Rider WhatsApp messages go out only once the assignment has committed.
+            if outbox:
+                result = dispatch.attach_notices(result, dispatch.deliver_rider_notices(outbox))
+            return result
 
         if clean_path == "/api/orders" and method == "POST":
             channel = str(body.get("channel", "web")).lower()
@@ -2945,9 +2976,29 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
             with get_db() as session:
                 area_access = access_control.state(headers, session)
+                blocked = sorted(area for area in access_control.AREAS if not access_control.allowed(area, area_access))
+                # Cheap fingerprint of everything the payload contains. Clients that already hold this
+                # revision get a tiny "unchanged" reply instead of the whole store (polled every few seconds).
+                revision_parts = [
+                    list(session.query(func.count(Product.id), func.max(Product.updated_at)).one()),
+                    list(session.query(func.count(Order.id), func.max(Order.updated_at)).one()),
+                    list(session.query(func.count(OrderItem.id)).one()),
+                    list(session.query(func.count(Inventory.id), func.sum(Inventory.quantity)).one()),
+                    list(session.query(func.count(LedgerEntry.id), func.max(LedgerEntry.created_at)).one()),
+                    list(session.query(func.count(Category.id)).one()),
+                    list(session.query(func.count(Rider.id)).one()),
+                    list(session.query(func.count(StoreSetting.key), func.max(StoreSetting.updated_at)).one()),
+                    blocked,
+                ]
+                revision = hashlib.sha256(json.dumps(revision_parts, default=str, sort_keys=True).encode("utf-8")).hexdigest()[:32]
+                client_revision = ""
+                if isinstance(body, dict):
+                    client_revision = str(body.get("if_revision") or "")
+                if client_revision and client_revision == revision:
+                    return json_response({"unchanged": True, "revision": revision, "synced_at": datetime.utcnow().isoformat()})
                 products = [access_control.sanitize_product(p.to_dict(), area_access) for p in session.query(Product).order_by(Product.created_at.desc()).all()]
                 categories = [c.to_dict() for c in session.query(Category).order_by(Category.sort_order.asc()).all()]
-                orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in session.query(Order).order_by(Order.created_at.desc()).all()] if (access_control.allowed("orders", area_access) or access_control.allowed("finance", area_access)) else []
+                orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in session.query(Order).options(selectinload(Order.items)).order_by(Order.created_at.desc()).all()] if (access_control.allowed("orders", area_access) or access_control.allowed("finance", area_access)) else []
                 inventory = [i.to_dict() for i in session.query(Inventory).all()] if access_control.allowed("stock", area_access) else []
                 riders = [r.to_dict() for r in session.query(Rider).filter_by(archived=False).all()] if access_control.allowed("orders", area_access) else []
                 ledger = [l.to_dict() for l in session.query(LedgerEntry).order_by(LedgerEntry.created_at.desc()).all()] if access_control.allowed("finance", area_access) else []
@@ -2956,6 +3007,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
                 return json_response({
                     "synced_at": datetime.utcnow().isoformat(),
+                    "revision": revision,
                     "products": products,
                     "categories": categories,
                     "sales": orders,

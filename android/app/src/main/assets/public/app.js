@@ -379,13 +379,19 @@
     viewReady = false;
     $$(".view").forEach(section => section.classList.remove("active"));
     if (typeof PosAccess !== "undefined") {
-      try {
-        await PosAccess.ready();
-        const area = PosAccess.areaForView(v);
-        if (!await PosAccess.ensure(area)) { if (requestId === viewRequest) showProtectedArea(v); return; }
-      } catch (error) {
-        if (requestId === viewRequest) showProtectedArea(v, error.message + " Check your connection and try again.");
-        return;
+      // Fast path: the cached access policy already allows this view, so switch immediately and
+      // refresh the policy in the background. Protected views still wait for a fresh check.
+      if (typeof PosAccess.fastViewAllowed === "function" && PosAccess.fastViewAllowed(v) === true) {
+        PosAccess.ready().catch(() => {});
+      } else {
+        try {
+          await PosAccess.ready();
+          const area = PosAccess.areaForView(v);
+          if (!await PosAccess.ensure(area)) { if (requestId === viewRequest) showProtectedArea(v); return; }
+        } catch (error) {
+          if (requestId === viewRequest) showProtectedArea(v, error.message + " Check your connection and try again.");
+          return;
+        }
       }
     }
     if (requestId !== viewRequest) return;
@@ -656,6 +662,25 @@
     return isSalePaid(s) ? "paid" : "unpaid";
   }
 
+  // Orders list day boundary: Kampala calendar day. Server timestamps are UTC without a suffix.
+  const KAMPALA_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Kampala", year: "numeric", month: "2-digit", day: "2-digit" });
+  function kampalaDay(value) {
+    if (!value) return "";
+    const text = /[zZ]|[+-]\d\d:?\d\d$/.test(String(value)) ? String(value) : String(value) + "Z";
+    const time = Date.parse(text);
+    return Number.isFinite(time) ? KAMPALA_DAY.format(new Date(time)) : "";
+  }
+  // Web orders leave the working list once they were removed, or once they were dispatched/completed
+  // on an earlier Kampala day. Their records and exports are unaffected.
+  function leavesOrdersList(s) {
+    if (!s || s.channel !== "web") return false;
+    if (s.list_archived_at) return true;
+    const stage = fulfillmentStage(s);
+    if (stage !== "Dispatched" && stage !== "Completed" && stage !== "Ready for Pickup") return false;
+    const day = kampalaDay(s.dispatched_at || s.updated_at || s.created_at);
+    return !!day && day < kampalaDay(new Date().toISOString());
+  }
+
   function isOrderInLane(s, laneKey) {
     const lane = DB.laneOf(s);
     if (laneKey === "active") return ["incoming", "fulfillment", "ready"].includes(lane);
@@ -677,7 +702,8 @@
     if (stage === "Unfulfilled") return { next: "In Assembly", label: "Start assembly", icon: "package" };
     if (stage === "In Assembly") {
       const pickup = String(s.delivery_type || "").toLowerCase() === "pickup";
-      return { next: pickup ? "Ready for Pickup" : "Dispatched", label: pickup ? "Mark ready for pickup" : "Mark dispatched", icon: pickup ? "check-circle" : "truck" };
+      if (!pickup) return { next: "", label: "Assign rider", icon: "bike" }; // opens the rider picker; dispatch needs a rider
+      return { next: "Ready for Pickup", label: "Mark ready for pickup", icon: "check-circle" };
     }
     if (stage === "Ready for Pickup" || stage === "Dispatched") return { next: "Completed", label: "Complete order", icon: "check-circle" };
     return null;
@@ -710,7 +736,7 @@
   }
 
   function renderSales() {
-    const sales = allSales();
+    const sales = allSales().filter(s => !leavesOrdersList(s));
     const webPend = sales.filter(isOpenWebOrder);
     const openOrders = sales.filter(s => ["incoming", "fulfillment", "ready"].includes(DB.laneOf(s)));
     const needsReview = stageOrders(sales, "incoming");
@@ -865,6 +891,7 @@
         <div class="order-actions">
           ${actionButton}
           <button type="button" class="btn order-details-action" data-open-order="${esc(s.id)}">Details</button>
+          ${(stage === "Dispatched" || stage === "Completed") && s.channel === "web" ? `<button type="button" class="btn ghost order-list-action" data-order-action="list-archive" data-order-id="${esc(s.id)}">Remove from list</button>` : ""}
           ${cancellable ? `<button type="button" class="btn danger order-cancel-action" data-order-action="cancel" data-order-id="${esc(s.id)}">Cancel</button>` : stage === "Completed" || stage === "Cancelled" ? `<button type="button" class="btn order-details-action" data-print-order="${esc(s.id)}">Receipt</button>` : ""}
         </div>
       </div>
@@ -893,7 +920,7 @@
       const updated = await work();
       if (typeof afterSuccess === "function") afterSuccess(updated);
       if (updated && updated.dispatch_status) activeLane = DB.laneOf(updated);
-      toast(successMessage);
+      toast(typeof successMessage === "function" ? successMessage(updated) : successMessage);
       renderSales();
       return updated;
     } catch (err) {
@@ -1123,6 +1150,44 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     toast("WhatsApp confirmation prepared — tap Send to deliver it");
   }
 
+  function isDeliveryOrder(s) {
+    return String(s.delivery_type || "boda").toLowerCase() !== "pickup";
+  }
+
+  // Rider picker: only partners who can take a job are selectable; the one already on the order stays visible.
+  function riderDispatchBlock(s, riders) {
+    if (!isDeliveryOrder(s)) return "";
+    const stage = fulfillmentStage(s);
+    if (stage !== "In Assembly" && stage !== "Dispatched") return "";
+    const assigned = String(assignedRiderId(s) || "");
+    const active = riders.filter(r => !r.archived);
+    const options = active.map(r => {
+      const current = String(r.id) === assigned;
+      const unavailable = r.status === "Offline" && !current;
+      const label = `${r.name}${r.zone ? " (" + r.zone + ")" : ""} · ${String(r.status || "Available").toUpperCase()}`;
+      return `<option value="${esc(r.id)}" ${current ? "selected" : ""} ${unavailable ? "disabled" : ""}>${esc(label)}${unavailable ? " — offline" : ""}</option>`;
+    }).join("");
+    const hasOptions = active.some(r => r.status !== "Offline" || String(r.id) === assigned);
+    return `
+      <div class="field">
+        <label>${assigned ? "REASSIGN DELIVERY PARTNER" : "ASSIGN DELIVERY PARTNER"}</label>
+        <select id="modalRiderSel" class="sel-full">
+          <option value="">${hasOptions ? "Choose an available partner…" : "No available partners — set one Available first"}</option>
+          ${options}
+        </select>
+        ${assigned ? `<p class="muted small">Currently with ${esc(assignedRiderName(s) || "a partner")}.</p>` : ""}
+      </div>
+      <button class="btn primary btn-full" id="btnDispatchRider">${Icons.svg("bike", "ico-14")} ${assigned ? "Reassign &amp; notify on WhatsApp" : "Assign &amp; notify rider on WhatsApp"}</button>`;
+  }
+
+  function riderAssignmentMessage(orderId, riderName, updated) {
+    const notice = updated && updated.rider_notice;
+    const first = Array.isArray(notice) ? notice[0] : notice;
+    if (!first) return `${orderId} assigned to ${riderName}`;
+    if (first.status === "sent") return `${orderId} assigned to ${riderName} · WhatsApp sent to the rider`;
+    return `${orderId} assigned to ${riderName} · WhatsApp not sent (${first.error || "not configured"}). Message the rider from Delivery Partners & Dispatch.`;
+  }
+
   function orderDetailModal(id) {
     const s = DB.getSale(id);
     if (!s) return toast("Order not found", false);
@@ -1204,22 +1269,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
       <div class="odm-dispatch-box">
         <div class="odm-dispatch-title">Workflow Dispatch &amp; Closure</div>
-        <div class="field">
-          <label>ASSIGN DELIVERY PARTNER</label>
-          <select id="modalRiderSel" class="sel-full">
-            ${riders.map(r => `
-              <option value="${r.id}" ${assignedRiderId(s) === String(r.id) ? "selected" : ""}>
-                ${esc(r.name)} (${esc(r.zone)}) · ${esc(r.status.toUpperCase())}
-              </option>
-            `).join("")}
-          </select>
-        </div>
+        ${riderDispatchBlock(s, riders)}
 
         ${fulfillmentStage(s) === "Unfulfilled" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">${Icons.svg("package", "ico-14")} Start Assembly</button>
-        ` : fulfillmentStage(s) === "In Assembly" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${String(s.delivery_type || "").toLowerCase() === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${String(s.delivery_type || "").toLowerCase() === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
-          ${String(s.delivery_type || "").toLowerCase() !== "pickup" ? `<button class="btn ghost btn-full" id="btnDispatchRider">${Icons.svg("bike", "ico-14")} Assign selected rider &amp; dispatch</button>` : ""}
+          ${isDeliveryOrder(s) ? `<p class="muted small">Assemble the order first, then assign a delivery partner here.</p>` : ""}
+        ` : fulfillmentStage(s) === "In Assembly" && !isDeliveryOrder(s) ? `
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Ready for Pickup">✓ Mark Ready for Pickup</button>
         ` : fulfillmentStage(s) === "Ready for Pickup" || fulfillmentStage(s) === "Dispatched" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Completed">✓ Complete Order</button>
         ` : ""}
@@ -1235,11 +1291,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (btnDisp) {
       btnDisp.addEventListener("click", async () => {
         const riderId = sel ? sel.value : null;
-        if (!riderId) return toast("Choose a delivery partner before dispatching", false);
+        if (!riderId) return toast("Choose an available delivery partner first", false);
+        const rider = riders.find(r => String(r.id) === String(riderId));
         await performOrderAction(
           btnDisp,
           () => DB.assignRiderToOrder(s.id, riderId),
-          `${s.id} assigned to a rider and marked dispatched`,
+          updated => riderAssignmentMessage(s.id, rider ? rider.name : "the rider", updated),
           closeModal
         );
       });
@@ -3630,6 +3687,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         if (DB.refreshOperationalData) await DB.refreshOperationalData();
         return toast("Order not found in the saved list. Refresh and try again.", false);
       }
+      if (orderAction.dataset.orderAction === "list-archive") {
+        if (!window.confirm(`Remove ${orderId} from the Orders list? It stays in Records and exports.`)) return;
+        await performOrderAction(
+          orderAction,
+          () => DB.setOrderListVisibility(orderId, false),
+          `${orderId} removed from the list · kept in Records`
+        );
+        return;
+      }
       if (orderAction.dataset.orderAction === "cancel") {
         if (!confirmOrderCancellation(order)) return;
         await performOrderAction(
@@ -3639,6 +3705,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         );
       } else {
         const nextStage = orderAction.dataset.nextStage;
+        if (!nextStage) return orderDetailModal(orderId); // delivery: choose the rider in the order panel
         await performOrderAction(
           orderAction,
           () => DB.setDispatchStatus(orderId, nextStage),

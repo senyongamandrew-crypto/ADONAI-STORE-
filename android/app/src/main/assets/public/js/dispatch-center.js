@@ -66,7 +66,7 @@
   function renderOrders() {
     const node=$("#dispatchOrders"); if (!node) return;
     const jobs=data?.orders || [], riders=(data?.riders || []).filter(r=>r.status!=="Offline");
-    node.innerHTML=jobs.map(order=>`<article class="dc-order"><div class="dc-order-top"><strong>${esc(order.id)}</strong><span class="dc-stage">${esc(order.progress?.stage || (order.rider_id?"assigned":"Ready to assign"))}</span></div><h3>${esc(order.customer_name)}</h3><p>${esc(order.address || order.area || "Confirm delivery address with customer")}</p>${order.notes?`<p class="dc-order-notes">${esc(order.notes)}</p>`:""}<div class="dc-order-meta"><span>${money(order.total)} · paid</span><button class="dc-text-button" type="button" data-open-order="${esc(order.id)}">Order details</button></div>${order.rider_id?`<p class="dc-order-rider">Assigned to <strong>${esc(order.rider_name)}</strong></p>`:""}<div class="dc-assign"><select aria-label="Choose rider for ${esc(order.id)}" data-dispatch-choice="${esc(order.id)}"><option value="">Choose delivery partner</option>${riders.map(r=>`<option value="${esc(r.id)}" ${(selections.get(order.id) || order.rider_id)===r.id?"selected":""}>${esc(r.name)} · ${r.active_jobs} jobs · ${esc(stateLabels[locationState(r)])}</option>`).join("")}</select><button class="btn primary" type="button" data-dispatch-assign="${esc(order.id)}" ${busy?"disabled":""}>${order.rider_id?"Reassign":"Assign & dispatch"}</button></div></article>`).join("") || '<div class="dc-empty compact"><strong>No deliveries waiting here</strong><p>Paid delivery orders appear after staff move them to In Assembly. Pickup, unpaid, cancelled and completed orders are not dispatched.</p><button type="button" class="btn" data-goto="sales">Open fulfillment & orders</button></div>';
+    node.innerHTML=jobs.map(order=>`<article class="dc-order"><div class="dc-order-top"><strong>${esc(order.id)}</strong><span class="dc-stage">${esc(order.progress?.stage || (order.rider_id?"assigned":"Ready to assign"))}</span></div><h3>${esc(order.customer_name)}</h3><p>${esc(order.address || order.area || "Confirm delivery address with customer")}</p>${order.notes?`<p class="dc-order-notes">${esc(order.notes)}</p>`:""}<div class="dc-order-meta"><span>${money(order.total)} · paid</span><button class="dc-text-button" type="button" data-open-order="${esc(order.id)}">Order details</button></div>${order.rider_id?`<p class="dc-order-rider">Assigned to <strong>${esc(order.rider_name)}</strong>${order.rider_wa_link?` · <a class="dc-text-button" href="${esc(order.rider_wa_link)}" target="_blank" rel="noopener noreferrer">Message rider on WhatsApp ↗</a>`:""}</p>`:""}<div class="dc-assign"><select aria-label="Choose rider for ${esc(order.id)}" data-dispatch-choice="${esc(order.id)}"><option value="">Choose delivery partner</option>${riders.map(r=>{const current=(selections.get(order.id) || order.rider_id)===r.id, off=r.status==="Offline"&&!current;return `<option value="${esc(r.id)}" ${current?"selected":""} ${off?"disabled":""}>${esc(r.name)} · ${r.active_jobs} jobs · ${esc(off?"offline":stateLabels[locationState(r)])}</option>`;}).join("")}</select><button class="btn primary" type="button" data-dispatch-assign="${esc(order.id)}" ${busy?"disabled":""}>${order.rider_id?"Reassign":"Assign & dispatch"}</button></div></article>`).join("") || '<div class="dc-empty compact"><strong>No deliveries waiting here</strong><p>Paid delivery orders appear after staff move them to In Assembly. Pickup, unpaid, cancelled and completed orders are not dispatched.</p><button type="button" class="btn" data-goto="sales">Open fulfillment & orders</button></div>';
     const count=$("#dispatchOrderCount");if(count)count.textContent=jobs.length;
   }
   function renderEvents() {
@@ -116,9 +116,14 @@
     const p=pointOf(rider);if(p && map && pan)map.setView([p.latitude,p.longitude],15);
     if(p)status(`${rider.name}: ${stateLabels[locationState(rider)]}. ${age(p)}; accuracy ±${Math.round(p.accuracy_m)} m. This is a reported GPS estimate, not an exact guarantee.`);
   }
+  function assignedMessage(name,result){
+    const notice=result&&result.rider_notice, first=Array.isArray(notice)?notice[0]:notice;
+    if(!first) return `Delivery assigned to ${name}.`;
+    return first.status==="sent" ? `Delivery assigned to ${name}. WhatsApp sent to the rider.` : `Delivery assigned to ${name}. WhatsApp was not sent automatically — use "Message rider on WhatsApp" on the order.`;
+  }
   async function mutate(action,message) {
     if(busy)return;busy=true;const request=generation;
-    try {await action(request);if(request!==generation)return;status(message);await refresh();}
+    try {const result=await action(request);if(request!==generation)return;status(typeof message==="function"?message(result):message);await refresh();}
     catch(error){if(request===generation)status(error.message,true);}
     finally {busy=false;if(active)render();}
   }
@@ -154,7 +159,7 @@
       if(!choice)return status("Choose a saved delivery partner before assigning.",true);
       const rider=data.riders.find(r=>r.id===choice);
       if(locationState(rider)!=="live" && !global.confirm(`${rider.name} does not have fresh live GPS. Assign anyway and contact the rider directly?`))return;
-      return void mutate(()=>DB.assignRiderToOrder(id,choice),"Delivery assigned and dispatched. Rider receives it in their delivery app.");
+      return void mutate(()=>DB.assignRiderToOrder(id,choice),result=>assignedMessage(data.riders.find(r=>r.id===choice)?.name || "the rider",result));
     }
   });
   document.addEventListener("change",event=>{

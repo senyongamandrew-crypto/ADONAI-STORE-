@@ -8,6 +8,10 @@
   "use strict";
 
   const READ_KEY = "adonai.notifications.read-ids.v2";
+  // Deleted-on-this-device IDs only (no alert text), so they can't leak payloads.
+  const DELETED_KEY = "adonai.notifications.deleted.v1";
+  const HOLD_KEY = "adonai.notifications.hold.v1"; // retired: removed on load
+  const DELETED_MAX = 300;
   const MAX_LOCAL = 100;
   const MAX_READ = 300;
   const POLL_MS = 5000;
@@ -36,11 +40,25 @@
     SETTINGS_UPDATED: { label: "Store settings", icon: "⚙️", view: "settings" }
   };
 
+  function loadIdSet(key, cap) {
+    try {
+      const ids = JSON.parse(localStorage.getItem(key) || "[]");
+      return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === "string").slice(-cap) : []);
+    } catch (e) { return new Set(); }
+  }
+  function saveIdSet(key, set, cap) {
+    try { localStorage.setItem(key, JSON.stringify(Array.from(set).slice(-cap))); } catch (e) {}
+  }
+
   class NotificationManager {
     constructor() {
       this.history = [];
       this.seenIds = new Set();
       this.readIds = this.restoreReadIds();
+      this.deletedIds = loadIdSet(DELETED_KEY, DELETED_MAX);
+      saveIdSet(DELETED_KEY, this.deletedIds, DELETED_MAX);
+      this.selected = new Set();
+      try { localStorage.removeItem(HOLD_KEY); } catch (e) {}
       this.unreadCount = 0;
       this.hasSynced = false;
       this.failures = 0;
@@ -202,10 +220,44 @@
         return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === "string").slice(-MAX_READ) : []);
       } catch (e) { return new Set(); }
     }
+    // One list: everything the server returned, minus messages deleted on this device.
+    visibleItems() {
+      return this.history.filter(n => !this.deletedIds.has(n.id));
+    }
     recountUnread() {
-      this.unreadCount = this.history.filter(n => !this.readIds.has(n.id)).length;
+      this.unreadCount = this.visibleItems().filter(n => !this.readIds.has(n.id)).length;
       this.updateBadgeUI();
     }
+    toggleSelected(id, on) {
+      if (on) this.selected.add(id); else this.selected.delete(id);
+      this.renderDrawerList();
+    }
+    selectAllVisible() {
+      const items = this.visibleItems();
+      const allSelected = items.length > 0 && items.every(n => this.selected.has(n.id));
+      this.selected = allSelected ? new Set() : new Set(items.map(n => n.id));
+      this.renderDrawerList();
+    }
+    deleteIds(ids, message) {
+      if (!ids.length) return;
+      if (typeof window.confirm === "function" && !window.confirm(message)) return;
+      ids.forEach(id => { this.deletedIds.add(id); this.selected.delete(id); });
+      saveIdSet(DELETED_KEY, this.deletedIds, DELETED_MAX);
+      this.recountUnread(); this.renderDrawerList();
+    }
+    deleteSelected() {
+      const ids = Array.from(this.selected);
+      this.deleteIds(ids, `Delete ${ids.length} selected notification${ids.length === 1 ? "" : "s"} from this device? The store keeps its own records.`);
+    }
+    deleteReadMessages() {
+      const ids = this.visibleItems().filter(n => this.readIds.has(n.id)).map(n => n.id);
+      this.deleteIds(ids, `Delete ${ids.length} read notification${ids.length === 1 ? "" : "s"} from this device?`);
+    }
+    deleteAllMessages() {
+      const ids = this.visibleItems().map(n => n.id);
+      this.deleteIds(ids, `Delete all ${ids.length} notification${ids.length === 1 ? "" : "s"} from this device?`);
+    }
+
     markAllRead() {
       this.history.forEach(n => this.readIds.add(n.id));
       this.readIds = new Set(Array.from(this.readIds).slice(-MAX_READ));
@@ -252,6 +304,7 @@
           '<button type="button" class="nd-close" id="notifDrawerClose" aria-label="Close notifications">&times;</button></div></div>' +
           '<div class="nd-feedbar"><span class="nd-feed-status" id="notifFeedStatus" data-state="loading" role="status">Connecting to updates…</span>' +
           '<button type="button" class="nd-refresh" id="notifRefresh" aria-label="Refresh notifications">Refresh</button></div>' +
+          '<div class="nd-toolbar" id="notifToolbar"></div>' +
           '<div class="nd-list" id="notifDrawerList"></div>';
         document.body.appendChild(d);
         const scrim = document.createElement("div");
@@ -281,24 +334,41 @@
     }
     renderDrawerList() {
       const box = document.getElementById("notifDrawerList");
+      const toolbar = document.getElementById("notifToolbar");
       if (!box) return;
+      const items = this.visibleItems();
+      // Selection only ever refers to rows currently on screen.
+      this.selected = new Set(Array.from(this.selected).filter(id => items.some(n => n.id === id)));
+      const selectedCount = this.selected.size;
+      const allSelected = items.length > 0 && selectedCount === items.length;
+      const readCount = items.filter(n => this.readIds.has(n.id)).length;
+      if (toolbar) {
+        toolbar.innerHTML = items.length ? '<label class="nd-selall"><input type="checkbox" data-nd-action="select-all"' + (allSelected ? " checked" : "") + '> Select all</label>' +
+          '<button type="button" class="nd-tool nd-danger" data-nd-action="delete" ' + (selectedCount ? "" : "disabled") + '>Delete selected' + (selectedCount ? ' (' + selectedCount + ')' : '') + '</button>' +
+          (readCount ? '<button type="button" class="nd-tool" data-nd-action="clear-read">Delete read (' + readCount + ')</button>' : "") +
+          '<button type="button" class="nd-tool" data-nd-action="clear-all">Clear all</button>' : "";
+      }
       let html;
-      if (!this.history.length) {
-        html = this.status === "offline"
-          ? '<p class="nd-empty">Notifications could not be loaded.<br/>Tap Refresh to retry. Updates will also reconnect automatically.</p>'
-          : this.status === "loading"
-            ? '<p class="nd-empty">Checking for store activity…</p>'
-            : '<p class="nd-empty">No notifications yet.<br/>Completed checkouts, new orders, stock changes and other store activity will appear here.</p>';
-      } else html = this.history.map(n => {
+      if (!items.length) {
+        html = !this.history.length
+          ? (this.status === "offline"
+            ? '<p class="nd-empty">Notifications could not be loaded.<br/>Tap Refresh to retry. Updates will also reconnect automatically.</p>'
+            : this.status === "loading"
+              ? '<p class="nd-empty">Checking for store activity…</p>'
+              : '<p class="nd-empty">No notifications yet.<br/>Completed checkouts, new orders, stock changes and other store activity will appear here.</p>')
+          : '<p class="nd-empty">All notifications on this device are deleted.<br/>New activity will appear here.</p>';
+      } else html = items.map(n => {
         const meta = TYPE_META[n.type] || { label: "Alert", icon: "🔔" };
         const when = n.timestamp ? new Date(n.timestamp * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
         const unread = !this.readIds.has(n.id) ? " nd-unread" : "";
         const href = this.href(n);
         const tag = href ? "a" : "div";
-        return '<' + tag + (href ? ' href="' + esc(href) + '"' : '') + ' data-notification-id="' + esc(n.id) + '" class="nd-item' + unread + ' nd-' + esc(String(n.type || "alert").toLowerCase().replace(/[^a-z0-9_]/g, "")) + '">' +
+        const checked = this.selected.has(n.id) ? " checked" : "";
+        return '<div class="nd-row"><label class="nd-check"><input type="checkbox" data-nd-check="' + esc(n.id) + '"' + checked + ' aria-label="Select: ' + esc(n.title) + '"></label>' +
+          '<' + tag + (href ? ' href="' + esc(href) + '"' : '') + ' data-notification-id="' + esc(n.id) + '" class="nd-item' + unread + ' nd-' + esc(String(n.type || "alert").toLowerCase().replace(/[^a-z0-9_]/g, "")) + '">' +
           '<span class="nd-ico" aria-hidden="true">' + meta.icon + '</span><span class="nd-body"><strong>' + esc(n.title) + '</strong>' +
           '<span class="nd-msg">' + esc(n.message) + '</span><span class="nd-time">' + esc(meta.label) + ' · ' + esc(when) + (n.protected ? ' · 🔒 Details protected' : '') + '</span></span>' +
-          (href ? '<span class="nd-link" aria-hidden="true">›</span>' : '') + '</' + tag + '>';
+          (href ? '<span class="nd-link" aria-hidden="true">›</span>' : '') + '</' + tag + '></div>';
       }).join("");
       if (box.innerHTML !== html) box.innerHTML = html;
     }
@@ -358,6 +428,19 @@
         if (e.target.closest("#notifDrawerClose") || e.target.id === "notifScrim") { this.toggleDrawer(false); return; }
         if (e.target.closest("#notifMarkAllRead")) this.markAllRead();
         if (e.target.closest("#notifRefresh")) this.syncHistory();
+        const action = e.target.closest("[data-nd-action]");
+        if (action && action.tagName === "BUTTON") {
+          const name = action.dataset.ndAction;
+          if (name === "delete") this.deleteSelected();
+          else if (name === "clear-read") this.deleteReadMessages();
+          else if (name === "clear-all") this.deleteAllMessages();
+          return;
+        }
+        if (e.target.matches && e.target.matches("[data-nd-action='select-all']")) this.selectAllVisible();
+      });
+      document.addEventListener("change", e => {
+        const check = e.target.closest && e.target.closest("[data-nd-check]");
+        if (check) this.toggleSelected(check.dataset.ndCheck, check.checked);
       });
       document.addEventListener("keydown", e => { if (e.key === "Escape") this.toggleDrawer(false); });
       document.addEventListener("visibilitychange", () => { if (!document.hidden) this.requestRefresh(0); });

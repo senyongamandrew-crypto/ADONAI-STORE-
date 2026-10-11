@@ -454,6 +454,11 @@ class Order(Base):
     cashier_name = Column(String(100), nullable=True)
     rider_id = Column(String(50), nullable=True)
     rider_name = Column(String(100), nullable=True)
+
+    # When the order first left assembly for dispatch (day boundary for the Orders list)
+    # and when staff removed it from the active list. Records keep every order either way.
+    dispatched_at = Column(DateTime, nullable=True)
+    list_archived_at = Column(DateTime, nullable=True)
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -502,6 +507,8 @@ class Order(Base):
             } if self.rider_id or self.rider_name else None,
             "assigned_rider_id": self.rider_id or None,
             "assigned_rider_name": self.rider_name or None,
+            "dispatched_at": self.dispatched_at.isoformat() if self.dispatched_at else None,
+            "list_archived_at": self.list_archived_at.isoformat() if self.list_archived_at else None,
             "items": [it.to_dict() for it in self.items],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None

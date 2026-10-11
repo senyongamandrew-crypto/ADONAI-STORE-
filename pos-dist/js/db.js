@@ -342,22 +342,43 @@
   let operationalSyncOnline = null;
   let operationalSyncLastSyncedAt = null;
   let operationalSyncStatusCode = 0;
-  function pullOperationalData() {
+  let operationalSyncFullAt = 0;
+  let operationalSignature = null;
+  const FULL_SYNC_EVERY_MS = 300000;
+  // Asks the server for the whole store only when something changed. The revision is kept in the
+  // cached state so a navigation reload can check freshness with a tiny request instead of a full download.
+  function currentSyncRevision() {
+    reload();
+    return state && typeof state.sync_revision === "string" ? state.sync_revision : "";
+  }
+  function pullOperationalData(options) {
     if (operationalSyncInFlight || typeof fetch === "undefined") return operationalSyncInFlight || Promise.resolve(false);
     const ready = typeof Auth !== "undefined" && Auth.ready ? Auth.ready() : Promise.resolve();
+    const forceFull = !!(options && options.force) || Date.now() - operationalSyncFullAt > FULL_SYNC_EVERY_MS;
     operationalSyncInFlight = ready.then(() => fetch(apiUrl("/api/sync/pull"), {
       method: "POST",
       headers: apiHeaders(),
+      body: JSON.stringify({ if_revision: forceFull ? "" : currentSyncRevision() }),
       cache: "no-store"
     })).then(async response => {
       let data = null;
       try { data = await response.json(); } catch (e) {}
-      if (!response.ok || !data || !Array.isArray(data.products)) {
+      if (!response.ok || !data || (!data.unchanged && !Array.isArray(data.products))) {
         operationalSyncOnline = false;
         operationalSyncStatusCode = response.status || 502;
         broadcast("sync");
         return false;
       }
+      operationalSyncOnline = true;
+      operationalSyncStatusCode = 200;
+      operationalSyncLastSyncedAt = new Date().toISOString();
+      if (data.unchanged) return false;
+      operationalSyncFullAt = Date.now();
+      // Identical payloads must not touch storage or re-render open screens.
+      const signature = JSON.stringify([data.products, data.sales, data.ledger, data.settings, data.riders, data.categories, data.inventory, data.blocked_areas]);
+      const revisionChanged = !!data.revision && data.revision !== currentSyncRevision();
+      if (signature === operationalSignature && !revisionChanged) return false;
+      operationalSignature = signature;
       reload();
       state.products = data.products.map(normalizeProductMedia);
       if (Array.isArray(data.sales)) state.sales = data.sales.map(normalizeSaleRecord);
@@ -367,11 +388,9 @@
         by: line.staff || "System",
         sale_id: line.ref_id || null
       }, line));
+      if (data.revision) state.sync_revision = data.revision;
       save();
       if (data.settings) applyRemoteSettings(data.settings);
-      operationalSyncOnline = true;
-      operationalSyncStatusCode = 200;
-      operationalSyncLastSyncedAt = new Date().toISOString();
       broadcast("*");
       return true;
     }).catch(() => {
@@ -411,13 +430,15 @@
       // storefronts current when an Android terminal saves System Parameters.
       pullStoreSettings();
       if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
+      // Freshness is checked every few seconds with a tiny revision request; the full store is only
+      // downloaded when it actually changed. Store settings are polled less often.
       window.setInterval(() => {
         if (!document.hidden) {
-          pullStoreSettings();
           if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
           else pullOperationalData();
         }
-      }, 2000);
+      }, 4000);
+      window.setInterval(() => { if (!document.hidden) pullStoreSettings(); }, 10000);
 
       // Defer one tick so auth.js can restore the JWT after this module loads.
       // Staff consoles hydrate the full operational state; the storefront only
@@ -1107,7 +1128,18 @@
         const local = byId(st.sales, orderId);
         if (local) Object.assign(local, order); else st.sales.push(order);
       });
-      await pullOperationalData(); return order;
+      await pullOperationalData();
+      // Server result of the rider WhatsApp message ({status, error, wa_link}); not stored locally.
+      order.rider_notice = data.rider_notice || null;
+      return order;
+    },
+    /* Removes an assigned/completed order from the working Orders list only; the record and exports stay. */
+    async setOrderListVisibility(orderId, visible) {
+      const data = await apiRequest("/api/orders/" + encodeURIComponent(orderId) + (visible ? "/list-restore" : "/list-archive"), {method:"POST", body:"{}"}, true);
+      if (!data.order) throw new Error("The server did not return the order");
+      const order = normalizeSaleRecord(data.order);
+      await tx("sales", st => { const local = byId(st.sales, orderId); if (local) Object.assign(local, order); else st.sales.push(order); });
+      return order;
     },
     listSales() { reload(); return state.sales.map(s => JSON.parse(JSON.stringify(s))).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     getSale(id) { reload(); const s = byId(state.sales, id); return s ? JSON.parse(JSON.stringify(s)) : null; },

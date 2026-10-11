@@ -126,7 +126,7 @@ def report_rows(session, kind, lower, upper, search):
             return header, customers()
         header = ["Receipt / Order ID", "Posted / Order date (EAT)", "Customer", "Phone", "Address", "Channel", "Payment status", "Payment method", "Order status", "Fulfillment", "Cashier", "Items", "Units", "Subtotal (UGX)", "Delivery (UGX)", "Total (UGX)"]
         if kind == "orders":
-            header += ["Delivery type", "Delivery area", "Delivery notes", "Assigned rider", "Payment reference", "Paid date (EAT)", "Updated date (EAT)"]
+            header += ["Delivery type", "Delivery area", "Delivery notes", "Assigned rider", "Payment reference", "Paid date (EAT)", "Updated date (EAT)", "Dispatched (EAT)", "Removed from Orders list (EAT)"]
         def orders():
             for order in query.yield_per(500):
                 if kind == "sales" and not paid(order): continue
@@ -135,7 +135,7 @@ def report_rows(session, kind, lower, upper, search):
                     order.channel, order.payment_status or "", order.tender_type or "", order.status, order.dispatch_status,
                     order.cashier_name or "", "; ".join(f"{item.name} × {item.qty} @ {int(item.unit_price or 0)} UGX" for item in order.items),
                     sum(int(item.qty or 0) for item in order.items), int(order.subtotal or 0), int(order.delivery_fee or 0), int(order.total or 0)]
-                if kind == "orders": row += [order.delivery_type or "", order.delivery_area or "", order.delivery_notes or "", order.rider_name or "", order.payment_reference or "", local_date(order.paid_at), local_date(order.updated_at)]
+                if kind == "orders": row += [order.delivery_type or "", order.delivery_area or "", order.delivery_notes or "", order.rider_name or "", order.payment_reference or "", local_date(order.paid_at), local_date(order.updated_at), local_date(order.dispatched_at), local_date(order.list_archived_at)]
                 if matches(row, search): yield row
         return header, orders()
     if kind == "ledger":

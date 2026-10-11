@@ -150,9 +150,16 @@
     });
     return promptPending;
   }
+  // Synchronous answer from the cached policy: true/false when known, null when no policy is cached yet.
+  // Lets navigation switch views at once instead of waiting for a network round trip on every tap.
+  function fastViewAllowed(view) {
+    if (!policy) return null;
+    const area = areaForView(view);
+    return !area || canUse(area);
+  }
   async function ensure(area) {
     if (!area) return true;
-    await ready(true);
+    await ready();
     if (canUse(area)) return true;
     if (!await passwordDialog(area)) return false;
     await ready(true);
@@ -301,6 +308,6 @@
       channel.onmessage = () => ready(true).catch(() => {});
     }
   } catch (e) {}
-  global.PosAccess = { ready, headers, ensure, lock, canUse, areaForView, areaInfo, renderSettings, getPolicy: () => policy };
+  global.PosAccess = { ready, headers, ensure, lock, canUse, areaForView, areaInfo, renderSettings, getPolicy: () => policy, fastViewAllowed };
   setInterval(() => { if (!document.hidden) ready(true).catch(() => {}); }, 15000);
 })(window);

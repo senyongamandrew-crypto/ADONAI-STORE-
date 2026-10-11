@@ -179,4 +179,90 @@ class DispatchTests(unittest.TestCase):
         payload=self.call("POST","/api/sync/pull",{},HEADERS);serialized=json.dumps(payload)
         self.assertNotIn(data["session_token"],serialized);self.assertNotIn("rider_devices",serialized);self.assertNotIn("latitude",serialized)
 
+    def test_rider_whatsapp_after_commit_manual_fallback_and_no_rider_dispatch(self):
+        self.protect()
+        sent=[]
+        class Reply:
+            def __enter__(inner): return inner
+            def __exit__(inner,*args): return False
+            def read(inner): return b'{"messages":[{"id":"wamid.TEST"}]}'
+        def fake_open(request,timeout):
+            self.assertEqual(request.headers["Authorization"],"Bearer SECRET-TOKEN");self.assertLessEqual(timeout,10)
+            self.assertIn("/PHONEID/messages",request.full_url);sent.append(json.loads(request.data));return Reply()
+        configured={"WHATSAPP_ACCESS_TOKEN":"SECRET-TOKEN","WHATSAPP_PHONE_NUMBER_ID":"PHONEID"}
+        # Rider-less dispatch of a paid delivery is refused and does not change the order.
+        self.call("PATCH","/api/orders/O1",{"dispatch_status":"Dispatched"},HEADERS,409)
+        with get_db() as s:self.assertEqual(s.get(Order,"O1").dispatch_status,"In Assembly");self.assertIsNone(s.get(Order,"O1").rider_id)
+        with mock.patch.dict(os.environ,configured,clear=False),mock.patch("dispatch.urllib.request.urlopen",side_effect=fake_open):
+            result=self.call("POST","/api/dispatch/orders/O1/assign",{"rider_id":"R1"},HEADERS)
+        self.assertEqual(result["rider_notice"]["status"],"sent");self.assertIsNone(result["rider_notice"]["wa_link"])
+        self.assertEqual(len(sent),1);self.assertEqual(sent[0]["to"],"256700111222");self.assertEqual(sent[0]["type"],"text")
+        body=sent[0]["text"]["body"];self.assertIn("O1",body);self.assertIn("Kibuli, Kampala",body);self.assertIn("UGX 25,000",body);self.assertNotIn("SECRET-TOKEN",body)
+        with get_db() as s:self.assertIn("WhatsApp to rider: sent",s.query(DeliveryEvent).filter_by(order_id="O1").one().note)
+        # Without server credentials the job still saves; staff get a tap-to-message link instead of a silent failure.
+        with mock.patch.dict(os.environ,{"WHATSAPP_ACCESS_TOKEN":"","WHATSAPP_PHONE_NUMBER_ID":""}):
+            failed=self.call("POST","/api/dispatch/orders/O2/assign",{"rider_id":"R2"},HEADERS)
+        self.assertEqual(failed["rider_notice"]["status"],"not_configured")
+        self.assertTrue(failed["rider_notice"]["wa_link"].startswith("https://wa.me/256700111333?text="))
+        with get_db() as s:
+            self.assertEqual(s.get(Order,"O2").dispatch_status,"Dispatched");self.assertIn("not sent",s.query(DeliveryEvent).filter_by(order_id="O2").one().note)
+        board=self.call("GET","/api/dispatch/board",headers=HEADERS);links={o["id"]:o.get("rider_wa_link") for o in board["orders"]}
+        self.assertIn("https://wa.me/256700111222?text=",links["O1"]);self.assertIn("Deliver%20to",links["O1"]);self.assertIn("https://wa.me/256700111333?text=",links["O2"])
+        # Network/API failure: the assignment is kept, the error never leaks credentials.
+        import urllib.error
+        with mock.patch.dict(os.environ,configured),mock.patch("dispatch.urllib.request.urlopen",side_effect=urllib.error.URLError("boom SECRET-TOKEN")):
+            self.call("POST","/api/dispatch/orders/O1/assign",{"rider_id":"R2"},HEADERS)
+        with get_db() as s:self.assertEqual(s.get(Order,"O1").rider_id,"R2")
+        self.assertNotIn("SECRET-TOKEN",json.dumps(self.call("GET","/api/dispatch/board",headers=HEADERS)))
+        # Template mode for business-initiated messages; a rejected send is reported, not raised.
+        template_configured={**configured,"WHATSAPP_RIDER_TEMPLATE":"rider_job"}
+        with mock.patch.dict(os.environ,template_configured),mock.patch("dispatch.urllib.request.urlopen",side_effect=fake_open):
+            self.call("POST","/api/dispatch/orders/O1/assign",{"rider_id":"R1"},HEADERS)
+        self.assertEqual(sent[-1]["type"],"template");self.assertEqual(sent[-1]["template"]["name"],"rider_job")
+        self.assertEqual(dispatch.whatsapp_number("0700 111 222"),"256700111222");self.assertEqual(dispatch.whatsapp_number("+256 700-111-222"),"256700111222");self.assertEqual(dispatch.whatsapp_number("12"),"")
+    def test_dispatched_without_rider_is_refused_for_delivery_but_pickup_is_unchanged(self):
+        self.protect()
+        self.call("PATCH","/api/orders/O2",{"dispatch_status":"Dispatched"},HEADERS,409)
+        with get_db() as s:self.assertEqual(s.get(Order,"O2").dispatch_status,"In Assembly")
+        self.call("PATCH","/api/orders/PICKUP",{"dispatch_status":"Ready for Pickup"},HEADERS)
+        with get_db() as s:self.assertEqual(s.get(Order,"PICKUP").dispatch_status,"Ready for Pickup")
+        self.call("PATCH","/api/orders/O2",{"dispatch_status":"Dispatched","rider_id":"R1"},HEADERS)
+        with get_db() as s:self.assertEqual(s.get(Order,"O2").rider_id,"R1")
+        self.assertTrue(self.call("GET","/api/dispatch/board",headers=HEADERS)["orders"])
+
+    def test_removed_from_list_only_after_assignment_and_records_are_kept(self):
+        import exports
+        self.protect()
+        # Not yet assigned: removal is refused, the order stays in the working list.
+        self.call("POST","/api/orders/O1/list-archive",{},HEADERS,409)
+        self.call("POST","/api/dispatch/orders/O1/assign",{"rider_id":"R1"},HEADERS)
+        with get_db() as s:
+            self.assertIsNotNone(s.get(Order,"O1").dispatched_at)
+        removed=self.call("POST","/api/orders/O1/list-archive",{},HEADERS)["order"]
+        self.assertIsNotNone(removed["list_archived_at"])
+        # The record still exists and is still returned by the orders API (the list hides it client-side).
+        ids=[o["id"] for o in self.call("GET","/api/orders",headers=HEADERS)["orders"]]
+        self.assertIn("O1",ids)
+        with get_db() as s:
+            self.assertEqual(s.get(Order,"O1").rider_name,"Authorized rider");self.assertEqual(s.get(Order,"O1").payment_status,"paid")
+        # Export keeps dispatch and removal times for the records.
+        with get_db() as s:
+            header,rows=exports.report_rows(s,"orders",None,None,"")
+            rows=list(rows)
+        self.assertIn("Dispatched (EAT)",header);self.assertIn("Removed from Orders list (EAT)",header)
+        row=next(r for r in rows if r[0]=="O1");self.assertNotEqual(row[header.index("Dispatched (EAT)")],"");self.assertNotEqual(row[header.index("Removed from Orders list (EAT)")],"")
+        # Restore brings it back onto the working list.
+        self.assertIsNone(self.call("POST","/api/orders/O1/list-restore",{},HEADERS)["order"]["list_archived_at"])
+        self.call("POST","/api/orders/MISSING/list-archive",{},HEADERS,404)
+
+    def test_sync_pull_returns_tiny_unchanged_reply_until_the_store_changes(self):
+        first=self.call("POST","/api/sync/pull",{},HEADERS)
+        self.assertIn("products",first);self.assertTrue(first["revision"])
+        same=self.call("POST","/api/sync/pull",{"if_revision":first["revision"]},HEADERS)
+        self.assertTrue(same.get("unchanged"));self.assertNotIn("products",same)
+        with get_db() as s:
+            s.add(Product(id="P-REV",sku="REV-1",barcode_id="BC-REV",name="Revision probe",demographic="Women",category="Dress",cost_price=5000,selling_price=20000,base_price=20000,in_stock_count=1))
+        changed=self.call("POST","/api/sync/pull",{"if_revision":first["revision"]},HEADERS)
+        self.assertNotEqual(changed["revision"],first["revision"]);self.assertIn("products",changed)
+
 if __name__=="__main__":unittest.main()

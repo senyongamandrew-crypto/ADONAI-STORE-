@@ -8,11 +8,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="css/pos.css?v=7.4" />
-<link rel="stylesheet" href="css/notifications.css?v=2.0" />
+<link rel="stylesheet" href="css/notifications.css?v=2.2" />
 <link rel="stylesheet" href="css/pos-overhaul.css?v=1.1" />
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
 <link rel="icon" href="assets/favicon.ico" sizes="any" />
@@ -60,6 +59,7 @@
         </div>
       </div>
       <button class="nav-item store-nav-item" id="btnSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
+      <button class="nav-item" id="btnRefreshSystem" type="button" title="Reload the whole system (keeps saved sales and stock)"><span class="nav-ico"><i data-icon="refresh-cw"></i></span><span>Refresh system</span></button>
     </nav>
 
     <div class="sidebar-foot">
@@ -304,14 +304,29 @@
 
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
-<script src="js/notifications.js?v=2.0"></script>
+<script src="js/notifications.js?v=2.2"></script>
 <script src="js/icons.js?v=1.0"></script>
-<script src="js/db.js?v=4.5"></script>
+<script src="js/db.js?v=4.9"></script>
 <script src="js/auth.js?v=3.0"></script>
-<script src="js/pos-access.js?v=1.1"></script>
+<script src="js/pos-access.js?v=1.2"></script>
 <script src="js/garment-tools.js?v=1.1"></script>
 <script src="js/pos-camera.js?v=1.0"></script>
 <script src="js/pos.js?v=6.9"></script>
 <script src="js/pos-ui.js?v=1.0"></script>
+  <script>
+    /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
+       re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */
+    (function () {
+      var btn = document.getElementById("btnRefreshSystem");
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.querySelector("span:last-child").textContent = "Refreshing…";
+        var url = new URL(location.href);
+        url.searchParams.set("_refresh", Date.now().toString(36));
+        location.replace(url.toString());
+      });
+    })();
+  </script>
 </body>
 </html>
