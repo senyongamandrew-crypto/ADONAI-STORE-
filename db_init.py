@@ -154,10 +154,6 @@ def _dual_inventory_backfill_statements(
 def apply_additive_schema_migrations():
     """Add columns create_all cannot add, without changing or dropping live data."""
     additions = {
-        "orders": [
-            ("dispatched_at", "TIMESTAMP"),
-            ("list_archived_at", "TIMESTAMP"),
-        ],
         "riders": [
             ("vehicle", "VARCHAR(100) NOT NULL DEFAULT 'Motorbike (Boda)'"),
             ("zone", "VARCHAR(100) NOT NULL DEFAULT ''"),
@@ -212,6 +208,9 @@ def apply_additive_schema_migrations():
             ("payment_token_hash", "VARCHAR(128)"),
             ("paid_at", "TIMESTAMP"),
             ("payment_expires_at", "TIMESTAMP"),
+            # Order-list lifecycle: when the order was dispatched, and when staff removed it from the Orders list.
+            ("dispatched_at", "TIMESTAMP"),
+            ("list_archived_at", "TIMESTAMP"),
         ],
     }
     with engine.begin() as connection:
