@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-display-size="standard">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
 <link rel="stylesheet" href="css/garment-media.css?v=1.0" />
+<link rel="stylesheet" href="css/adaptive-display.css?v=1.0" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
 <link rel="icon" href="assets/favicon.ico" sizes="any" />
@@ -71,6 +72,16 @@
       <button class="nav-item store-nav-item" id="btnAdminSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
       <button class="nav-item" id="btnRefreshSystem" type="button" title="Reload the whole system (keeps saved sales and stock)"><span class="nav-ico"><i data-icon="refresh-cw"></i></span><span>Refresh system</span></button>
     </nav>
+
+    <div class="ds-panel" id="adminDisplaySize" role="group" aria-label="Display size">
+      <div class="ds-panel-head"><i data-icon="monitor" data-size="13"></i><span>Display size</span></div>
+      <div class="ds-options">
+        <button class="ds-opt" type="button" data-display-size-option="compact" aria-pressed="false">Compact</button>
+        <button class="ds-opt is-active" type="button" data-display-size-option="standard" aria-pressed="true">Standard</button>
+        <button class="ds-opt" type="button" data-display-size-option="large" aria-pressed="false">Large</button>
+      </div>
+      <p class="ds-hint">Fits words to this screen. Saved on this device.</p>
+    </div>
 
     <div class="sidebar-foot">
       <div class="me-card">
