@@ -1107,7 +1107,10 @@
         const local = byId(st.sales, orderId);
         if (local) Object.assign(local, order); else st.sales.push(order);
       });
-      await pullOperationalData(); return order;
+      await pullOperationalData();
+      // Server result of the rider WhatsApp message ({status, error, wa_link}); not stored locally.
+      order.rider_notice = data.rider_notice || null;
+      return order;
     },
     listSales() { reload(); return state.sales.map(s => JSON.parse(JSON.stringify(s))).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     getSale(id) { reload(); const s = byId(state.sales, id); return s ? JSON.parse(JSON.stringify(s)) : null; },

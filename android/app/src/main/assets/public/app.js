@@ -677,7 +677,8 @@
     if (stage === "Unfulfilled") return { next: "In Assembly", label: "Start assembly", icon: "package" };
     if (stage === "In Assembly") {
       const pickup = String(s.delivery_type || "").toLowerCase() === "pickup";
-      return { next: pickup ? "Ready for Pickup" : "Dispatched", label: pickup ? "Mark ready for pickup" : "Mark dispatched", icon: pickup ? "check-circle" : "truck" };
+      if (!pickup) return { next: "", label: "Assign rider", icon: "bike" }; // opens the rider picker; dispatch needs a rider
+      return { next: "Ready for Pickup", label: "Mark ready for pickup", icon: "check-circle" };
     }
     if (stage === "Ready for Pickup" || stage === "Dispatched") return { next: "Completed", label: "Complete order", icon: "check-circle" };
     return null;
@@ -893,7 +894,7 @@
       const updated = await work();
       if (typeof afterSuccess === "function") afterSuccess(updated);
       if (updated && updated.dispatch_status) activeLane = DB.laneOf(updated);
-      toast(successMessage);
+      toast(typeof successMessage === "function" ? successMessage(updated) : successMessage);
       renderSales();
       return updated;
     } catch (err) {
@@ -1123,6 +1124,44 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     toast("WhatsApp confirmation prepared — tap Send to deliver it");
   }
 
+  function isDeliveryOrder(s) {
+    return String(s.delivery_type || "boda").toLowerCase() !== "pickup";
+  }
+
+  // Rider picker: only partners who can take a job are selectable; the one already on the order stays visible.
+  function riderDispatchBlock(s, riders) {
+    if (!isDeliveryOrder(s)) return "";
+    const stage = fulfillmentStage(s);
+    if (stage !== "In Assembly" && stage !== "Dispatched") return "";
+    const assigned = String(assignedRiderId(s) || "");
+    const active = riders.filter(r => !r.archived);
+    const options = active.map(r => {
+      const current = String(r.id) === assigned;
+      const unavailable = r.status === "Offline" && !current;
+      const label = `${r.name}${r.zone ? " (" + r.zone + ")" : ""} · ${String(r.status || "Available").toUpperCase()}`;
+      return `<option value="${esc(r.id)}" ${current ? "selected" : ""} ${unavailable ? "disabled" : ""}>${esc(label)}${unavailable ? " — offline" : ""}</option>`;
+    }).join("");
+    const hasOptions = active.some(r => r.status !== "Offline" || String(r.id) === assigned);
+    return `
+      <div class="field">
+        <label>${assigned ? "REASSIGN DELIVERY PARTNER" : "ASSIGN DELIVERY PARTNER"}</label>
+        <select id="modalRiderSel" class="sel-full">
+          <option value="">${hasOptions ? "Choose an available partner…" : "No available partners — set one Available first"}</option>
+          ${options}
+        </select>
+        ${assigned ? `<p class="muted small">Currently with ${esc(assignedRiderName(s) || "a partner")}.</p>` : ""}
+      </div>
+      <button class="btn primary btn-full" id="btnDispatchRider">${Icons.svg("bike", "ico-14")} ${assigned ? "Reassign &amp; notify on WhatsApp" : "Assign &amp; notify rider on WhatsApp"}</button>`;
+  }
+
+  function riderAssignmentMessage(orderId, riderName, updated) {
+    const notice = updated && updated.rider_notice;
+    const first = Array.isArray(notice) ? notice[0] : notice;
+    if (!first) return `${orderId} assigned to ${riderName}`;
+    if (first.status === "sent") return `${orderId} assigned to ${riderName} · WhatsApp sent to the rider`;
+    return `${orderId} assigned to ${riderName} · WhatsApp not sent (${first.error || "not configured"}). Message the rider from Delivery Partners & Dispatch.`;
+  }
+
   function orderDetailModal(id) {
     const s = DB.getSale(id);
     if (!s) return toast("Order not found", false);
@@ -1204,22 +1243,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
       <div class="odm-dispatch-box">
         <div class="odm-dispatch-title">Workflow Dispatch &amp; Closure</div>
-        <div class="field">
-          <label>ASSIGN DELIVERY PARTNER</label>
-          <select id="modalRiderSel" class="sel-full">
-            ${riders.map(r => `
-              <option value="${r.id}" ${assignedRiderId(s) === String(r.id) ? "selected" : ""}>
-                ${esc(r.name)} (${esc(r.zone)}) · ${esc(r.status.toUpperCase())}
-              </option>
-            `).join("")}
-          </select>
-        </div>
+        ${riderDispatchBlock(s, riders)}
 
         ${fulfillmentStage(s) === "Unfulfilled" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="In Assembly">${Icons.svg("package", "ico-14")} Start Assembly</button>
-        ` : fulfillmentStage(s) === "In Assembly" ? `
-          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="${String(s.delivery_type || "").toLowerCase() === "pickup" ? "Ready for Pickup" : "Dispatched"}">✓ Mark ${String(s.delivery_type || "").toLowerCase() === "pickup" ? "Ready for Pickup" : "Dispatched"}</button>
-          ${String(s.delivery_type || "").toLowerCase() !== "pickup" ? `<button class="btn ghost btn-full" id="btnDispatchRider">${Icons.svg("bike", "ico-14")} Assign selected rider &amp; dispatch</button>` : ""}
+          ${isDeliveryOrder(s) ? `<p class="muted small">Assemble the order first, then assign a delivery partner here.</p>` : ""}
+        ` : fulfillmentStage(s) === "In Assembly" && !isDeliveryOrder(s) ? `
+          <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Ready for Pickup">✓ Mark Ready for Pickup</button>
         ` : fulfillmentStage(s) === "Ready for Pickup" || fulfillmentStage(s) === "Dispatched" ? `
           <button class="btn primary btn-full" id="btnAdvRider" data-advance-stage="Completed">✓ Complete Order</button>
         ` : ""}
@@ -1235,11 +1265,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (btnDisp) {
       btnDisp.addEventListener("click", async () => {
         const riderId = sel ? sel.value : null;
-        if (!riderId) return toast("Choose a delivery partner before dispatching", false);
+        if (!riderId) return toast("Choose an available delivery partner first", false);
+        const rider = riders.find(r => String(r.id) === String(riderId));
         await performOrderAction(
           btnDisp,
           () => DB.assignRiderToOrder(s.id, riderId),
-          `${s.id} assigned to a rider and marked dispatched`,
+          updated => riderAssignmentMessage(s.id, rider ? rider.name : "the rider", updated),
           closeModal
         );
       });
@@ -3639,6 +3670,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         );
       } else {
         const nextStage = orderAction.dataset.nextStage;
+        if (!nextStage) return orderDetailModal(orderId); // delivery: choose the rider in the order panel
         await performOrderAction(
           orderAction,
           () => DB.setDispatchStatus(orderId, nextStage),

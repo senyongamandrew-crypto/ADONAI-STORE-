@@ -1533,6 +1533,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 return auth_error
             order_id = clean_path.split("/")[-1]
             lifecycle = {"Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed", "Cancelled"}
+            outbox = []
             with get_db() as session:
                 order = session.query(Order).filter_by(id=order_id).with_for_update().first()
                 if not order:
@@ -1583,6 +1584,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                                 restored_units += quantity
                                 if product.inventory_status == "OUT_OF_STOCK" and product.in_stock_count > 0:
                                     product.inventory_status = "AVAILABLE"
+                    if next_stage == "Dispatched" and not assignment and not order.rider_id and order.channel == "web" and str(order.delivery_type or "").strip().lower() != "pickup":
+                        return json_response({"ok": False, "error": "Choose a delivery partner, then dispatch. Assigning the rider sends them the WhatsApp job message."}, status=409)
                     order.dispatch_status = next_stage
                     order.status = (
                         "completed" if next_stage == "Completed"
@@ -1592,7 +1595,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     )
 
                 if assignment:
-                    dispatch.assign(session, order, assignment.id, (staff_info or {}).get("name","Dispatcher"))
+                    dispatch.assign(session, order, assignment.id, (staff_info or {}).get("name","Dispatcher"), outbox)
                 if "payment_method" in body:
                     order.tender_type = str(body.get("payment_method") or "cash").strip().lower()
                 order.updated_at = datetime.utcnow()
@@ -1601,7 +1604,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     broadcast_event("ORDER_UPDATED", f"Order {order.id} updated",
                         f"{order.dispatch_status or order.status}" + (f" · Rider: {order.rider_name}" if order.rider_name else ""),
                         {"order_id": order.id, "status": order.status, "fulfillment_status": order.dispatch_status}, session=session)
-                return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session)), "stock_restored_units": restored_units})
+                result = json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session)), "stock_restored_units": restored_units})
+            # Rider WhatsApp messages go out only once the assignment has committed.
+            if outbox:
+                result = dispatch.attach_notices(result, dispatch.deliver_rider_notices(outbox))
+            return result
 
         if clean_path == "/api/orders" and method == "POST":
             channel = str(body.get("channel", "web")).lower()
