@@ -9,6 +9,7 @@ Adonai Store — Production Server & WSGI Gateway for Render
 """
 import gzip
 import http.server
+from http import HTTPStatus
 import io
 import json
 import logging
@@ -20,7 +21,9 @@ import urllib.parse
 
 # Setup Database and Auto-Migrations
 import notifications
+import access_control
 from api import handle_api_request
+from media import upload_limit
 from database import DATABASE_URL, IS_POSTGRES, mask_database_url, verify_database_connection
 from db_init import init_db
 
@@ -91,8 +94,9 @@ FLUTTERWAVE_ORIGINS = "https://checkout.flutterwave.com https://api.flutterwave.
 
 CSP_POLICY = (
     "default-src 'self'; "
-    "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https://*.flutterwave.com; "
+    "img-src 'self' data: blob: https://images.unsplash.com https://*.unsplash.com https://*.flutterwave.com https://tile.openstreetmap.org; "
     "font-src 'self' https://fonts.gstatic.com data:; "
+    "media-src 'self' blob:; "
     f"connect-src 'self' {FLUTTERWAVE_ORIGINS}; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     f"script-src 'self' 'unsafe-inline' https://checkout.flutterwave.com; "
@@ -108,7 +112,7 @@ SECURITY_HEADERS = [
     ("X-Content-Type-Options", "nosniff"),
 ] + ([] if ALLOW_FRAME_EMBED else [("X-Frame-Options", "SAMEORIGIN")]) + [
     ("Referrer-Policy", "strict-origin-when-cross-origin"),
-    ("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)"),
+    ("Permissions-Policy", "camera=(self), microphone=(), geolocation=(self)"),
     ("Cross-Origin-Opener-Policy", "same-origin-allow-popups"),
     ("Content-Security-Policy", CSP_POLICY),
 ]
@@ -139,6 +143,18 @@ BLOCKED_FILENAMES = {
 
 # Request body ceiling for API calls (5 MB covers base64 intake photos).
 MAX_API_BODY_BYTES = int(os.environ.get("MAX_API_BODY_BYTES", str(5 * 1024 * 1024)))
+
+
+def api_body_limit(method, path):
+    return (upload_limit(path) if method == "POST" else None) or MAX_API_BODY_BYTES
+
+
+def api_response_headers(result):
+    values = {"Content-Type": result[1], "Cache-Control": "no-cache, no-store, must-revalidate"}
+    if result[0] != 304:
+        values["Content-Length"] = str(len(result[2]))
+    values.update(getattr(result, "headers", {}))
+    return list(values.items())
 
 
 def resolve_static_file(clean_path: str) -> str | None:
@@ -251,7 +267,7 @@ def product_page_html(slug: str, origin: str) -> bytes | None:
         with get_db() as session:
             row = lookup_product(session, slug)
             if row:
-                product = row.to_dict()
+                product = access_control.sanitize_product(row.to_dict(), access_control.state({}, session))
     except Exception as exc:  # pragma: no cover - database optional at render time
         logger.warning("PDP server render fell back to the client shell: %s", exc)
 
@@ -429,8 +445,9 @@ def api_cors_headers(origin: str) -> list[tuple[str, str]]:
         return []
     return [
         ("Access-Control-Allow-Origin", origin),
-        ("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS"),
-        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Terminal-Key, X-Staff-Token"),
+        ("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS"),
+        ("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Terminal-Key, X-Staff-Token, X-Pos-Access, X-File-Name, Range, If-None-Match"),
+        ("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, ETag"),
         ("Access-Control-Max-Age", "600"),
         ("Vary", "Origin"),
     ]
@@ -494,7 +511,7 @@ def wsgi_app(environ, start_response):
             try:
                 yield notifications.sse_preamble()
                 while True:
-                    yield notifications.next_frame(q, timeout=25.0)
+                    yield access_control.filter_stream_frame(notifications.next_frame(q, timeout=25.0), staff)
             finally:
                 notifications.unsubscribe(q)
 
@@ -518,7 +535,7 @@ def wsgi_app(environ, start_response):
             content_length = 0
 
         # Reject oversized payloads before buffering them.
-        if content_length > MAX_API_BODY_BYTES:
+        if content_length > api_body_limit(method, raw_path):
             payload = b'{"ok": false, "error": "Request body too large"}'
             headers = [
                 ("Content-Type", "application/json; charset=utf-8"),
@@ -543,20 +560,18 @@ def wsgi_app(environ, start_response):
             elif k in ("CONTENT_TYPE", "CONTENT_LENGTH"):
                 headers_dict[k.replace("_", "-").lower()] = v
 
-        status_code, content_type, response_body = handle_api_request(
+        result = handle_api_request(
             method, raw_path, query_params, body_bytes, headers=headers_dict,
             client_addr=environ.get("REMOTE_ADDR", "")
         )
 
-        headers = [
-            ("Content-Type", content_type),
-            ("Content-Length", str(len(response_body))),
-            ("Cache-Control", "no-cache, no-store, must-revalidate")
-        ]
+        status_code, content_type, response_body = result
+        headers = api_response_headers(result)
         headers.extend(cors)
-        headers.extend(SECURITY_HEADERS)
+        existing_headers = {name.lower() for name, _ in headers}
+        headers.extend((name, value) for name, value in SECURITY_HEADERS if name.lower() not in existing_headers)
 
-        status_str = f"{status_code} " + ("OK" if status_code == 200 else ("Created" if status_code == 201 else "Error"))
+        status_str = f"{status_code} {HTTPStatus(status_code).phrase}"
         start_response(status_str, headers)
         if method == "HEAD":
             return [b""]
@@ -676,6 +691,9 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
     def do_PUT(self):
         self.handle_http(head_only=False)
 
+    def do_PATCH(self):
+        self.handle_http(head_only=False)
+
     def do_DELETE(self):
         self.handle_http(head_only=False)
 
@@ -711,7 +729,7 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             except (TypeError, ValueError):
                 content_len = 0
 
-            if content_len > MAX_API_BODY_BYTES:
+            if content_len > api_body_limit(self.command, path):
                 payload = b'{"ok": false, "error": "Request body too large"}'
                 self.send_response(413)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -731,16 +749,16 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
                 body_bytes = b""
 
             headers_dict = {k.lower(): v for k, v in self.headers.items()}
-            status_code, content_type, response_body = handle_api_request(
+            result = handle_api_request(
                 self.command, path, query_params, body_bytes, headers=headers_dict,
                 client_addr=(self.client_address[0] if self.client_address else "")
             )
 
+            status_code, content_type, response_body = result
             self.send_response(status_code)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(response_body)))
-            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-            for k, v in [*cors, *SECURITY_HEADERS]:
+            response_headers = api_response_headers(result)
+            existing_headers = {name.lower() for name, _ in response_headers}
+            for k, v in [*response_headers, *cors, *((k, v) for k, v in SECURITY_HEADERS if k.lower() not in existing_headers)]:
                 self.send_header(k, v)
             self.end_headers()
 
@@ -881,7 +899,7 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(notifications.sse_preamble())
             self.wfile.flush()
             while True:
-                frame = notifications.next_frame(q, timeout=25.0)
+                frame = access_control.filter_stream_frame(notifications.next_frame(q, timeout=25.0), staff)
                 self.wfile.write(frame)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):

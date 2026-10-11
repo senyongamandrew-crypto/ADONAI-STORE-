@@ -1,188 +1,189 @@
+"""Durable operator notifications, with optional cross-worker SSE delivery.
+
+Business routes pass their existing SQL session to ``broadcast_event``: an
+alert commits (or rolls back) with the action, never ahead of it. History
+polling is the default client transport, so small threaded Gunicorn pools do
+not need to hold an SSE connection open for every cashier. Legacy SSE clients
+also read committed SQL history and use shared, hashed, one-use tickets.
 """
-Adonai Store — Real-Time Notification Engine (backend broadcaster)
-
-Thread-safe, dependency-free Server-Sent-Events hub for the threaded
-http.server stack (serve.py) and the WSGI gateway.
-
-Responsibilities
-----------------
-1. Fan-out: every business event is pushed to all connected POS/console
-   clients through per-subscriber queues (`broadcast_event`).
-2. History:  a bounded in-memory ring buffer feeds the notification
-   drawer (`recent_events`) so late-joining clients see prior alerts.
-3. Access:   EventSource cannot send Authorization headers, and this
-   codebase forbids credentials in query strings. Clients therefore
-   exchange their staff JWT for a single-use, 60-second *stream ticket*
-   (`issue_stream_ticket` / `redeem_stream_ticket`) which is the only
-   thing that ever appears in the stream URL.
-
-Event payload schema (serialized as JSON on the `data:` line):
-    {
-      "id":        "notif_1790975533042",
-      "type":      "NEW_ORDER" | "NEW_MESSAGE" | "LOW_STOCK" | "NEW_EXPENSE",
-      "title":     "🛍️ New Online Order #1042",
-      "message":   "Order received — UGX 129,000",
-      "timestamp": 1790975533,
-      "payload":   { ... event-specific context ... }
-    }
-"""
-
+from collections import deque
+from datetime import datetime, timedelta
+import hashlib
 import json
 import logging
 import queue
 import secrets
 import threading
 import time
-from collections import deque
+import uuid
+
+from sqlalchemy import delete
+from database import get_db
+from models import NotificationEvent, NotificationStreamTicket
 
 logger = logging.getLogger("adonai.notifications")
-
-# Safety threshold at or below which LOW_STOCK alerts fire (units).
 LOW_STOCK_THRESHOLD = 3
-
-# How many notifications the drawer history endpoint retains.
 HISTORY_LIMIT = 100
-
-# Per-client outbound buffer. A stalled client never blocks the store.
-SUBSCRIBER_QUEUE_SIZE = 64
-
-# Stream tickets: single-use, short-lived handshake values.
 TICKET_TTL_SECONDS = 60
-
+STREAM_POLL_SECONDS = 1.0
 _lock = threading.Lock()
-_subscribers: list[queue.Queue] = []
-_history: deque = deque(maxlen=HISTORY_LIMIT)
-_tickets: dict[str, dict] = {}
-_sequence = 0
+_subscribers = []
 
 
-# ----------------------------------------------------------------------
-# Subscription management
-# ----------------------------------------------------------------------
-def subscribe() -> queue.Queue:
-    """Register a connected SSE client and return its outbound queue."""
-    q = queue.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
+def _source_key(event_type, payload):
+    # Creation events can be safely recovered from existing rows on upgrade.
+    field = {"NEW_ORDER": "order_id", "STOCK_ADDED": "product_id", "NEW_EXPENSE": "expense_id"}.get(event_type)
+    if not field or not payload.get(field):
+        return None
+    source = f"{event_type}:{payload[field]}"
+    # A permanently deleted catalog ID may legitimately be reused. The
+    # creation time distinguishes that new intake from its historical row.
+    if event_type == "STOCK_ADDED" and payload.get("created_at"):
+        source += ":" + str(payload["created_at"])
+    return source
+
+
+def broadcast_event(event_type, title, message, payload=None, *, session=None):
+    """Record activity in the caller's transaction (or a standalone one).
+
+    Do NOT open a nested get_db() inside a business transaction: this app uses
+    scoped sessions. Every API caller must pass ``session=session``.
+    Only committed rows are observable by history and stream clients.
+    """
+    created_at = datetime.utcnow()
+    payload_json = json.dumps(payload or {}, ensure_ascii=False)
+    row = NotificationEvent(
+        id="notif_" + uuid.uuid4().hex, event_type=str(event_type)[:40],
+        title=str(title)[:255], message=str(message), payload_json=payload_json,
+        source_key=_source_key(str(event_type), payload or {}), created_at=created_at,
+    )
+    event_data = row.to_dict()
+    if session is not None:
+        session.add(row)
+    else:
+        with get_db() as db:
+            db.add(row)
+    return event_data
+
+
+def recent_events(limit=HISTORY_LIMIT, *, session=None):
+    """Newest-first committed history, independent of process/restart."""
+    limit = max(1, min(int(limit or HISTORY_LIMIT), HISTORY_LIMIT))
+    if session is None:
+        with get_db() as db:
+            return recent_events(limit, session=db)
+    return [row.to_dict() for row in session.query(NotificationEvent).order_by(
+        NotificationEvent.created_at.desc(), NotificationEvent.id.desc(),
+    ).limit(limit).all()]
+
+
+def backfill_history(session):
+    """Recover recent *actual* activity on upgrade, without demo alerts.
+
+    Deterministic creation source keys + ON CONFLICT make this idempotent
+    across deployments and concurrent startup workers. Existing objects are
+    never edited, and their original timestamps are preserved.
+    """
+    from models import Order, Product, ExpenseRecord
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    insert = pg_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+    session.flush()
+    candidates = []
+    for order in session.query(Order).order_by(Order.created_at.desc()).limit(HISTORY_LIMIT).all():
+        candidates.append(("NEW_ORDER", "Checkout recorded" if order.channel == "pos" else "Order received",
+            f"Order {order.id} · UGX {int(order.total or 0):,}",
+            {"order_id": order.id, "amount": int(order.total or 0), "customer": order.customer_name, "channel": order.channel}, order.created_at))
+    for product in session.query(Product).order_by(Product.created_at.desc()).limit(HISTORY_LIMIT).all():
+        candidates.append(("STOCK_ADDED", "Stock intake saved", f"{product.name} was added to the catalog.",
+            {"product_id": product.id, "name": product.name, "barcode": product.barcode_id,
+             "created_at": product.created_at.isoformat() if product.created_at else None}, product.created_at))
+    for expense in session.query(ExpenseRecord).order_by(ExpenseRecord.created_at.desc()).limit(HISTORY_LIMIT).all():
+        candidates.append(("NEW_EXPENSE", "Expense logged", f"{expense.category} · UGX {int(expense.amount or 0):,}",
+            {"expense_id": expense.id, "amount": int(expense.amount or 0), "category": expense.category}, expense.created_at))
+    candidates.sort(key=lambda item: item[4] or datetime.min, reverse=True)
+    for kind, title, message, payload, created_at in candidates[:HISTORY_LIMIT]:
+        source = _source_key(kind, payload)
+        stmt = insert(NotificationEvent).values(
+            id="notif_" + hashlib.sha256(source.encode()).hexdigest()[:32],
+            event_type=kind, title=title, message=message,
+            payload_json=json.dumps(payload, ensure_ascii=False), source_key=source,
+            created_at=created_at or datetime.utcnow(),
+        ).on_conflict_do_nothing(index_elements=["source_key"])
+        session.execute(stmt)
+
+
+def _digest(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def issue_stream_ticket(staff):
+    """Store only hashes of tickets/area tokens, never JWTs or passwords."""
+    from access_control import _tokens
+    ticket = secrets.token_urlsafe(32)
+    identity = {key: (staff or {}).get(key, default) for key, default in (
+        ("id", "STF-TOKEN"), ("name", "Staff Member"), ("role", "staff"))}
+    identity["_pos_access_token_hashes"] = [_digest(token) for token in _tokens({
+        "x-pos-access": (staff or {}).get("_pos_access_tokens", ""),
+    })]
+    now = datetime.utcnow()
+    with get_db() as session:
+        session.query(NotificationStreamTicket).filter(NotificationStreamTicket.expires_at <= now).delete(synchronize_session=False)
+        session.add(NotificationStreamTicket(ticket_hash=_digest(ticket), staff_json=json.dumps(identity),
+            expires_at=now + timedelta(seconds=TICKET_TTL_SECONDS)))
+    return ticket
+
+
+def redeem_stream_ticket(ticket):
+    """Atomic consume; a ticket works once, even on a different worker."""
+    if not isinstance(ticket, str) or not 32 <= len(ticket) <= 128:
+        return None
+    with get_db() as session:
+        identity = session.execute(delete(NotificationStreamTicket).where(
+            NotificationStreamTicket.ticket_hash == _digest(ticket),
+            NotificationStreamTicket.expires_at > datetime.utcnow(),
+        ).returning(NotificationStreamTicket.staff_json)).scalar_one_or_none()
+        return json.loads(identity) if identity else None
+
+
+def subscribe():
+    q = queue.Queue()
+    q.pending_frames = deque()
+    q.seen_ids = {event["id"] for event in recent_events()}
     with _lock:
         _subscribers.append(q)
-        count = len(_subscribers)
-    logger.info("Notification stream attached (%d active subscriber(s)).", count)
     return q
 
 
-def unsubscribe(q: queue.Queue) -> None:
-    """Detach a disconnected SSE client."""
+def unsubscribe(q):
     with _lock:
-        try:
+        if q in _subscribers:
             _subscribers.remove(q)
-        except ValueError:
-            pass
-        count = len(_subscribers)
-    logger.info("Notification stream detached (%d active subscriber(s)).", count)
 
 
-def subscriber_count() -> int:
+def subscriber_count():
     with _lock:
         return len(_subscribers)
 
 
-# ----------------------------------------------------------------------
-# Broadcasting
-# ----------------------------------------------------------------------
-def broadcast_event(event_type: str, title: str, message: str, payload: dict = None) -> dict:
-    """
-    Broadcasting utility called from api.py business routes.
-    Builds the canonical payload, records it in history, and fans it out
-    to every connected client. Never raises — a notification failure must
-    not break the business transaction that triggered it.
-    """
-    global _sequence
-    try:
-        with _lock:
-            _sequence += 1
-            seq = _sequence
-        event_data = {
-            "id": f"notif_{int(time.time() * 1000)}_{seq}",
-            "type": str(event_type),
-            "title": str(title),
-            "message": str(message),
-            "payload": payload or {},
-            "timestamp": int(time.time()),
-        }
-        frame = f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-
-        with _lock:
-            _history.appendleft(event_data)
-            targets = list(_subscribers)
-
-        for sub in targets:
-            try:
-                sub.put_nowait(frame)
-            except queue.Full:
-                # Slow/stalled consumer: drop the frame for that client only.
-                logger.warning("Dropping notification frame for one slow subscriber.")
-            except Exception:
-                unsubscribe(sub)
-        logger.info("Broadcast %s to %d subscriber(s): %s", event_type, len(targets), title)
-        return event_data
-    except Exception as exc:  # pragma: no cover — defensive by design
-        logger.error("broadcast_event failed silently: %s", exc)
-        return {}
-
-
-def recent_events(limit: int = HISTORY_LIMIT) -> list[dict]:
-    """Newest-first notification history for the drawer."""
-    with _lock:
-        return list(_history)[: max(1, min(int(limit or HISTORY_LIMIT), HISTORY_LIMIT))]
-
-
-# ----------------------------------------------------------------------
-# Stream tickets (header-auth → query-safe single-use handshake)
-# ----------------------------------------------------------------------
-def issue_stream_ticket(staff: dict) -> str:
-    """Exchange an already-verified staff identity for a one-shot stream ticket."""
-    ticket = secrets.token_urlsafe(32)
-    now = time.time()
-    with _lock:
-        # Opportunistic purge of expired tickets.
-        for key in [k for k, v in _tickets.items() if v["expires"] < now]:
-            _tickets.pop(key, None)
-        _tickets[ticket] = {
-            "staff": {
-                "id": (staff or {}).get("id", "STF-TOKEN"),
-                "name": (staff or {}).get("name", "Staff Member"),
-                "role": (staff or {}).get("role", "staff"),
-            },
-            "expires": now + TICKET_TTL_SECONDS,
-        }
-    return ticket
-
-
-def redeem_stream_ticket(ticket: str) -> dict | None:
-    """Validate and consume a stream ticket. Single use, 60s lifetime."""
-    if not ticket or len(ticket) > 128:
-        return None
-    with _lock:
-        entry = _tickets.pop(ticket, None)
-    if not entry or entry["expires"] < time.time():
-        return None
-    return entry["staff"]
-
-
-# ----------------------------------------------------------------------
-# SSE frame helpers shared by serve.py (threaded) and the WSGI gateway
-# ----------------------------------------------------------------------
-def sse_preamble() -> bytes:
-    """Initial frames: client retry policy + connected comment."""
+def sse_preamble():
     return b"retry: 5000\n\n: connected\n\n"
 
 
-def next_frame(q: queue.Queue, timeout: float = 25.0) -> bytes:
-    """
-    Block up to `timeout` seconds for the next event frame.
-    Returns a keep-alive comment on timeout so proxies and the client
-    know the connection is still healthy.
-    """
-    try:
-        return q.get(timeout=timeout).encode("utf-8")
-    except queue.Empty:
-        return b": keep-alive\n\n"
+def next_frame(q, timeout=25.0):
+    """Read committed events across workers; don't miss late commits."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if q.pending_frames:
+            return q.pending_frames.popleft()
+        history = recent_events()
+        for event in reversed(history):
+            if event["id"] not in q.seen_ids:
+                q.pending_frames.append(("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8"))
+        q.seen_ids = {event["id"] for event in history}
+        if q.pending_frames:
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return b": keep-alive\n\n"
+        time.sleep(min(STREAM_POLL_SECONDS, remaining))

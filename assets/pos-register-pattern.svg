@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960" fill="none">
+  <defs>
+    <radialGradient id="sage" cx="0" cy="0" r="1" gradientTransform="translate(1260 90) rotate(111) scale(670 560)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#CFE5D8" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#CFE5D8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="linen" cx="0" cy="0" r="1" gradientTransform="translate(100 660) rotate(-25) scale(520 400)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EDE7D8" stop-opacity=".65"/>
+      <stop offset="1" stop-color="#EDE7D8" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="weave" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r=".65" fill="#47695A" fill-opacity=".12"/>
+    </pattern>
+    <linearGradient id="thread" x1="920" y1="0" x2="1420" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6C9981" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#6C9981" stop-opacity=".04"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#sage)" d="M0 0h1440v960H0z"/>
+  <path fill="url(#linen)" d="M0 0h1440v960H0z"/>
+  <path fill="url(#weave)" d="M0 0h1440v960H0z"/>
+  <g stroke="url(#thread)" stroke-width="1.2">
+    <path d="M939-130c-193 183-70 422 133 497s350 124 461 319"/>
+    <path d="M961-130c-193 183-70 409 126 484s339 117 450 312"/>
+    <path d="M983-130c-193 183-70 396 119 471s328 110 439 305"/>
+    <path d="M1005-130c-193 183-70 383 112 458s317 103 428 298"/>
+    <path d="M1027-130c-193 183-70 370 105 445s306 96 417 291"/>
+    <path d="M1049-130c-193 183-70 357 98 432s295 89 406 284"/>
+    <path d="M1071-130c-193 183-70 344 91 419s284 82 395 277"/>
+    <path d="M1093-130c-193 183-70 331 84 406s273 75 384 270"/>
+    <path d="M1115-130c-193 183-70 318 77 393s262 68 373 263"/>
+    <path d="M1137-130c-193 183-70 305 70 380s251 61 362 256"/>
+    <path d="M1159-130c-193 183-70 292 63 367s240 54 351 249"/>
+    <path d="M1181-130c-193 183-70 279 56 354s229 47 340 242"/>
+  </g>
+  <g stroke="#B4AB93" stroke-opacity=".11" stroke-width="1">
+    <path d="M-120 690c156-120 207-71 280 8s86 162 243 191"/>
+    <path d="M-120 708c156-120 202-71 275 8s81 155 238 184"/>
+    <path d="M-120 726c156-120 197-71 270 8s76 148 233 177"/>
+    <path d="M-120 744c156-120 192-71 265 8s71 141 228 170"/>
+    <path d="M-120 762c156-120 187-71 260 8s66 134 223 163"/>
+  </g>
+</svg>

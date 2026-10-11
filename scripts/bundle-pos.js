@@ -42,6 +42,7 @@ function bundleTo(targetDir) {
   const rootFiles = [
     'pos.html',
     'admin.html',
+    'rider.html',
     'login.html',
     'app.js',
     'styles.css',

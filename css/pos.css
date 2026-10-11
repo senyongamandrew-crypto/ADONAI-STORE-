@@ -10,6 +10,19 @@
   box-sizing: border-box;
 }
 
+/* Hidden credential controls must stay hidden despite component display rules. */
+[hidden] { display: none !important; }
+
+.terminal-access-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ECFDF5;
+  color: #166534;
+  border: 1px solid #BBF7D0;
+  cursor: default !important;
+}
+
 /* Prevent global horizontal overflow — WITHOUT turning <body> into a scroll
    container (a body scrollport breaks the sticky checkout panel and re-adds a
    second scroller). The viewport (<html>) owns the x-axis clamp; body uses

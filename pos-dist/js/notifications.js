@@ -1,185 +1,239 @@
-/* ============================================================
-   Adonai Store — Real-Time Notification Engine (client)
-   NotificationManager: SSE stream listener, header bell badge,
-   slide-over drawer, floating toast alerts, audio chime,
-   Capacitor haptics, and offline localStorage history cache.
-
-   Backend contract:
-     POST /api/notifications/ticket   (Bearer JWT -> one-shot ticket)
-     GET  /api/notifications/stream?ticket=...   (SSE)
-     GET  /api/notifications          (drawer history, Bearer JWT)
-   ============================================================ */
+/* Adonai Store — Operator notifications v2.0
+ * Durable history is fetched immediately, every five seconds, and after local
+ * store actions. Delivery never depends on SSE opening successfully or on one
+ * particular server worker. Full notification text stays in memory only;
+ * sessionStorage holds read IDs, not customer/financial data or credentials.
+ */
 (function () {
   "use strict";
 
-  const STORE_KEY = "adonai.notifications.log";
-  const READ_KEY = "adonai.notifications.readmark";
+  const READ_KEY = "adonai.notifications.read-ids.v2";
   const MAX_LOCAL = 100;
+  const MAX_READ = 300;
+  const POLL_MS = 5000;
+  const REQUEST_TIMEOUT_MS = 10000;
   const TOAST_LIFETIME_MS = 5000;
-  const RECONNECT_DELAY_MS = 5000;
-  const TOKEN_POLL_MS = 15000;
-
   const esc = s => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-
   const BELL_SVG = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>';
-
   const TYPE_META = {
-    NEW_ORDER:   { label: "Order",   icon: "🛍️" },
-    NEW_MESSAGE: { label: "Message", icon: "💬" },
-    LOW_STOCK:   { label: "Stock",   icon: "⚠️" },
-    NEW_EXPENSE: { label: "Expense", icon: "🧾" }
+    NEW_ORDER: { label: "Checkout / order", icon: "🛍️", view: "sales" },
+    NEW_MESSAGE: { label: "Customer note", icon: "💬", view: "sales" },
+    ORDER_UPDATED: { label: "Order update", icon: "📦", view: "dispatch" },
+    ORDER_PAID: { label: "Payment received", icon: "💳", view: "sales" },
+    ORDER_EXPIRED: { label: "Payment expired", icon: "⌛", view: "sales" },
+    LOW_STOCK: { label: "Stock warning", icon: "⚠️", view: "inventory" },
+    STOCK_ADDED: { label: "Stock intake", icon: "👕", view: "inventory" },
+    STOCK_UPDATED: { label: "Stock update", icon: "🏷️", view: "inventory" },
+    STOCK_REMOVED: { label: "Stock removal", icon: "🗃️", view: "inventory" },
+    NEW_EXPENSE: { label: "Expense", icon: "🧾", view: "payments" },
+    EXPENSE_UPDATED: { label: "Expense update", icon: "🧾", view: "payments" },
+    EXPENSE_VOIDED: { label: "Expense voided", icon: "↩️", view: "payments" },
+    STOCK_LOT_RECEIVED: { label: "Stock lot", icon: "📦", view: "payments" },
+    STOCK_MARKDOWN: { label: "Markdown", icon: "🏷️", view: "payments" },
+    STOCK_WRITTEN_OFF: { label: "Write-off", icon: "🗃️", view: "payments" },
+    SETTINGS_UPDATED: { label: "Store settings", icon: "⚙️", view: "settings" }
   };
 
   class NotificationManager {
     constructor() {
-      this.unreadCount = 0;
-      this.eventSource = null;
+      this.history = [];
       this.seenIds = new Set();
-      this.reconnectTimer = null;
-      this.init();
-    }
-
-    /* ---------------- lifecycle ---------------- */
-    init() {
+      this.readIds = this.restoreReadIds();
+      this.unreadCount = 0;
+      this.hasSynced = false;
+      this.failures = 0;
+      this.accessEpoch = 0;
+      this.status = "loading";
+      this.inFlight = null;
+      this.pendingRefresh = false;
+      this.controller = null;
+      this.stopped = false;
+      // Old versions shared sensitive notification payloads across operators.
+      try {
+        localStorage.removeItem("adonai.notifications.log");
+        localStorage.removeItem("adonai.notifications.readmark");
+      } catch (e) {}
       this.injectUI();
       this.bindUIEvents();
-      this.restoreLocalHistory();
+      this.renderDrawerList();
+      this.updateBadgeUI();
       this.connectStream();
     }
 
-    token() {
-      try {
-        return (typeof Auth !== "undefined" && typeof Auth.token === "function" && Auth.token()) || "";
-      } catch (e) { return ""; }
+    /* Reliable, short-lived authenticated requests, not worker-bound SSE. */
+    connectStream() { return this.syncHistory(); }
+
+    headers() {
+      const auth = typeof Auth !== "undefined" && Auth.authHeaders ? Auth.authHeaders() : {};
+      const areas = typeof PosAccess !== "undefined" && PosAccess.headers ? PosAccess.headers() : {};
+      return Object.assign({}, auth, areas);
     }
 
-    /* ---------------- real-time stream ---------------- */
-    async connectStream() {
-      clearTimeout(this.reconnectTimer);
-      const tok = this.token();
-      if (!tok) {
-        // Open-access terminal: live alerts attach once a cashier signs in.
-        this.reconnectTimer = setTimeout(() => this.connectStream(), TOKEN_POLL_MS);
-        return;
-      }
-      try {
-        const res = await fetch("/api/notifications/ticket", {
-          method: "POST",
-          headers: { "Authorization": "Bearer " + tok, "Content-Type": "application/json" },
-          body: "{}"
-        });
-        if (!res.ok) throw new Error("ticket " + res.status);
-        const data = await res.json();
-
-        if (this.eventSource) { try { this.eventSource.close(); } catch (e) {} }
-        this.eventSource = new EventSource("/api/notifications/stream?ticket=" + encodeURIComponent(data.ticket));
-
-        this.eventSource.onopen = () => this.syncHistory();
-        this.eventSource.onmessage = event => {
-          try { this.handleNotification(JSON.parse(event.data)); } catch (e) {}
-        };
-        this.eventSource.onerror = () => {
-          console.warn("Notification connection lost. Reconnecting in 5s...");
-          try { this.eventSource.close(); } catch (e) {}
-          this.eventSource = null;
-          this.reconnectTimer = setTimeout(() => this.connectStream(), RECONNECT_DELAY_MS);
-        };
-      } catch (e) {
-        this.reconnectTimer = setTimeout(() => this.connectStream(), RECONNECT_DELAY_MS);
-      }
+    scheduleRefresh(delay = POLL_MS) {
+      clearTimeout(this.pollTimer);
+      if (!this.stopped) this.pollTimer = setTimeout(() => this.syncHistory(), delay);
     }
 
-    async syncHistory() {
-      const tok = this.token();
-      if (!tok) return;
+    requestRefresh(delay = 150) {
+      if (this.inFlight) { this.pendingRefresh = true; return; }
+      this.scheduleRefresh(delay);
+    }
+
+    syncHistory() {
+      clearTimeout(this.pollTimer);
+      if (this.stopped) return Promise.resolve(false);
+      if (this.inFlight) { this.pendingRefresh = true; return this.inFlight; }
+      this.inFlight = this.fetchHistory().finally(() => {
+        this.inFlight = null;
+        this.controller = null;
+        const pending = this.pendingRefresh;
+        this.pendingRefresh = false;
+        const interval = this.failures ? Math.min(30000, POLL_MS * Math.pow(2, this.failures - 1)) : (document.hidden ? 15000 : POLL_MS);
+        this.scheduleRefresh(pending ? 0 : interval);
+      });
+      return this.inFlight;
+    }
+
+    async fetchHistory() {
+      let timer;
+      let epoch = this.accessEpoch;
       try {
-        const res = await fetch("/api/notifications?limit=100", {
-          headers: { "Authorization": "Bearer " + tok }
-        });
-        if (!res.ok) return;
+        if (this.stopped) return false;
+        epoch = this.accessEpoch;
+        this.controller = typeof AbortController === "function" ? new AbortController() : null;
+        const controller = this.controller;
+        timer = controller ? setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) : null;
+        const path = "/api/notifications?limit=" + MAX_LOCAL;
+        const endpoint = typeof DB !== "undefined" && DB.apiUrl ? DB.apiUrl(path) : path;
+        const res = await fetch(endpoint, { headers: this.headers(), cache: "no-store", signal: controller ? controller.signal : undefined });
+        if (!res.ok) {
+          const error = new Error("Notification history " + res.status);
+          error.status = res.status;
+          throw error;
+        }
         const data = await res.json();
-        const list = Array.isArray(data.notifications) ? data.notifications : [];
-        // Merge newest-first server history into the local cache.
-        for (let i = list.length - 1; i >= 0; i--) this.saveLocal(list[i]);
+        if (!data.ok || !Array.isArray(data.notifications)) throw new Error("Invalid notification history");
+        if (epoch !== this.accessEpoch || this.stopped) return false;
+        const byId = new Map();
+        data.notifications.forEach(n => {
+          if (n && typeof n.id === "string" && typeof n.type === "string") byId.set(n.id, n);
+        });
+        const list = Array.from(byId.values()).sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)).slice(0, MAX_LOCAL);
+        const fresh = list.filter(n => !this.seenIds.has(n.id));
+        // Replace, don't append: every response is permission-filtered. A
+        // revoked password must also remove text from an already-seen alert.
+        this.history = list;
+        const toasts = document.getElementById("toastContainer");
+        if (toasts) Array.from(toasts.children).forEach(toast => {
+          const current = byId.get(toast.dataset.notificationId);
+          if (!current || current.protected) toast.remove();
+        });
+        list.forEach(n => this.seenIds.add(n.id));
+        if (this.seenIds.size > 400) this.seenIds = new Set(Array.from(this.seenIds).slice(-400));
+        if (this.hasSynced) {
+          // A checkout must not lose its chime/toast behind several stock
+          // warnings emitted by the same basket.
+          const priority = fresh.filter(n => n.type === "NEW_ORDER").concat(fresh.filter(n => n.type !== "NEW_ORDER"));
+          priority.slice(0, 3).reverse().forEach(n => this.announce(n));
+        }
+        this.hasSynced = true;
+        this.failures = 0;
+        this.setStatus("live", "Updates connected · refreshes every 5 seconds");
+        if (this.drawerOpen()) this.markAllRead();
+        else { this.recountUnread(); this.renderDrawerList(); }
+        return true;
+      } catch (error) {
+        if (epoch !== this.accessEpoch || this.stopped) return false;
+        this.failures++;
+        if (error.status === 401 || error.status === 403) {
+          this.history = [];
+          const toasts = document.getElementById("toastContainer");
+          if (toasts) toasts.replaceChildren();
+          this.recountUnread();
+          this.setStatus("offline", "Sign in to receive notifications");
+        } else this.setStatus("offline", "Updates disconnected · retrying automatically");
         this.renderDrawerList();
-        this.recountUnread();
-      } catch (e) { /* offline — the local cache already feeds the drawer */ }
+        return false;
+      } finally { if (timer) clearTimeout(timer); }
     }
 
-    /* ---------------- event handling ---------------- */
+    accessChanged() {
+      // Never let a slow, privileged response repopulate a relocked drawer.
+      this.accessEpoch++;
+      if (this.controller) this.controller.abort();
+      this.history = [];
+      this.hasSynced = false;
+      const toasts = document.getElementById("toastContainer");
+      if (toasts) toasts.replaceChildren();
+      this.recountUnread();
+      this.setStatus("loading", "Checking notification access…");
+      this.renderDrawerList();
+      this.requestRefresh(0);
+    }
+
     handleNotification(notification) {
-      if (!notification || !notification.id || this.seenIds.has(notification.id)) return;
+      if (!notification || !notification.id) return;
+      const fresh = !this.seenIds.has(notification.id);
       this.seenIds.add(notification.id);
+      this.saveLocal(notification);
+      if (fresh) this.announce(notification);
+      if (this.drawerOpen()) this.markAllRead();
+      else { this.recountUnread(); this.renderDrawerList(); }
+    }
 
-      // 1. Unread badge counter
-      this.unreadCount++;
-      this.updateBadgeUI();
-
-      // 2. Audio chime (high-priority) & mobile haptics
+    announce(notification) {
       if (notification.type === "NEW_ORDER") this.playChime();
       this.vibrate(notification.type === "NEW_ORDER" ? 120 : 45);
-
-      // 3. Floating toast popup
-      this.renderToast(notification);
-
-      // 4. Offline local cache + drawer
-      this.saveLocal(notification);
-      this.renderDrawerList();
+      if (!this.drawerOpen()) this.renderToast(notification);
     }
 
-    /* ---------------- offline storage ---------------- */
-    loadLocal() {
-      try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
-      catch (e) { return []; }
-    }
-
+    /* Payloads are memory-only. Server history provides reload persistence. */
+    loadLocal() { return this.history; }
     saveLocal(notification) {
       if (!notification || !notification.id) return;
+      this.history = [notification].concat(this.history.filter(n => n.id !== notification.id))
+        .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0)).slice(0, MAX_LOCAL);
+    }
+    restoreReadIds() {
       try {
-        const list = this.loadLocal();
-        if (!list.some(n => n.id === notification.id)) {
-          list.unshift(notification);
-          localStorage.setItem(STORE_KEY, JSON.stringify(list.slice(0, MAX_LOCAL)));
-        }
-      } catch (e) { /* storage full/unavailable — stream still works */ }
+        const ids = JSON.parse(sessionStorage.getItem(READ_KEY) || "[]");
+        return new Set(Array.isArray(ids) ? ids.filter(id => typeof id === "string").slice(-MAX_READ) : []);
+      } catch (e) { return new Set(); }
     }
-
-    readMark() {
-      try { return Number(localStorage.getItem(READ_KEY) || 0); }
-      catch (e) { return 0; }
-    }
-
-    restoreLocalHistory() {
-      const list = this.loadLocal();
-      list.forEach(n => this.seenIds.add(n.id));
-      this.renderDrawerList();
-      this.recountUnread();
-    }
-
     recountUnread() {
-      const mark = this.readMark();
-      this.unreadCount = this.loadLocal().filter(n => (n.timestamp || 0) > mark).length;
+      this.unreadCount = this.history.filter(n => !this.readIds.has(n.id)).length;
       this.updateBadgeUI();
     }
-
     markAllRead() {
-      try { localStorage.setItem(READ_KEY, String(Math.floor(Date.now() / 1000))); } catch (e) {}
-      this.unreadCount = 0;
-      this.updateBadgeUI();
+      this.history.forEach(n => this.readIds.add(n.id));
+      this.readIds = new Set(Array.from(this.readIds).slice(-MAX_READ));
+      try { sessionStorage.setItem(READ_KEY, JSON.stringify(Array.from(this.readIds))); } catch (e) {}
+      this.recountUnread();
       this.renderDrawerList();
     }
 
-    /* ---------------- UI: badge ---------------- */
     updateBadgeUI() {
       const badge = document.getElementById("notifBadge");
-      if (!badge) return;
-      badge.textContent = this.unreadCount > 99 ? "99+" : String(this.unreadCount);
-      badge.style.display = this.unreadCount > 0 ? "inline-flex" : "none";
+      if (badge) {
+        badge.textContent = this.unreadCount > 99 ? "99+" : String(this.unreadCount);
+        badge.style.display = this.unreadCount > 0 ? "inline-flex" : "none";
+      }
+      const bell = document.getElementById("notifBellBtn");
+      if (bell) {
+        bell.setAttribute("aria-label", this.unreadCount ? "Notifications, " + this.unreadCount + " unread" : "Notifications");
+        bell.setAttribute("aria-expanded", String(this.drawerOpen()));
+        bell.setAttribute("aria-controls", "notifDrawer");
+      }
     }
 
-    /* ---------------- UI: injected containers ---------------- */
+    setStatus(state, message) {
+      this.status = state;
+      const el = document.getElementById("notifFeedStatus");
+      if (el) { el.dataset.state = state; el.textContent = message; }
+    }
+
     injectUI() {
       if (!document.getElementById("toastContainer")) {
         const c = document.createElement("div");
@@ -193,14 +247,11 @@
         d.id = "notifDrawer";
         d.className = "notif-drawer";
         d.setAttribute("aria-label", "Notifications");
-        d.innerHTML =
-          '<div class="nd-head">' +
-            '<span class="nd-title">' + BELL_SVG + ' Notifications</span>' +
-            '<div class="nd-actions">' +
-              '<button type="button" class="nd-readall" id="notifMarkAllRead">Mark all as read</button>' +
-              '<button type="button" class="nd-close" id="notifDrawerClose" aria-label="Close notifications">&times;</button>' +
-            '</div>' +
-          '</div>' +
+        d.innerHTML = '<div class="nd-head"><span class="nd-title">' + BELL_SVG + ' Notifications</span>' +
+          '<div class="nd-actions"><button type="button" class="nd-readall" id="notifMarkAllRead">Mark all as read</button>' +
+          '<button type="button" class="nd-close" id="notifDrawerClose" aria-label="Close notifications">&times;</button></div></div>' +
+          '<div class="nd-feedbar"><span class="nd-feed-status" id="notifFeedStatus" data-state="loading" role="status">Connecting to updates…</span>' +
+          '<button type="button" class="nd-refresh" id="notifRefresh" aria-label="Refresh notifications">Refresh</button></div>' +
           '<div class="nd-list" id="notifDrawerList"></div>';
         document.body.appendChild(d);
         const scrim = document.createElement("div");
@@ -210,85 +261,67 @@
       }
     }
 
+    drawerOpen() {
+      const drawer = document.getElementById("notifDrawer");
+      return !!(drawer && drawer.classList.contains("open"));
+    }
     toggleDrawer(force) {
       const drawer = document.getElementById("notifDrawer");
       const scrim = document.getElementById("notifScrim");
       if (!drawer) return;
-      const open = typeof force === "boolean" ? force : !drawer.classList.contains("open");
+      const open = typeof force === "boolean" ? force : !this.drawerOpen();
       drawer.classList.toggle("open", open);
       if (scrim) scrim.classList.toggle("show", open);
-      if (open) {
-        this.renderDrawerList();
-        this.markAllRead();
-      }
+      if (open) { this.markAllRead(); this.syncHistory(); }
+      this.updateBadgeUI();
     }
-
+    href(notification) {
+      const meta = TYPE_META[notification.type];
+      return meta && meta.view ? (/admin\.html/.test(location.pathname) ? "" : "admin.html") + "?view=" + meta.view : "";
+    }
     renderDrawerList() {
       const box = document.getElementById("notifDrawerList");
       if (!box) return;
-      const list = this.loadLocal();
-      if (!list.length) {
-        box.innerHTML = '<p class="nd-empty">No notifications yet.<br/>New orders, stock warnings and expense logs will appear here in real time.</p>';
-        return;
-      }
-      const mark = this.readMark();
-      box.innerHTML = list.map(n => {
+      let html;
+      if (!this.history.length) {
+        html = this.status === "offline"
+          ? '<p class="nd-empty">Notifications could not be loaded.<br/>Tap Refresh to retry. Updates will also reconnect automatically.</p>'
+          : this.status === "loading"
+            ? '<p class="nd-empty">Checking for store activity…</p>'
+            : '<p class="nd-empty">No notifications yet.<br/>Completed checkouts, new orders, stock changes and other store activity will appear here.</p>';
+      } else html = this.history.map(n => {
         const meta = TYPE_META[n.type] || { label: "Alert", icon: "🔔" };
         const when = n.timestamp ? new Date(n.timestamp * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-        const unread = (n.timestamp || 0) > mark ? " nd-unread" : "";
-        return '<div class="nd-item' + unread + ' nd-' + esc((n.type || "").toLowerCase()) + '">' +
-          '<span class="nd-ico">' + meta.icon + '</span>' +
-          '<span class="nd-body"><strong>' + esc(n.title) + '</strong>' +
-          '<span class="nd-msg">' + esc(n.message) + '</span>' +
-          '<span class="nd-time">' + esc(meta.label) + ' · ' + esc(when) + '</span></span>' +
-          '</div>';
+        const unread = !this.readIds.has(n.id) ? " nd-unread" : "";
+        const href = this.href(n);
+        const tag = href ? "a" : "div";
+        return '<' + tag + (href ? ' href="' + esc(href) + '"' : '') + ' data-notification-id="' + esc(n.id) + '" class="nd-item' + unread + ' nd-' + esc(String(n.type || "alert").toLowerCase().replace(/[^a-z0-9_]/g, "")) + '">' +
+          '<span class="nd-ico" aria-hidden="true">' + meta.icon + '</span><span class="nd-body"><strong>' + esc(n.title) + '</strong>' +
+          '<span class="nd-msg">' + esc(n.message) + '</span><span class="nd-time">' + esc(meta.label) + ' · ' + esc(when) + (n.protected ? ' · 🔒 Details protected' : '') + '</span></span>' +
+          (href ? '<span class="nd-link" aria-hidden="true">›</span>' : '') + '</' + tag + '>';
       }).join("");
+      if (box.innerHTML !== html) box.innerHTML = html;
     }
 
-    /* ---------------- UI: floating toasts ---------------- */
     renderToast(notification) {
       const container = document.getElementById("toastContainer");
       if (!container) return;
-
-      const type = (notification.type || "").toLowerCase();
       const toast = document.createElement("div");
-      toast.className = "toast-card toast-" + type;
-
-      let actions = "";
-      if (notification.type === "NEW_ORDER" && notification.payload && notification.payload.order_id) {
-        const isConsole = /admin\.html/.test(location.pathname);
-        const href = (isConsole ? "" : "admin.html") + "?view=sales";
-        actions = '<div class="toast-actions">' +
-          '<a class="toast-btn toast-view" href="' + esc(href) + '">View Order</a>' +
-          '<button type="button" class="toast-btn toast-dismiss" data-dismiss>Dismiss</button>' +
-          '</div>';
-      }
-
-      toast.innerHTML =
-        '<div class="toast-content">' +
-          '<strong>' + esc(notification.title) + '</strong>' +
-          '<p>' + esc(notification.message) + '</p>' + actions +
-        '</div>' +
+      toast.dataset.notificationId = notification.id;
+      toast.className = "toast-card toast-" + String(notification.type || "alert").toLowerCase().replace(/[^a-z0-9_]/g, "");
+      const href = this.href(notification);
+      const actions = href ? '<div class="toast-actions"><a class="toast-btn toast-view" href="' + esc(href) + '">' + (notification.protected ? 'Open protected area' : 'View details') + '</a></div>' : "";
+      toast.innerHTML = '<div class="toast-content"><strong>' + esc(notification.title) + '</strong><p>' + esc(notification.message) + '</p>' + actions + '</div>' +
         '<button type="button" class="toast-close" data-dismiss aria-label="Dismiss">&times;</button>';
-
-      toast.addEventListener("click", e => {
-        if (e.target.closest("[data-dismiss]")) toast.remove();
-      });
+      toast.addEventListener("click", e => { if (e.target.closest("[data-dismiss]")) toast.remove(); });
       container.appendChild(toast);
-
-      // Auto-dismiss after 5s; a hovering operator keeps it on screen.
+      while (container.children.length > 3) container.firstElementChild.remove();
       let hovered = false;
       toast.addEventListener("mouseenter", () => { hovered = true; });
-      toast.addEventListener("mouseleave", () => {
-        hovered = false;
-        setTimeout(() => { if (!hovered && toast.parentElement) toast.remove(); }, 1200);
-      });
-      setTimeout(() => {
-        if (!hovered && toast.parentElement) toast.remove();
-      }, TOAST_LIFETIME_MS);
+      toast.addEventListener("mouseleave", () => { hovered = false; setTimeout(() => { if (!hovered) toast.remove(); }, 1200); });
+      setTimeout(() => { if (!hovered) toast.remove(); }, TOAST_LIFETIME_MS);
     }
 
-    /* ---------------- audio & haptics ---------------- */
     playChime() {
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -297,7 +330,6 @@
         const ctx = this._audioCtx;
         if (ctx.state === "suspended") ctx.resume().catch(() => {});
         const now = ctx.currentTime;
-        // Two-note professional register chime: E6 -> A6, soft envelope.
         [[1318.5, 0, 0.18], [1760, 0.12, 0.26]].forEach(([freq, delay, dur]) => {
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
@@ -310,46 +342,48 @@
           osc.start(now + delay);
           osc.stop(now + delay + dur + 0.05);
         });
-      } catch (e) { /* audio autoplay policy — chime resumes after first tap */ }
+      } catch (e) {}
     }
-
     vibrate(ms) {
       try {
         if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics) {
           window.Capacitor.Plugins.Haptics.vibrate({ duration: ms });
-          return;
-        }
-        if (navigator.vibrate) navigator.vibrate(ms);
+        } else if (navigator.vibrate) navigator.vibrate(ms);
       } catch (e) {}
     }
 
-    /* ---------------- events ---------------- */
     bindUIEvents() {
       document.addEventListener("click", e => {
-        const bell = e.target.closest("#notifBellBtn");
-        if (bell) { e.preventDefault(); this.toggleDrawer(); return; }
-        if (e.target.closest("#notifDrawerClose") || e.target.id === "notifScrim") {
-          this.toggleDrawer(false); return;
-        }
+        if (e.target.closest("#notifBellBtn")) { e.preventDefault(); this.toggleDrawer(); return; }
+        if (e.target.closest("#notifDrawerClose") || e.target.id === "notifScrim") { this.toggleDrawer(false); return; }
         if (e.target.closest("#notifMarkAllRead")) this.markAllRead();
+        if (e.target.closest("#notifRefresh")) this.syncHistory();
       });
-      document.addEventListener("keydown", e => {
-        if (e.key === "Escape") this.toggleDrawer(false);
-      });
-      // First user gesture unlocks the audio context (autoplay policy).
+      document.addEventListener("keydown", e => { if (e.key === "Escape") this.toggleDrawer(false); });
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) this.requestRefresh(0); });
+      window.addEventListener("online", () => this.requestRefresh(0));
+      window.addEventListener("focus", () => this.requestRefresh(0));
+      window.addEventListener("adonai-store-activity", () => this.requestRefresh());
+      window.addEventListener("pos-access-change", () => this.accessChanged());
+      window.addEventListener("pagehide", () => this.stop());
+      window.addEventListener("pageshow", event => { if (event.persisted) { this.stopped = false; this.accessChanged(); } });
       document.addEventListener("pointerdown", () => {
         if (this._audioCtx && this._audioCtx.state === "suspended") this._audioCtx.resume().catch(() => {});
       }, { once: true });
     }
+    stop() {
+      this.stopped = true;
+      clearTimeout(this.pollTimer);
+      if (this.controller) this.controller.abort();
+    }
   }
 
-  // Offline storage contract used by other modules.
+  // Compatibility with modules that post an already-formed notification.
   window.posLocalDB = window.posLocalDB || {};
   window.posLocalDB.saveNotification = n => {
-    if (window.notificationEngine) window.notificationEngine.saveLocal(n);
+    if (window.notificationEngine) window.notificationEngine.handleNotification(n);
   };
-
-  function boot() { window.notificationEngine = new NotificationManager(); }
+  function boot() { if (!window.notificationEngine) window.notificationEngine = new NotificationManager(); }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();

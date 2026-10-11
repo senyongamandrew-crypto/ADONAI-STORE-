@@ -1,8 +1,9 @@
 /* ============ Adonai Store POS — cashier terminal logic ============ */
-(function () {
+(async function () {
   "use strict";
 
-  /* ---------- route guard (open access while lock is off) ---------- */
+  /* ---------- PIN-free terminal session (no login screen) ---------- */
+  if (Auth.ready) await Auth.ready();
   const me = Auth.guard({ role: null });
   if (Auth.locked() && !me) return; // redirect in flight
 
@@ -32,7 +33,9 @@
   const posMeName = $("#posMeName");
   if (posMeName) posMeName.textContent = cashier.name;
   const posMeRole = $("#posMeRole");
-  if (posMeRole) posMeRole.textContent = Auth.locked() ? ("Role: " + cashier.role.toUpperCase()) : "Open access · Staff";
+  if (posMeRole) posMeRole.textContent = Auth.locked() ? ("Role: " + cashier.role.toUpperCase()) : "PIN-free · No sign-in required";
+  const suiteAccessLabel = $("#posSuiteAccessLabel");
+  if (suiteAccessLabel) suiteAccessLabel.textContent = Auth.locked() ? "Store passkey required" : "Optional area passwords";
   const posMeAvatar = $("#posMeAvatar");
   if (posMeAvatar) posMeAvatar.textContent = (cashier.name || "S").charAt(0).toUpperCase();
 
@@ -69,10 +72,13 @@
   const doExitPos = async () => {
     try { await DB.releaseInventoryLockOwner(lockOwner); } catch (e) {}
     Auth.signOut();                       // revoke staff privileges
-    location.href = "login.html";         // return to terminal login
+    location.href = Auth.locked() ? "login.html" : "index.html";
   };
   const btnPosSbExit = $("#btnPosSbExit");
-  if (btnPosSbExit) btnPosSbExit.addEventListener("click", doExitPos);
+  if (btnPosSbExit) {
+    btnPosSbExit.hidden = !Auth.locked();
+    btnPosSbExit.addEventListener("click", doExitPos);
+  }
 
   /* ---------- Cross-Navigation: POS to Live Web Storefront (External Browser Intent) ---------- */
   // Live Render deployment of the public storefront (web + API share this service).
@@ -173,6 +179,7 @@
   const SCAN_GAP_MS = 120, MIN_CODE_LEN = 4;
 
   window.addEventListener("keydown", e => {
+    if (window.PosCamera && PosCamera.isOpen()) return; // camera modal owns its input / scan
     const el = e.target;
     const editable = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
 
@@ -211,13 +218,16 @@
   window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installPromptEvt = e; });
 
   async function handleScan(code) {
+    if (["ADN-000000", "ADONAI-SAMPLE"].includes(String(code).trim().toUpperCase())) { flash("Printer-test tag only — not a saleable garment", false); beep(false); return false; }
     const p = DB.findByBarcode(code);
-    if (!p) { flash(`✗ No product for barcode "${code}"`, false); beep(false); return; }
-    if (p.in_stock_count <= 0) { flash(`✗ "${p.name}" is sold out`, false); beep(false); return; }
-    if (!(await addLine(p.id))) return;
+    if (!p) { flash(`✗ No product for barcode "${code}"`, false); beep(false); return false; }
+    if (p.in_stock_count <= 0) { flash(`✗ "${p.name}" is sold out`, false); beep(false); return false; }
+    if (!(await addLine(p.id))) return false;
     flash(`✓ Held for this POS: ${p.name} — ${DB.ugx(p.selling_price)}`, true);
     beep(true);
+    return true;
   }
+  if (window.PosCamera) PosCamera.bind({ button: $("#btnScanTag"), onScan: handleScan });
 
   /* ============================================================
      MANUAL LOOKUP GRID
@@ -282,7 +292,11 @@
           </span>
         </span>
       </button>`;
-    }).join("") : `<p class="cart-empty">No items match.</p>`;
+    }).join("") : `<div class="pos-catalog-empty">
+      <img src="assets/pos-register-ready.svg" width="200" height="150" alt="" decoding="async" />
+      <h2>${products.length ? "No matching pieces" : "Your register is ready"}</h2>
+      <p>${products.length ? "Try another department or category to find your piece." : "Add your first pieces from Menu → Catalog Intake. Then scan a barcode or tap a piece to start a sale."}</p>
+    </div>`;
   }
   $("#tileGrid").addEventListener("click", async e => {
     const t = e.target.closest("[data-tile]");
@@ -347,8 +361,8 @@
   if (posCartScrim) posCartScrim.addEventListener("click", () => setCartOpen(false));
 
   const lockQueues = new Map();
-  const hasRemotePosAuth = () => {
-    try { return typeof Auth !== "undefined" && typeof Auth.token === "function" && !!Auth.token(); }
+  const canUseRemotePos = () => {
+    try { return typeof Auth !== "undefined" && ((Auth.openAccess && Auth.openAccess()) || (typeof Auth.token === "function" && !!Auth.token())); }
     catch (e) { return false; }
   };
 
@@ -361,12 +375,10 @@
       const quantity = current ? current.qty : 0;
       if (quantity + 1 > p.in_stock_count) { flash(`✗ Only ${p.in_stock_count} in stock for "${p.name}"`, false); beep(false); return false; }
 
-      // Selection is a UI action and must not wait on a network round trip.
-      // Open-access terminals have no JWT, so their local POS database is the
-      // checkout source until a cashier signs in. Authenticated terminals still
-      // reserve against the shared inventory before adding the line.
+      // PIN-free terminals use the same server-side stock holds and atomic
+      // checkout without needing a PIN, key, JWT or session handshake.
       try {
-        if (hasRemotePosAuth()) await DB.acquireInventoryLock(pid, lockOwner, 1);
+        if (canUseRemotePos()) await DB.acquireInventoryLock(pid, lockOwner, 1);
         const line = cart.find(x => x.product_id === pid);
         if (line) line.qty++; else cart.push({ product_id: pid, qty: 1 });
         renderCart();
@@ -447,14 +459,14 @@
       if (dec) {
         const l = cart.find(x => x.product_id === dec.dataset.dec);
         if (l && l.qty > 1) {
-          if (hasRemotePosAuth()) await DB.releaseInventoryLock(l.product_id, lockOwner, 1);
+          if (canUseRemotePos()) await DB.releaseInventoryLock(l.product_id, lockOwner, 1);
           l.qty--;
         }
       }
       if (inc) await addLine(inc.dataset.inc);
       if (rm) {
         const l = cart.find(x => x.product_id === rm.dataset.rm);
-        if (l && hasRemotePosAuth()) await DB.releaseInventoryLock(l.product_id, lockOwner, l.qty);
+        if (l && canUseRemotePos()) await DB.releaseInventoryLock(l.product_id, lockOwner, l.qty);
         cart = cart.filter(x => x.product_id !== rm.dataset.rm);
       }
       if (dec || rm) renderCart();
@@ -466,7 +478,7 @@
 
   $("#btnClear").addEventListener("click", async () => {
     await Promise.allSettled(Array.from(lockQueues.values()));
-    if (hasRemotePosAuth()) {
+    if (canUseRemotePos()) {
       try { await DB.releaseInventoryLockOwner(lockOwner); } catch (error) { flash("Hold release will retry automatically", false); }
     }
     cart = [];
@@ -476,10 +488,10 @@
   // Extend active holds while the cart is open. The short server expiry also
   // guarantees abandoned or crashed terminals cannot block stock indefinitely.
   window.setInterval(() => {
-    if (cart.length && !document.hidden && hasRemotePosAuth()) DB.heartbeatInventoryLocks(lockOwner).catch(() => {});
+    if (cart.length && !document.hidden && canUseRemotePos()) DB.heartbeatInventoryLocks(lockOwner).catch(() => {});
   }, 60000);
   window.addEventListener("pagehide", () => {
-    if (cart.length && hasRemotePosAuth()) DB.releaseInventoryLockOwner(lockOwner, true).catch(() => {});
+    if (cart.length && canUseRemotePos()) DB.releaseInventoryLockOwner(lockOwner, true).catch(() => {});
   });
 
   /* ============================================================

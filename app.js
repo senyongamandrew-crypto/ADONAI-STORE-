@@ -1,18 +1,23 @@
 /* ============================================================
    ADONAI — OPERATIONS CONSOLE (admin.html)
    Warm screenshot system · all views live off the shared DB
-   with guest book, riders, ledger, intake & Master Key gate.
+   with guest book, riders, ledger, intake & PIN-free terminal access.
    ============================================================ */
-(function () {
+(async function () {
   "use strict";
-  // Every destination exposed by the POS drawer belongs to this operations
-  // console, so any authenticated terminal user may open it. Destructive and
-  // security-sensitive controls remain protected by the secondary Master Key.
+  // Establish the PIN-free server session before navigating or publishing
+  // settings. Credential prompts exist only for explicitly protected servers.
+  if (Auth.ready) await Auth.ready();
   const me = Auth.guard({ role: null });
   if (Auth.locked() && !me) return;
 
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const pinFree = typeof Auth.openAccess === "function" && Auth.openAccess();
+  document.body.dataset.accessMode = pinFree ? "open" : "credential";
+  $$("[data-credential-control]").forEach(control => { control.hidden = pinFree; });
+  const accessNotice = $("#terminalAccessNotice");
+  if (accessNotice) accessNotice.hidden = !pinFree;
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const ugx = DB.ugx;
   const AV_PALETTE = ["#111827", "#1F2937", "#16A34A", "#15803D", "#166534", "#374151", "#22C55E", "#0B1120"];
@@ -32,8 +37,14 @@
   /* ---------------- modal shell ---------------- */
   const backdrop = $("#modalBackdrop");
   const modalBox = $("#modalBox");
-  const openModal = html => { modalBox.innerHTML = html; backdrop.classList.add("open"); };
-  const closeModal = () => { backdrop.classList.remove("open"); modalBox.innerHTML = ""; };
+  const disposeModalMedia = () => {
+    if (modalBox._mediaEditor) { modalBox._mediaEditor.dispose(); modalBox._mediaEditor = null; }
+  };
+  const openModal = html => { disposeModalMedia(); modalBox.innerHTML = html; backdrop.classList.add("open"); };
+  const closeModal = () => {
+    if (modalBox._mediaSaving) return;
+    disposeModalMedia(); backdrop.classList.remove("open"); modalBox.innerHTML = "";
+  };
   backdrop.addEventListener("click", e => { if (e.target === backdrop) closeModal(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
 
@@ -64,6 +75,7 @@
       renderMasterModal(cb);
     },
     requireRemote(cb) {
+      if (pinFree) return cb("");
       if (masterCredential) return cb(masterCredential);
       const active = Auth.me();
       const token = Auth.token();
@@ -74,7 +86,11 @@
   };
   function paintUnlockChip() {
     const c = $("#unlockChip");
+    const status = $("#openAccessChip");
+    if (status) status.hidden = !pinFree;
     if (!c) return;
+    c.hidden = pinFree;
+    if (pinFree) return;
     if (Keys.unlocked()) { c.innerHTML = Icons.svg("unlock", "ico-14") + " Master Key Unlocked"; c.classList.add("on"); }
     else { c.innerHTML = Icons.svg("lock", "ico-14") + " Unlock Master Key"; c.classList.remove("on"); }
   }
@@ -188,7 +204,11 @@
   function installSuiteGate() {
     const gate = $("#suiteGate");
     if (!gate) return;
-    if (Auth.suiteUnlocked()) { gate.hidden = true; return; }
+    if (Auth.suiteUnlocked()) {
+      gate.hidden = true;
+      document.body.classList.remove("suite-locked");
+      return;
+    }
     gate.hidden = false;
     document.body.classList.add("suite-locked");
     const input = $("#suiteKeyInput"), go = $("#suiteGateGo"), err = $("#suiteGateError");
@@ -258,12 +278,14 @@
   // staff identity in sidebar
   const whoName = me ? me.name : "Open access";
   $("#meName").textContent = whoName;
-  $("#meRole").textContent = me ? "Role: " + me.role.toUpperCase() : "Roster seeded · keys unset";
+  $("#meRole").textContent = pinFree ? "PIN-free · Admin tools available" : me ? "Role: " + me.role.toUpperCase() : "Staff sign-in required";
   $("#meAvatar").textContent = initials(whoName);
 
   const btnAdminExit = $("#btnAdminExit");
   if (btnAdminExit) {
+    if (pinFree) btnAdminExit.textContent = "Back to register";
     btnAdminExit.addEventListener("click", () => {
+      if (pinFree) { location.href = "pos.html"; return; }
       if (Auth.lockSuite) Auth.lockSuite(); else Auth.signOut();
       location.href = "login.html";
     });
@@ -333,21 +355,65 @@
   }
 
   let currentView = requestedView() || "overview";
+  let viewReady = false;
+  let viewRequest = 0;
+  const blockedView = $("#protectedAreaView");
+  function showProtectedArea(view, message) {
+    viewReady = false;
+    $$(".view").forEach(section => section.classList.remove("active"));
+    if (!blockedView) return;
+    const area = typeof PosAccess !== "undefined" ? PosAccess.areaForView(view) : null;
+    const info = area && PosAccess.areaInfo(area);
+    $("#protectedAreaTitle").textContent = info ? info.label : "Protected workspace";
+    $("#protectedAreaMessage").textContent = message || "The admin has protected this area. Enter its password or the admin password to continue. Checkout remains open.";
+    blockedView.hidden = false;
+  }
+  if (blockedView) $("#protectedAreaRetry").addEventListener("click", () => setView(currentView, false));
 
-  function setView(v, updateUrl = true) {
+  async function setView(v, updateUrl = true) {
     if (!VALID_VIEWS.includes(v)) v = "overview";
     const previousView = currentView;
+    if (window.DispatchCenter && v !== "dispatch") DispatchCenter.deactivate();
+    const requestId = ++viewRequest;
     currentView = v;
+    viewReady = false;
+    $$(".view").forEach(section => section.classList.remove("active"));
+    if (typeof PosAccess !== "undefined") {
+      try {
+        await PosAccess.ready();
+        const area = PosAccess.areaForView(v);
+        if (!await PosAccess.ensure(area)) { if (requestId === viewRequest) showProtectedArea(v); return; }
+      } catch (error) {
+        if (requestId === viewRequest) showProtectedArea(v, error.message + " Check your connection and try again.");
+        return;
+      }
+    }
+    if (requestId !== viewRequest) return;
+    viewReady = true;
+    if (blockedView) blockedView.hidden = true;
     const routeAlreadyActive = new URLSearchParams(location.search).get("view") === v && !location.hash;
     if (updateUrl && !routeAlreadyActive) history.pushState({ view: v }, "", viewUrl(v));
     $$(".nav-item[data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === v));
     $$(".view").forEach(s => s.classList.toggle("active", s.id === "view-" + v));
+    if (v !== "intake" && intakeMedia) intakeMedia.pause();
     shell.classList.remove("sb-open");
     render();
     // Lots can be registered/allocated while another dashboard is open. Refresh
     // on entry, not on every background DB poll (which runs every two seconds).
     if (v === "intake" && previousView !== v) loadIntakeStockLots();
+    if (v === "settings" && typeof PosAccess !== "undefined") PosAccess.renderSettings();
   }
+
+  window.addEventListener("pos-access-change", () => {
+    if (typeof PosAccess === "undefined") return;
+    const area = PosAccess.areaForView(currentView);
+    if (area && !PosAccess.canUse(area)) {
+      if (intakeMedia) intakeMedia.pause();
+      if (modalBox._mediaEditor && !modalBox._mediaSaving) closeModal();
+      showProtectedArea(currentView);
+    }
+    if (currentView === "settings" && viewReady) PosAccess.renderSettings();
+  });
 
   $$(".nav-item[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
 
@@ -1276,6 +1342,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
           </div>
         </div>
         <div class="stock-actions">
+          <button class="btn sm ghost" type="button" data-print-tag="${esc(p.id)}">${Icons.svg("printer", "ico-12")} Print tag</button>
           <button class="btn sm ghost" data-editprod="${esc(p.id)}">${Icons.svg("pencil", "ico-12")} Edit</button>
           <button class="btn sm ghost dim" data-delprod="${esc(p.id)}">${Icons.svg("trash-2", "ico-12")} Delete</button>
         </div>
@@ -1353,9 +1420,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
-    const modalImages = p && Array.isArray(p.images) ? p.images.slice(0, 4) : [];
-    if (!modalImages.length && p && p.image_url) modalImages.push(p.image_url);
-    while (modalImages.length < 4) modalImages.push("");
+    const modalImages = GarmentMedia.photosFor(p);
     openModal(`
       <button class="modal-x" data-close>×</button>
       <h3>${p ? "Edit item" : "New item"}</h3>
@@ -1391,14 +1456,19 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       <div class="field"><label>Flat-lay measurements<span class="fhint">inches · one per line as name: value</span></label>
         <textarea id="mpMeasure" class="sel-full" placeholder="shoulder: 18.5&#10;chest: 22&#10;sleeve: 25&#10;length: 26">${measurementsToText(p && p.measurements)}</textarea></div>
       <div class="field"><label>Flaw &amp; condition notes</label><textarea id="mpFlaws" class="sel-full" placeholder="Describe every flaw a shopper would want to know about.">${v("flaw_notes")}</textarea></div>
-      <div class="field"><label>Flaw close-up photo index<span class="fhint">-1 when there is no flaw photo</span></label>
-        <input id="mpFlawPhoto" type="number" min="-1" max="3" class="sel-full" value="${p && p.flaw_photo_index != null ? p.flaw_photo_index : -1}" /></div>
-      ${Intake.imageFieldHTML(modalImageState.image_url)}
+      <div class="field"><label>Which photo shows the flaw?</label>
+        <select id="mpFlawPhoto" class="sel-full"><option value="-1">No flaw close-up</option>${modalImages.map((url, i) => `<option value="${i}" ${p && Number(p.flaw_photo_index) === i ? "selected" : ""}>Photo ${i + 1}${i === 0 ? " · Cover" : ""}</option>`).join("")}</select></div>
+      <div id="mpMedia"></div>
       <div class="modal-actions">
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
-    modalBox._images = modalImages;
+    modalBox._mediaEditor = GarmentMedia.mount($("#mpMedia"), {
+      product: p,
+      onChange: (urls, previous) => syncFlawPhotoOptions($("#mpFlawPhoto"), urls, previous),
+      onBusy: busy => { const button = $("[data-save-prod]", modalBox); if (button) button.disabled = busy || !!modalBox._mediaSaving; },
+      onError: message => toast(message, false)
+    });
     const recalculateModalPrice = () => {
       const base = Math.max(0, Number($("#mpBase").value) || 0);
       const transport = Math.max(0, Number($("#mpTransport").value) || 0);
@@ -1407,22 +1477,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#mpBase").addEventListener("input", recalculateModalPrice);
     $("#mpTransport").addEventListener("input", recalculateModalPrice);
     $("#mpTransport").addEventListener("input", () => { $("#mpTransport").dataset.auto = "0"; });
-    $$("[data-mp-image]").forEach(button => button.addEventListener("click", () => {
-      const slot = Number(button.dataset.mpImage);
-      const input = document.createElement("input");
-      input.type = "file"; input.accept = "image/png, image/jpeg, image/jpg, image/webp, image/*";
-      input.onchange = async () => {
-        const file = input.files && input.files[0]; if (!file) return;
-        try {
-          button.disabled = true; button.textContent = "Uploading…";
-          modalImages[slot] = await Intake.compressImage(file);
-          const preview = $("[data-mp-preview='" + slot + "']");
-          if (preview) preview.innerHTML = `<img src="${esc(modalImages[slot])}" alt="View ${slot + 1}" />`;
-        } catch (err) { toast(err.message || "Could not load photo", false); }
-        finally { button.disabled = false; button.textContent = `Upload ${["front", "back", "fabric", "tag"][slot]}`; }
-      };
-      input.click();
-    }));
+
   }
 
   /* ============================================================
@@ -1431,9 +1486,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const DEMO_CODES = { Men: "MEN", Women: "WOM", Children: "KID", Unisex: "UNI" };
   const INTAKE_CONDITIONS = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"];
   const GROUPS = { "Apparel": ["Tops & Shirts", "Dresses & Skirts", "Pants & Jeans"], "Outerwear": ["Outerwear & Jackets"], "Footwear": ["Shoes"], "Accessories": ["Accessories"], "Kids": ["Children Wear"] };
-  const intakePhotos = ["", "", "", ""];   // front, back, fabric, tag
+  let intakeMedia = null;
   let intakeBound = false;
   let intakeLotsLoadInFlight = null;
+  let intakeSaving = false;
+  let lastTaggedProductId = null;
+  let tagLayoutPreviewOpened = false;
+  let mediaPreviewFocused = false;
 
   /* The System Parameters base delivery fee is the single source of truth for
      transport pricing. New catalog items prefill from it so staff never re-type
@@ -1457,9 +1516,16 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     }
   }
 
-  function demoSku() {
+  function newIntakeSku() {
     const demo = $("#inDemo").value || "Men";
-    return `ADN-${DEMO_CODES[demo] || "GEN"}-${1000 + Math.floor(Math.random() * 9000)}`;
+    const existing = new Set(DB.listProducts().flatMap(p => [p.sku, p.barcode_id]).map(code => String(code || "").toUpperCase()));
+    let candidate;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const random = window.crypto && crypto.getRandomValues ? crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 4294967296);
+      candidate = `ADN-${DEMO_CODES[demo] || "GEN"}-${random.toString(36).toUpperCase().padStart(6, "0").slice(-6)}`;
+      if (!existing.has(candidate) && !existing.has(candidate + "-1OF1")) return candidate;
+    }
+    return candidate; // The server's unique constraint also protects concurrent intakes.
   }
   /* Intake-side cache of registered lots so the tier dropdown can render
      without another round trip. Server-side math remains authoritative. */
@@ -1615,6 +1681,29 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return out;
   }
 
+  // The condition controls must be local console helpers, not undefined
+  // globals: opening Catalog Intake directly should never interrupt boot.
+  function intakeCondition() {
+    return $("#inItemCondition").value === "PRE_LOVED" ? "PRE_LOVED" : "BRAND_NEW";
+  }
+
+  function setIntakeCondition(value) {
+    const preLoved = value === "PRE_LOVED";
+    $("#inItemCondition").value = preLoved ? "PRE_LOVED" : "BRAND_NEW";
+    $$("[data-intake-condition]").forEach(button => {
+      const active = button.dataset.intakeCondition === intakeCondition();
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    ["inSizeVariantsField", "inFactoryNotesField"].forEach(id => { $("#" + id).hidden = preLoved; });
+    $("#inMeasurementsField").hidden = !preLoved;
+    const qty = $("#inQty");
+    qty.readOnly = preLoved;
+    if (preLoved) { qty.value = "1"; qty.max = "1"; }
+    else qty.removeAttribute("max");
+    $("#inQtyHint").textContent = preLoved ? "Unique piece · 1-of-1" : "Brand-new supports multi-stock";
+  }
+
   function initIntakeForm() {
     // renderIntake() also runs for background sync events. Populate defaults and
     // attach handlers once only, or each poll overwrites live form selections.
@@ -1624,13 +1713,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#inCond").innerHTML = INTAKE_CONDITIONS.map(c => `<option>${c}</option>`).join("");
     $("#inGroup").innerHTML = Object.keys(GROUPS).map(g => `<option>${g}</option>`).join("");
     $("#inSizePreset").innerHTML = `<option value="">Preset</option>` + ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"].map(s => `<option value="${s}">${s}</option>`).join("");
-    $("#inSku").value = demoSku();
+    $("#inSku").value = newIntakeSku();
     intakeBound = true;
     loadIntakeStockLots();
 
     $$('[data-intake-condition]').forEach(button => button.addEventListener("click", () => setIntakeCondition(button.dataset.intakeCondition)));
-    $("#btnRollSku").addEventListener("click", () => { $("#inSku").value = demoSku(); paintTag(); });
-    $("#inDemo").addEventListener("change", () => { $("#inSku").value = demoSku(); paintTag(); });
+    $("#btnRollSku").addEventListener("click", () => { $("#inSku").value = newIntakeSku(); paintTag(); });
+    $("#inDemo").addEventListener("change", () => { $("#inSku").value = newIntakeSku(); paintTag(); });
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
     $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; paintTag(); });
     $("#inStockLot").addEventListener("change", () => {
@@ -1667,71 +1756,53 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     buildMeasureFields($("#inMeasureSet").value);
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
+    $("#btnIntakePrint").addEventListener("click", () => saveIntake(false, true));
+    $("#btnPrintLastTag").addEventListener("click", () => { if (lastTaggedProductId && window.GarmentTools) GarmentTools.openTag(lastTaggedProductId); });
     buildPhotoRow();
     setIntakeCondition($("#inItemCondition").value || "BRAND_NEW");
     paintTag();
   }
 
+  function syncFlawPhotoOptions(select, urls, previous) {
+    if (!select) return;
+    const index = Number(select.value);
+    const reference = previous && previous[index];
+    const next = reference ? urls.indexOf(reference) : (index >= 0 && index < urls.length ? index : -1);
+    select.innerHTML = `<option value="-1">No flaw close-up</option>` + urls.map((url, i) => `<option value="${i}">Photo ${i + 1}${i === 0 ? " · Cover" : ""}</option>`).join("");
+    select.value = String(next);
+  }
+
   function buildPhotoRow() {
-    const SLOTS = [
-      ["1. Front View", ""], ["2. Back View", "Reverse cut & seams"],
-      ["3. Fabric / Texture", "Close-up weave & material"], ["4. Brand & Size Tag", "Authenticity & care tag"]
-    ];
-    $("#photoRow").innerHTML = SLOTS.map((s, i) => `
-      <div class="ph-slot" data-slot="${i}">
-        <div class="ph-prev ${i === 0 ? "hero" : ""}">${intakePhotos[i] ? `<img src="${esc(intakePhotos[i])}" alt="" />` : ""}<span class="ph-lbl">${s[0]}</span>${s[1] ? `<span class="ph-sub">${s[1]}</span>` : ""}</div>
-        <div class="ph-btns">
-          <button class="btn sm" data-phgal="${i}" type="button">${Icons.svg("upload", "ico-12")} Gallery / File</button>
-          ${intakePhotos[i] ? `<button class="btn sm ghost" data-phrem="${i}" type="button">Remove</button>` : ""}
-        </div>
-      </div>`).join("");
-    paintAngles();
-  }
-  function paintAngles() {
-    const n = intakePhotos.filter(Boolean).length;
-    $("#angleCount").textContent = `${n} / 4 angles`;
-    $$(".ph-slot").forEach((el, i) => {
-      const prev = $(".ph-prev", el);
-      prev.innerHTML = (intakePhotos[i] ? `<img src="${esc(intakePhotos[i])}" alt="" />` : "")
-        + `<span class="ph-lbl">${["1. Front View", "2. Back View", "3. Fabric / Texture", "4. Brand & Size Tag"][i]}</span>`;
-      if (i > 0) { const sub = ["", "Reverse cut & seams", "Close-up weave & material", "Authenticity & care tag", ""][i]; if (sub) prev.insertAdjacentHTML("beforeend", `<span class="ph-sub">${sub}</span>`); }
+    if (intakeMedia) return;
+    intakeMedia = GarmentMedia.mount($("#photoRow"), {
+      onChange: (urls, previous, video) => {
+        syncFlawPhotoOptions($("#inFlawPhoto"), urls, previous);
+        $("#angleCount").textContent = `${urls.length} / 12 photos${video ? " + video" : ""}`;
+      },
+      onBusy: busy => ["btnIntakeSave", "btnIntakeMore", "btnIntakePrint"].forEach(id => { $("#" + id).disabled = busy || intakeSaving; }),
+      onError: message => toast(message, false)
     });
-  }
-  function pickPhoto(slot) {
-    const fi = document.createElement("input");
-    fi.type = "file"; fi.accept = "image/png, image/jpeg, image/jpg, image/webp, image/*";
-    fi.onchange = async () => {
-      const f = fi.files && fi.files[0]; if (!f) return;
-      try {
-        const url = await Intake.compressImage(f);
-        intakePhotos[slot] = url;
-        buildPhotoRow();
-      } catch (err) {
-        toast(err.message || "Failed to load photo", false);
-      }
-    };
-    fi.click();
   }
 
   function paintTag() {
-    const demo = $("#inDemo").value || "Men", cat = $("#inCat").value || "Tops & Shirts";
-    $("#tagKicker").textContent = `${demo.toUpperCase()} · ${cat.toUpperCase()}`;
-    $("#tagTitle").textContent = $("#inTitle").value.trim() || "Item Title";
-    $("#tagMeta").textContent = `Brand: ${$("#inBrand").value.trim() || "Unbranded"} | Size: ${$("#inSize").value.trim() || "Standard"} | Color: ${$("#inColor").value.trim() || "Standard"}`;
+    const settings = DB.getSettings() || {};
+    $("#tagStoreName").textContent = settings.store_name || "ADONAI STORE";
+    $("#tagTitle").textContent = $("#inTitle").value.trim() || "Garment name";
+    $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonai-store.onrender.com";
     const basePrice = Number($("#inSell").value) || 0;
     const transport = Number($("#inTransport").value) || 0;
     const sell = basePrice + (transport * 0.5);
-    const rrp = Number($("#inRrp").value) || 0;
-    $("#tagPrice").textContent = ugx(sell);
-    $("#tagStrike").textContent = rrp > sell ? ugx(rrp) : "";
     const code = $("#inSku").value.trim() || "ADN-XXX-0000";
     $("#tagCode").textContent = code;
-    // real Code 128 barcode from the SKU
-    $("#tagBars").innerHTML = DB.barcodeSVG(code, 46);
-    $("#btnIntakeSave").textContent = `Tag & Save (${ugx(sell)})`;
+    // Print the saved SKU: a stable checkout alias without condition markers.
+    $("#tagBars").innerHTML = DB.barcodeSVG(code, 58);
+    if (!intakeSaving) $("#btnIntakeSave").textContent = `Save Garment (${ugx(sell)})`;
   }
 
-  async function saveIntake(again) {
+  async function saveIntake(again, printAfter = false) {
+    if (intakeSaving) return;
+    let garmentMedia;
+    try { garmentMedia = intakeMedia.snapshot(); } catch (error) { return toast(error.message, false); }
     const vals = {
       name: $("#inTitle").value.trim(),
       brand: $("#inBrand").value.trim() || "Unbranded",
@@ -1769,11 +1840,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         const sku = $("#inSku").value.trim().slice(0, 50);
         return intakeCondition() === "PRE_LOVED" ? `${sku.slice(0, 45)}-1OF1` : sku;
       })(),
-      images: intakePhotos.filter(Boolean),
-      image_url: intakePhotos[0] || intakePhotos.find(Boolean) || ""
+      ...garmentMedia
     };
     if (!vals.name) return toast("Item title is required", false);
     if (!vals.selling_price) return toast("Set a sell price first", false);
+    if (["ADN-000000", "ADONAI-SAMPLE"].includes(vals.sku.toUpperCase())) return toast("This code is reserved for printer setup. Roll a different SKU.", false);
+    if (!vals.sku || vals.sku.length > 45 || !/^[\x21-\x7e]+$/.test(vals.sku)) return toast("Use a unique SKU of 1–45 English letters, numbers or symbols, without spaces.", false);
     if (vals.stock_lot_id && !vals.lot_grade_id) {
       const lot = findIntakeLot(vals.stock_lot_id);
       if (lot && (lot.grades || []).length) {
@@ -1781,8 +1853,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         return toast("This lot is tier-graded — choose a grade tier so COGS stays locked", false);
       }
     }
+    intakeSaving = true;
+    intakeMedia.setLocked(true);
+    const saveButtons = [$("#btnIntakeSave"), $("#btnIntakeMore"), $("#btnIntakePrint")];
+    saveButtons.forEach(button => { button.disabled = true; });
     try {
       const p = await DB.addProduct(vals);
+      intakeMedia.markSaved();
+      lastTaggedProductId = p.id;
+      $("#btnPrintLastTag").disabled = false;
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes",
@@ -1790,34 +1869,44 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         $("#inFlawPhoto").value = "-1";
         $("#inSell").dataset.gradeSuggested = "0";
         buildMeasureFields($("#inMeasureSet").value);
-        intakePhotos.fill(""); paintAngles();
+        intakeMedia.reset();
         $("#inStockLot").value = "";
         syncIntakeLotGradeUI();
         lockIntakeCost(false);
         // Next item restarts from the global System Parameters base fee.
         syncIntakeTransportDefault(true);
-        $("#inSku").value = demoSku(); paintTag(); $("#inTitle").focus();
+        $("#inSku").value = newIntakeSku(); paintTag(); $("#inTitle").focus();
       } else {
         renderAll();
       }
       // Tier remaining counts moved — force a fresh count after any in-flight
       // pre-save request has settled.
       loadIntakeStockLots(true);
+      if (printAfter && window.GarmentTools) await GarmentTools.openTag(p.id);
     } catch (err) { toast(err.message, false); }
+    finally { intakeSaving = false; intakeMedia.setLocked(false); saveButtons.forEach(button => { button.disabled = intakeMedia.busy; }); paintTag(); }
   }
 
   function renderIntake() {
     initIntakeForm();
     syncIntakeTransportDefault(false);
     paintTag();
+    if (!mediaPreviewFocused && new URLSearchParams(location.search).get("mediaPreview") === "1") {
+      mediaPreviewFocused = true;
+      requestAnimationFrame(() => $("#photoRow").scrollIntoView({ block: "start", behavior: "auto" }));
+    }
+    if (!tagLayoutPreviewOpened && new URLSearchParams(location.search).get("tagPreview") === "1" && window.GarmentTools) {
+      tagLayoutPreviewOpened = true;
+      GarmentTools.openTag(null, true).catch(error => toast(error.message || "Could not open the tag preview", false));
+    }
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
       <div class="ch-row">
         <div class="rider-mini">
           <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
           <div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div>
         </div>
-        <strong class="serif">${ugx(p.selling_price)}</strong>
-      </div>`).join("");
+        <div class="gt-recent-actions"><strong class="serif">${ugx(p.selling_price)}</strong><button class="btn sm" type="button" data-print-tag="${esc(p.id)}">${Icons.svg("printer", "ico-12")} Print tag</button></div>
+      </div>`).join("") || '<p class="gt-recent-empty">No saved garments yet. Save your first piece above, or preview the tag layout before printing.</p>';
   }
 
   /* ============================================================
@@ -1827,112 +1916,262 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const guestSearchEl = $("#guestSearch");
   if (guestSearchEl) guestSearchEl.addEventListener("input", e => { guestTerm = e.target.value.trim().toLowerCase(); renderGuests(); });
 
-  /* ---------- posted data audit log ---------- */
-  let auditTerm = "";
-  const auditSearchEl = $("#auditSearch");
-  if (auditSearchEl) auditSearchEl.addEventListener("input", e => { auditTerm = e.target.value.trim().toLowerCase(); renderAuditLogs(); });
+  /* ---------- posted data audit / actual file exports ---------- */
+  let auditTerm = "", auditTicket = null, auditController = null, auditPendingArea = null;
+  let auditRequest = 0, auditExpiryTimer = null, auditNativeSave = null, auditBusy = false;
+  const auditSearchEl = $("#auditSearch"), auditReportEl = $("#auditReport");
+  const auditPresetEl = $("#auditDatePreset"), auditFromEl = $("#auditDateFrom"), auditToEl = $("#auditDateTo");
+  let auditDayTimer = null, auditRefreshing = false, auditRefreshError = "";
+  if (auditPresetEl && auditFromEl && auditToEl) {
+    const initial = AuditExports.preset("today");
+    auditPresetEl.value = "today"; auditFromEl.value = initial.from; auditToEl.value = initial.to;
+  }
+  function syncAuditRelativeDates(now = new Date()) {
+    if (!auditPresetEl || !AuditExports.relative(auditPresetEl.value)) return false;
+    const dates = AuditExports.preset(auditPresetEl.value, now);
+    if (auditFromEl.value === dates.from && auditToEl.value === dates.to) return false;
+    auditFromEl.value = dates.from; auditToEl.value = dates.to;
+    // A native save already in progress remains a valid copy of its named day.
+    // Abandon only unused / late preparation links, never the saved books.
+    if (!auditNativeSave) clearAuditDownload();
+    return true;
+  }
+  function scheduleAuditDay() {
+    if (auditDayTimer) clearTimeout(auditDayTimer);
+    auditDayTimer = setTimeout(() => {
+      syncAuditRelativeDates();
+      if (currentView === "customers" && viewReady) renderAuditLogs();
+      scheduleAuditDay();
+    }, AuditExports.untilMidnight());
+  }
+  scheduleAuditDay();
+  const wakeAuditDay = () => {
+    if (document.hidden) return;
+    syncAuditRelativeDates();
+    if (currentView === "customers" && viewReady) renderAuditLogs();
+    scheduleAuditDay();
+  };
+  window.addEventListener("focus", wakeAuditDay);
+  document.addEventListener("visibilitychange", wakeAuditDay);
+  window.addEventListener("pagehide", () => { if (auditDayTimer) clearTimeout(auditDayTimer); });
+  window.addEventListener("pageshow", wakeAuditDay);
+  function auditDates() { return AuditExports.range(auditFromEl?.value || "", auditToEl?.value || ""); }
+  function auditStatus(message, error = false) {
+    const box = $("#auditDownloadStatus"), text = $("#auditDownloadMessage");
+    if (box) { box.hidden = !message; box.classList.toggle("is-error", error); }
+    if (text) text.textContent = message;
+  }
+  function auditSetBusy(busy) {
+    auditBusy = busy;
+    const disabled = busy || !!auditNativeSave;
+    ["#btnExportAudit", "#btnExportAuditExcel", "#auditReport", "#auditDatePreset", "#auditDateFrom", "#auditDateTo", "#auditSearch", "#btnAuditToday", "#btnAuditYesterday", "#auditReceiptDay"].forEach(selector => { const element = $(selector); if (element) element.disabled = disabled; });
+    ["#btnExportAudit", "#btnExportAuditExcel"].forEach(selector => $(selector)?.setAttribute("aria-busy", String(busy)));
+  }
+  function clearAuditDownload(message = "") {
+    auditRequest++;
+    if (auditController) auditController.abort();
+    auditController = null; auditPendingArea = null; auditTicket = null;
+    if (auditExpiryTimer) clearTimeout(auditExpiryTimer);
+    const link = $("#auditDownloadFallback");
+    if (link) { link.hidden = true; link.removeAttribute("href"); link.removeAttribute("download"); }
+    auditSetBusy(false); auditStatus(message);
+  }
   function auditSales() {
-    return DB.listSales().slice().sort((a, b) => new Date(a.created_at || a.createdAt || 0) - new Date(b.created_at || b.createdAt || 0));
+    let dates; try { dates = auditDates(); } catch (_) { return []; }
+    return DB.listSales().filter(s => AuditExports.posted(s) && AuditExports.within(AuditExports.postingDate(s), dates))
+      .filter(s => !auditTerm || AuditExports.searchFields(s).join(" ").toLowerCase().includes(auditTerm))
+      .sort((a, b) => AuditExports.dateOf(AuditExports.postingDate(a)) - AuditExports.dateOf(AuditExports.postingDate(b)));
   }
   function renderAuditLogs() {
     const target = $("#auditList"); if (!target) return;
-    let list = auditSales();
-    if (auditTerm) list = list.filter(s => [s.id, s.order_number, s.customer_name, s.cashier_name, s.payment_method, s.channel].join(" ").toLowerCase().includes(auditTerm));
-    const total = list.reduce((n, s) => n + Number(s.total || 0), 0);
+    syncAuditRelativeDates();
+    const list = auditSales(), total = list.reduce((n, s) => n + Number(s.total || 0), 0);
+    let dates = null, label = "Choose valid dates"; try { dates = auditDates(); label = dates.label; } catch (_) {}
+    const today = AuditExports.kampalaDay(), daily = !!(dates?.from && dates.from === dates.to);
+    const isToday = daily && dates.from === today;
+    const title = dates ? AuditExports.dayTitle(dates) : "Choose valid receipt dates";
+    const dayPicker = $("#auditReceiptDay");
+    if (dayPicker && document.activeElement !== dayPicker) dayPicker.value = daily ? dates.from : "";
+    if ($("#auditDayTitle")) $("#auditDayTitle").textContent = title;
+    if ($("#auditReceiptsTitle")) $("#auditReceiptsTitle").textContent = title;
+    if ($("#auditDayBadge")) { $("#auditDayBadge").textContent = isToday ? "TODAY" : daily ? "SAVED DAY" : "HISTORY"; $("#auditDayBadge").classList.toggle("is-history", !isToday); }
+    if ($("#auditDayCaption")) $("#auditDayCaption").textContent = daily ? `${AuditExports.dayLabel(dates.from)} · Kampala time · 00:00 up to midnight.` : `${label} · Kampala time. Pick one day to reprint its invoices.`;
+    $("#btnAuditToday")?.setAttribute("aria-pressed", String(isToday));
+    $("#btnAuditYesterday")?.setAttribute("aria-pressed", String(daily && dates.from === AuditExports.preset("yesterday").from));
+    if ($("#btnPrintDayReceipts")) { $("#btnPrintDayReceipts").disabled = !list.length; $("#btnPrintDayReceipts").textContent = daily ? "Print day's invoices" : "Print selected invoices"; }
+    if ($("#btnPrintAudit")) { $("#btnPrintAudit").disabled = !list.length; $("#btnPrintAudit").textContent = daily ? "Print day summary" : "Print selection summary"; }
     const summary = $("#auditSummary");
-    if (summary) summary.innerHTML = `<strong>${list.length}</strong> posted sale${list.length === 1 ? "" : "s"} · <strong>${ugx(total)}</strong> total value`;
-    target.innerHTML = list.length ? list.map(s => `<div class="guest-card audit-card">
-      <div class="guest-top"><span class="avatar" style="background:${avColor(s.customer_name || "Sale")}">${initials(s.customer_name || "Sale")}</span>
-        <div class="grow"><div class="guest-name">${esc(s.order_number || s.id || "Posted sale")}</div><div class="muted">${esc(new Date(s.created_at || s.createdAt || Date.now()).toLocaleString())} · ${esc(s.customer_name || "Walk-in customer")}</div></div>
-        <strong class="serif">${ugx(s.total || 0)}</strong>
-      </div><div class="guest-tags"><span class="itag">${esc(s.payment_method || s.tender_type || "Payment recorded")}</span><span class="itag">${esc(s.channel || "POS")}</span><button class="lnk" data-print-sale="${esc(s.id)}">Print receipt</button></div>
-    </div>`).join("") : `<div class="card"><p class="muted" style="padding:20px">No posted sales match this search.</p></div>`;
+    if (summary) summary.innerHTML = `<strong>${list.length}</strong> receipt${list.length === 1 ? "" : "s"} · <strong>${ugx(total)}</strong> posted sales${auditTerm ? ' <span class="audit-filtered-label">Search filtered</span>' : ""}<span class="audit-period-label">${esc(label)} · EAT</span>`;
+    const sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+    const syncNode = $("#auditSyncState");
+    if (syncNode) {
+      syncNode.classList.toggle("is-offline", !!auditRefreshError || sync?.online === false);
+      syncNode.textContent = auditRefreshing ? "Refreshing receipts from saved records…" : auditRefreshError || (sync?.online === true ? `Saved records refreshed ${AuditExports.stamp(sync.last_synced_at)}. History is retained.` : sync?.online === false ? "Connection unavailable — showing the last saved copy. Refresh before printing a complete closing-day report." : "Saved receipt list. Refresh to check the latest postings.");
+    }
+    target.innerHTML = list.length ? list.map(s => `<button type="button" class="guest-card audit-card audit-invoice" data-print-sale="${esc(s.id)}" aria-label="Print receipt ${esc(s.order_number || s.id)}">
+      <span class="audit-invoice-top"><span class="audit-invoice-icon" aria-hidden="true">${Icons.svg("file-text", "ico-20")}</span><span class="audit-invoice-main"><strong>${esc(s.order_number || s.id)}</strong><span>${esc(AuditExports.stamp(AuditExports.postingDate(s)))}</span></span><strong class="audit-invoice-amount">${ugx(s.total || 0)}</strong></span>
+      <span class="audit-invoice-customer">${esc(s.customer_name || "Walk-in customer")}${s.cashier_name || s.cashier?.name ? ` · ${esc(s.cashier_name || s.cashier.name)}` : ""}</span>
+      <span class="audit-invoice-bottom"><span class="audit-invoice-tags"><span class="itag">${esc(s.payment_method || s.tender_type || s.tender?.type || "Payment recorded")}</span><span class="itag">${esc(s.channel || "POS")}</span></span><span class="audit-invoice-print">${Icons.svg("printer", "ico-14")} Print invoice</span></span>
+    </button>`).join("") : `<div class="card audit-empty"><strong>${isToday ? "No receipts posted today yet" : "No posted receipts in this selection"}</strong><p class="muted">${isToday ? "Completed sales will appear here throughout the day. Yesterday's invoices are not deleted — select Yesterday or a past date above to find them." : "Try another day or clear the search. Saved history and ledger postings are never removed by these filters."}</p></div>`;
+    if ($("#auditReportNote")) $("#auditReportNote").textContent = AuditExports.note(auditReportEl?.value || "sales");
   }
-  function exportAuditCSV(kind = "sales") {
-    const date = new Date().toISOString().slice(0, 10);
-    let rows;
-    let filename;
-    if (kind === "demo") {
-      rows = [
-        ["Demo type", "Reference", "Description", "Amount / quantity", "Note"],
-        ["Sales", "DEMO-SALE-001", "Sample posted sale", "UGX 85,000", "DEMO — safe to delete"],
-        ["Stock", "DEMO-STK-001", "Sample checked shirt", "4", "DEMO — safe to delete"],
-        ["Ledger", "DEMO-LED-001", "Sample cash receipt", "UGX 85,000", "DEMO — safe to delete"],
-        ["Staff", "DEMO-STF-001", "Sample cashier account", "Active", "DEMO — safe to delete"]
-      ];
-      filename = `adonai-demo-examples-${date}.csv`;
-    } else if (kind === "stock") {
-      rows = [["SKU", "Product", "Category", "Size", "Condition", "In stock", "Selling price"]].concat(
-        DB.listProducts().map(p => [p.sku || "", p.name || "", p.category || "", p.size || "", p.condition || "", p.in_stock_count || 0, p.selling_price || 0])
-      );
-      filename = `adonai-stock-inventory-${date}.csv`;
-    } else if (kind === "staff") {
-      rows = [["Staff ID", "Name", "Role", "Phone", "Active"]].concat(
-        DB.listStaff().map(s => [s.id || "", s.name || "", s.role || "", s.phone || "", s.active === false ? "No" : "Yes"])
-      );
-      filename = `adonai-staff-directory-${date}.csv`;
-    } else if (kind === "ledger") {
-      rows = [["Reference", "Date", "Customer", "Payment method", "Channel", "Debit / value"]].concat(
-        auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0])
-      );
-      filename = `adonai-financial-ledger-${date}.csv`;
+  function auditPrintStatus(message, error = false) {
+    const node = $("#auditPrintStatus");
+    if (node) { node.hidden = !message; node.textContent = message; node.classList.toggle("is-error", error); }
+  }
+  function auditPrintSelection() {
+    syncAuditRelativeDates();
+    const dates = auditDates(), sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+    return {...dates, search:auditTerm, lastSynced:sync?.last_synced_at || null, offline:sync?.online === false || !!auditRefreshError};
+  }
+  function performAuditPrint(action) {
+    if (typeof PosAccess !== "undefined" && !PosAccess.canUse("orders")) { auditPrintStatus("This area is locked. Unlock Orders & audit to reprint saved invoices.", true); return; }
+    try {
+      const result = action();
+      auditPrintStatus(result.mode === "native" ? "System print requested. Choose a printer or Save as PDF. Your sale records stay unchanged." : "Print dialog requested. Choose your printer or Save as PDF. Printing does not delete or repost the sale.");
+    } catch (error) { auditPrintStatus(error.message, true); toast(error.message, false); }
+  }
+  function printAuditReceipt(id) {
+    syncAuditRelativeDates();
+    const sale = auditSales().find(record => String(record.id) === String(id));
+    if (!sale) { auditPrintStatus("This receipt is no longer in the selected day. Refresh or choose its saved date to print it.", true); return; }
+    performAuditPrint(() => ReceiptPrinter.printReceipt(sale, DB.getSettings(), $("#auditPrintPaper")?.value || "a4"));
+  }
+  async function refreshAuditReceipts() {
+    if (auditRefreshing) return;
+    if (typeof PosAccess !== "undefined" && !PosAccess.canUse("orders")) return;
+    const button = $("#btnRefreshAudit"); auditRefreshing = true; auditRefreshError = "";
+    if (button) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
+    renderAuditLogs(); let timer;
+    try {
+      const refreshed = await Promise.race([
+        DB.refreshOperationalData(),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("The server took too long. Showing the saved copy — tap Refresh receipts to try again.")), 30000); })
+      ]);
+      if (!refreshed) throw new Error("Could not refresh receipts. Showing the saved copy — check your connection and try again.");
+    } catch (error) { auditRefreshError = error.message || "Could not refresh saved records."; }
+    finally {
+      clearTimeout(timer); auditRefreshing = false;
+      if (button) { button.disabled = false; button.removeAttribute("aria-busy"); }
+      if (currentView === "customers" && viewReady) renderAuditLogs();
+    }
+  }
+  async function startAuditDownload(ticket, signal, request = auditRequest) {
+    const result = await FileDownloads.download(ticket, signal);
+    if (request !== auditRequest || signal?.aborted) {
+      if (result.mode === "native" && typeof window.Android?.cancelFileExport === "function") window.Android.cancelFileExport(result.id);
+      return;
+    }
+    const count = `${ticket.records} record${ticket.records === 1 ? "" : "s"}`;
+    if (result.mode === "native") {
+      auditNativeSave = result.id;
+      auditStatus(`${ticket.filename} · ${count}. Choose a folder in Save As, then tap Save.`);
+    } else if (result.mode === "external") {
+      auditStatus(`${ticket.filename} · ${count}. Download opened in your phone browser. Check Downloads or tap Download again.`);
     } else {
-      rows = [["Receipt", "Date", "Customer", "Payment", "Channel", "Total"]].concat(
-        auditSales().map(s => [s.order_number || s.id, new Date(s.created_at || s.createdAt || 0).toISOString(), s.customer_name || "Walk-in customer", s.payment_method || s.tender_type || "", s.channel || "POS", s.total || 0])
-      );
-      filename = `adonai-posted-sales-${date}.csv`;
+      auditStatus(`${ticket.filename} · ${count}. Download requested — check your browser's Downloads. If it did not appear, tap Download again.`);
     }
-    const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], {type: "text/csv;charset=utf-8"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    // Keep a visible fallback link for Android WebView builds where an
-    // automatic anchor download may be blocked by the host container.
-    const fallback = $("#auditDownloadFallback");
-    if (fallback) {
-      fallback.href = url;
-      fallback.download = filename;
-      fallback.textContent = `Download ${filename}`;
-      fallback.hidden = false;
+    if (!ticket.records) toast("No records in this selection — the file contains column headers only");
+  }
+  async function exportAuditFile(format = "csv") {
+    if (auditBusy || auditNativeSave) return;
+    syncAuditRelativeDates();
+    let dates; try { dates = auditDates(); } catch (error) { auditStatus(error.message, true); toast(error.message, false); return; }
+    const kind = auditReportEl?.value || "sales";
+    clearAuditDownload(); const request = auditRequest;
+    auditSetBusy(true); auditStatus(`Preparing ${format === "xlsx" ? "Excel workbook" : "CSV"} from saved records…`);
+    try {
+      if (typeof PosAccess !== "undefined" && !(await PosAccess.ensure(AuditExports.AREAS[kind]))) {
+        auditStatus("Export cancelled. Unlock the selected area to download its records."); return;
+      }
+      if (request !== auditRequest) return;
+      const controller = new AbortController(); auditController = controller; auditPendingArea = AuditExports.AREAS[kind];
+      const ticket = await DB.prepareExport({kind, format, from:dates.from, to:dates.to, q:auditTerm}, controller.signal);
+      if (request !== auditRequest || controller.signal.aborted) return;
+      auditTicket = ticket;
+      const link = $("#auditDownloadFallback");
+      if (link) { link.href = ticket.url; link.download = ticket.filename; link.textContent = "Download again"; link.hidden = false; }
+      auditExpiryTimer = setTimeout(() => clearAuditDownload("This download link expired after 10 minutes. Export again for a fresh file."), 10 * 60 * 1000);
+      await startAuditDownload(ticket, controller.signal);
+    } catch (error) {
+      if (request !== auditRequest) return;
+      const message = error.message || "The export could not be downloaded. Check your connection and try again.";
+      auditStatus(message, true); toast(message, false);
+    } finally {
+      if (request === auditRequest) { auditController = null; auditPendingArea = null; auditSetBusy(false); }
     }
-    setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
-    closeAuditExportMenu();
-    toast(`${filename} ready — download started`);
   }
-  function closeAuditExportMenu() {
-    const details = $("#auditExportDetails");
-    if (details) details.open = false;
+  function chooseAuditDay(preset) {
+    if (auditBusy || auditNativeSave) return;
+    const dates = AuditExports.preset(preset);
+    auditPresetEl.value = preset; auditFromEl.value = dates.from; auditToEl.value = dates.to;
+    auditTerm = ""; if (auditSearchEl) auditSearchEl.value = "";
+    clearAuditDownload(); auditPrintStatus(""); renderAuditLogs();
   }
+  $("#auditReceiptDay")?.addEventListener("change", event => {
+    if (auditBusy || auditNativeSave || !event.target.value) return;
+    try {
+      const dates = AuditExports.range(event.target.value, event.target.value);
+      auditPresetEl.value = dates.from === AuditExports.kampalaDay() ? "today" : "custom";
+      auditFromEl.value = dates.from; auditToEl.value = dates.to;
+      auditTerm = ""; if (auditSearchEl) auditSearchEl.value = "";
+      clearAuditDownload(); auditPrintStatus(""); renderAuditLogs();
+    } catch (error) { auditPrintStatus(error.message, true); }
+  });
+  $("#btnAuditToday")?.addEventListener("click", () => chooseAuditDay("today"));
+  $("#btnAuditYesterday")?.addEventListener("click", () => chooseAuditDay("yesterday"));
+  $("#btnRefreshAudit")?.addEventListener("click", refreshAuditReceipts);
+  $("#btnPrintDayReceipts")?.addEventListener("click", () => performAuditPrint(() => {
+    const selection = auditPrintSelection();
+    return ReceiptPrinter.printInvoices(auditSales(), selection, DB.getSettings(), $("#auditPrintPaper")?.value || "a4");
+  }));
+  window.addEventListener("adonai-receipt-print-result", event => {
+    if (currentView !== "customers" || !viewReady) return;
+    auditPrintStatus(event.detail?.message || "Choose a printer in system print.", event.detail?.status === "error");
+  });
+  if (auditSearchEl) auditSearchEl.addEventListener("input", e => { auditTerm = e.target.value.trim().toLowerCase(); clearAuditDownload(); renderAuditLogs(); });
+  if (auditPresetEl) auditPresetEl.addEventListener("change", () => {
+    if (auditPresetEl.value !== "custom") { const dates = AuditExports.preset(auditPresetEl.value); auditFromEl.value = dates.from; auditToEl.value = dates.to; }
+    clearAuditDownload(); renderAuditLogs();
+  });
+  [auditFromEl, auditToEl].forEach(element => {
+    // Do not reset a date while a cashier is typing it during a live DB poll.
+    element?.addEventListener("input", () => { if (auditPresetEl) auditPresetEl.value = "custom"; });
+    element?.addEventListener("change", () => { if (auditPresetEl) auditPresetEl.value = "custom"; clearAuditDownload(); auditPrintStatus(""); renderAuditLogs(); });
+  });
+  auditReportEl?.addEventListener("change", () => { clearAuditDownload(); renderAuditLogs(); });
+  $("#btnExportAudit")?.addEventListener("click", () => exportAuditFile("csv"));
+  $("#btnExportAuditExcel")?.addEventListener("click", () => exportAuditFile("xlsx"));
+  $("#auditDownloadFallback")?.addEventListener("click", async event => {
+    if (!FileDownloads.nativePresent()) return; // ordinary HTTPS attachment on browsers
+    event.preventDefault(); if (!auditTicket || auditBusy || auditNativeSave) return;
+    const request = auditRequest; auditSetBusy(true);
+    const controller = new AbortController(); auditController = controller; auditPendingArea = AuditExports.AREAS[auditTicket.kind];
+    try { await startAuditDownload(auditTicket, controller.signal); }
+    catch (error) { if (request === auditRequest) auditStatus(error.message, true); }
+    finally { if (request === auditRequest) { auditController = null; auditPendingArea = null; auditSetBusy(false); } }
+  });
+  window.addEventListener("adonai-file-export-result", event => {
+    if (event.detail?.id !== auditNativeSave) return;
+    auditNativeSave = null; auditSetBusy(false);
+    const {status, message} = event.detail;
+    auditStatus(message || (status === "saved" ? "File saved. Open it from the folder you chose in Save As." : status === "cancelled" ? "Save cancelled — tap Download again to choose a folder." : "File could not be saved. Tap Download again."), status === "error");
+  });
+  window.addEventListener("pos-access-change", () => {
+    if (typeof PosAccess === "undefined") return;
+    const area = auditTicket ? AuditExports.AREAS[auditTicket.kind] : auditPendingArea;
+    if (area && !PosAccess.canUse(area)) {
+      if (auditNativeSave && typeof window.Android?.cancelFileExport === "function") window.Android.cancelFileExport(auditNativeSave);
+      auditNativeSave = null;
+      clearAuditDownload("This area was locked. Unlock it before exporting again.");
+    }
+  });
   function printAuditSummary() {
-    const sales = auditSales();
-    const total = sales.reduce((n, s) => n + Number(s.total || 0), 0);
-    const sheet = $("#receiptSheet");
-    if (sheet) {
-      sheet.innerHTML = `<div style="font-family:Arial,sans-serif;color:#111;padding:8px">
-        <h2 style="margin:0 0 6px">Adonai Store — Posted Sales</h2>
-        <p style="margin:0 0 12px">${sales.length} posted sale${sales.length === 1 ? "" : "s"} · ${ugx(total)} total value</p>
-        <table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>
-          <th style="text-align:left;border-bottom:1px solid #999;padding:4px 0">Receipt</th>
-          <th style="text-align:left;border-bottom:1px solid #999;padding:4px 0">Date</th>
-          <th style="text-align:right;border-bottom:1px solid #999;padding:4px 0">Total</th>
-        </tr></thead><tbody>${sales.map(s => `<tr>
-          <td style="padding:5px 0;border-bottom:1px solid #ddd">${esc(s.order_number || s.id || "Posted sale")}</td>
-          <td style="padding:5px 0;border-bottom:1px solid #ddd">${esc(new Date(s.created_at || s.createdAt || Date.now()).toLocaleString())}</td>
-          <td style="padding:5px 0;border-bottom:1px solid #ddd;text-align:right">${ugx(s.total || 0)}</td>
-        </tr>`).join("")}</tbody></table>
-      </div>`;
-    }
-    window.print();
+    performAuditPrint(() => {
+      const selection = auditPrintSelection();
+      return ReceiptPrinter.printSummary(auditSales(), selection, DB.getSettings());
+    });
   }
-  $$("[data-export-audit]").forEach(button => button.addEventListener("click", () => exportAuditCSV(button.dataset.exportAudit)));
   $("#btnPrintAudit")?.addEventListener("click", printAuditSummary);
   function renderGuests() {
     let list = DB.listGuests();
@@ -1973,6 +2212,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
      DELIVERY PARTNERS & DISPATCH
      ============================================================ */
   function renderRiders() {
+    if (window.DispatchCenter) { DispatchCenter.activate(); return; }
     const all = allSales();
     $("#riderList").innerHTML = DB.listRiders().map(r => {
       const active = all.filter(s => assignedRiderId(s) === String(r.id) && fulfillmentStage(s) === "Dispatched").length;
@@ -1997,17 +2237,21 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     }).join("");
   }
   function riderModal(id) {
-    const r = DB.listRiders().find(x => x.id === id);
+    const r = id ? DB.listRiders().find(x => x.id === id) : {id:"",name:"",phone:"",vehicle:"Motorbike (Boda)",zone:"",plate:""};
     if (!r) return;
     openModal(`
       <button class="modal-x" data-close>×</button>
-      <h3>Rider details</h3>
+      <h3>${id ? "Delivery partner details" : "Add delivery partner"}</h3>
       <div class="field"><label>Name</label><input class="sel-full" id="mrName" value="${esc(r.name)}" /></div>
-      <div class="field"><label>Phone</label><input class="sel-full" id="mrPhone" value="${esc(r.phone)}" /></div>
+      <div class="field"><label>Phone</label><input class="sel-full" id="mrPhone" type="tel" maxlength="50" value="${esc(r.phone)}" /></div>
       <div class="field"><label>Vehicle</label><input class="sel-full" id="mrVehicle" value="${esc(r.vehicle)}" /></div>
-      <div class="field"><label>Zone</label><input class="sel-full" id="mrZone" value="${esc(r.zone)}" /></div>
+      <div class="field"><label>Vehicle registration / plate</label><input class="sel-full" id="mrPlate" maxlength="50" value="${esc(r.plate || "")}" /></div>
+      <div class="field"><label>Service zone</label><input class="sel-full" id="mrZone" maxlength="100" value="${esc(r.zone)}" /></div>
+      <p class="muted small">Saved on the server for all staff devices. GPS is off until this partner explicitly shares from a paired Android phone.</p>
       <button class="btn primary" data-save-rider="${esc(r.id)}">Save rider</button>`);
   }
+
+  window.addEventListener("adonai-add-rider", () => { if (currentView === "dispatch" && viewReady) riderModal(null); });
 
   /* ============================================================
      FINANCIAL LEDGERS — server-backed, double-entry hub
@@ -2035,6 +2279,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const financeError = error => {
     const status = Number(error && error.status);
     const message = (error && error.message) || "Financial data could not be loaded";
+    if (pinFree && (status === 401 || status === 403)) {
+      return `<div class="finance-error"><div><strong>Reconnect the terminal</strong><p class="small">The automatic terminal session could not connect. Try again to reconnect — no PIN or master key is required in PIN-free mode.</p><div class="finance-error-actions"><button type="button" class="btn primary sm" data-finance-retry>Try again</button></div></div></div>`;
+    }
     const action = status === 403
       // never a dead end: the passkey input is right here
       ? `<div class="fin-inline-unlock">
@@ -2268,22 +2515,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (abs >= 1000) return "UGX " + Math.round(n / 1000) + "k";
     return ugx(n);
   };
-  const csvCell = value => {
-    const s = String(value == null ? "" : value);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-  };
+  const csvCell = value => FileDownloads.csvCell(value);
   const toCsv = rows => rows.map(row => row.map(csvCell).join(",")).join("\r\n");
-  function downloadFile(name, content, mime = "text/csv;charset=utf-8") {
+  async function downloadFile(name, content, mime = "text/csv;charset=utf-8") {
     try {
-      const blob = new Blob(["﻿" + content], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = name;
-      document.body.appendChild(anchor);
-      anchor.click();
-      setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 500);
-    } catch (e) { toast("Download failed in this browser", false); }
+      const result = await FileDownloads.save(new Blob(["\ufeff" + content], {type:mime}), name, mime);
+      toast(result.mode === "native" ? "Choose a folder in Save As, then tap Save" : "File ready — check your browser's Downloads");
+      return result;
+    } catch (error) { toast(error.message || "Download failed. Please try again.", false); return null; }
   }
   const pctLabel = value => (value === null || value === undefined) ? "—" : `${value > 0 ? "+" : ""}${value}%`;
 
@@ -2515,7 +2754,6 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       ...(d.recommendations || []).map(r => [r.title, r.detail]),
     ];
     downloadFile(`adonai-strategy-report-${d.days}d-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows));
-    toast("Strategy report downloaded — share with the team or open in Excel/Sheets");
   }
 
   function exportCrmList() {
@@ -2523,7 +2761,6 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!top.length) { toast("No customers captured yet — record name & phone at checkout", false); return; }
     const rows = [["Customer", "Phone", "Orders", "Spend (UGX)"], ...top.map(r => [r.name, r.phone, r.orders, r.spend])];
     downloadFile(`adonai-customers-${new Date().toISOString().slice(0, 10)}.csv`, toCsv(rows));
-    toast("Customer list downloaded for your marketing campaign");
   }
 
   function openBroadcastModal() {
@@ -3107,8 +3344,11 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
   function renderStaff() {
     const locked = Auth.locked();
-    $("#lockToggle").checked = locked;
-    $("#lockState").textContent = locked ? "Access lock ON — terminals require a staff key" : "Open access mode — stores & terminals are unlocked";
+    $("#lockState").textContent = locked ? "Staff sign-in required by the server" : "PIN-free access — register and admin tools are open";
+    const hint = $("#lockHint");
+    if (hint) hint.textContent = locked
+      ? "Credential protection is enabled for this deployment."
+      : "No PIN, master key or environment-variable credentials are needed to use this terminal.";
 
     const profiles = buildTeamProfiles();
     const activeAdmins = profiles.filter(x => x.role === "admin" && x.active).length;
@@ -3260,7 +3500,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   /* ============================================================
      STORE SETTINGS
      ============================================================ */
+  let settingsDirty = false;
+  const settingsView = $("#view-settings");
+  ["input", "change"].forEach(event => settingsView.addEventListener(event, e => { if (e.target.closest("#storeProfileSettings")) settingsDirty = true; }));
+
   function renderSettings() {
+    // Background sync must not erase an owner's unfinished settings edits.
+    if (settingsDirty) { paintUnlockChip(); return; }
     const s = DB.getSettings();
     $("#setName").value = s.store_name || "";
     $("#setWaRaw").value = s.whatsapp || "";
@@ -3272,14 +3518,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#setAddress").value = s.address || "";
     $("#setScope").value = s.delivery_scope || "";
     $("#setHours").value = s.hours || "";
-    $("#setFee").value = s.base_delivery_fee || 7000;
+    $("#setFee").value = s.base_delivery_fee ?? 7000;
     $("#setKey").value = "";
     $("#setKey").placeholder = "Leave blank to keep current key";
     paintUnlockChip();
   }
   async function saveSettings() {
     Keys.requireRemote(async adminCredential => {
-      const newKey = $("#setKey").value.trim();
+      const newKey = pinFree ? "" : $("#setKey").value.trim();
       if (newKey && newKey.length < 6) {
         toast("Master key must be at least 6 characters", false);
         return;
@@ -3318,6 +3564,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
           ? "Configuration published — storefront updated and master key rotated"
           : "Configuration published — live everywhere within seconds") + rolledOut);
         if ($("#setFeeApplyAll")) $("#setFeeApplyAll").checked = false;
+        settingsDirty = false;
         renderSettings();
       } catch (err) {
         toast(err.message || "Could not publish configuration", false);
@@ -3419,8 +3666,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     }
     const btnSaveProd = t.closest("[data-save-prod]");
     if (btnSaveProd) {
-      const savedImages = (modalBox._images || []).filter(Boolean);
-      if (savedImages.length < 4) return toast("Upload all 4 product views before saving", false);
+      if (modalBox._mediaSaving) return;
+      let garmentMedia;
+      try { garmentMedia = modalBox._mediaEditor.snapshot(); } catch (error) { return toast(error.message, false); }
       const vals = {
         name: $("#mpName").value.trim(),
         item_condition: $("#mpItemCondition").value,
@@ -3433,7 +3681,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         total_transport_cost: Number($("#mpTransport").value) || 0,
         selling_price: Number($("#mpSell").value) || 0,
         compare_price: Number($("#mpCompare").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,
-        image_url: modalBox._imageState ? modalBox._imageState.image_url : "",
+        ...garmentMedia,
         // Product detail page specifications
         fabric: $("#mpFabric").value.trim(),
         care_notes: $("#mpCare").value.trim(),
@@ -3442,24 +3690,23 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         flaw_photo_index: Number($("#mpFlawPhoto").value)
       };
       if (!vals.name) return toast("Name required", false);
+      modalBox._mediaSaving = true;
+      const editor = modalBox._mediaEditor;
+      editor.setLocked(true); setButtonBusy(btnSaveProd, true, "Saving…");
       try {
         if (btnSaveProd.dataset.saveProd) { await DB.updateProduct(btnSaveProd.dataset.saveProd, vals); toast("Item updated — live everywhere"); }
         else { const p = await DB.addProduct(vals); toast(`Added ${p.name} · ${p.sku}`); }
+        editor.markSaved(); modalBox._mediaSaving = false;
         closeModal();
       } catch (err) { toast(err.message, false); }
+      finally { modalBox._mediaSaving = false; editor.setLocked(false); setButtonBusy(btnSaveProd, false); }
       return;
     }
-
-    /* intake photo slots */
-    const pg = t.closest("[data-phgal]"); if (pg) return pickPhoto(Number(pg.dataset.phgal));
-    const pr = t.closest("[data-phrem]"); if (pr) { intakePhotos[Number(pr.dataset.phrem)] = ""; buildPhotoRow(); return; }
 
     /* posted audit log */
     const printSale = t.closest("[data-print-sale]");
     if (printSale) {
-      const sale = DB.listSales().find(s => String(s.id) === String(printSale.dataset.printSale));
-      if (sale) printReceiptModal(sale.id);
-      else toast("Sale record not found", false);
+      printAuditReceipt(printSale.dataset.printSale);
       return;
     }
     /* guests (legacy handlers retained for existing records) */
@@ -3485,9 +3732,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const sr = t.closest("[data-save-rider]");
     if (sr) {
       try {
-        await DB.updateRider(sr.dataset.saveRider, { name: $("#mrName").value, phone: $("#mrPhone").value, vehicle: $("#mrVehicle").value, zone: $("#mrZone").value });
-        closeModal(); toast("Rider route updated");
-      } catch (err) { toast(err.message, false); }
+        if (sr.disabled) return;
+        sr.disabled = true;
+        const values = {name:$("#mrName").value.trim(),phone:$("#mrPhone").value.trim(),vehicle:$("#mrVehicle").value.trim(),zone:$("#mrZone").value.trim(),plate:$("#mrPlate").value.trim()};
+        if (!values.name || !values.phone) throw new Error("Enter the delivery partner's name and phone number.");
+        if (sr.dataset.saveRider) await DB.updateRider(sr.dataset.saveRider,values); else await DB.addRider(values);
+        closeModal(); toast("Delivery partner saved to the server");
+        if (window.DispatchCenter) DispatchCenter.refresh();
+      } catch (err) { sr.disabled = false; toast(err.message, false); }
       return;
     }
 
@@ -3580,15 +3832,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#" + id).addEventListener("change", e => { teamFilters[key] = e.target.value; renderStaff(); });
   });
 
-  $("#lockToggle").addEventListener("change", e => {
-    Keys.require(() => DB.updateSettings({ access_locked: e.target.checked }).then(() => {
-      toast(e.target.checked ? "Access lock ON — POS & console now require staff keys" : "Open access mode enabled");
-      if (e.target.checked && !DB.listStaff().some(s => s.pin)) toast("No staff keys are set yet — unlock stays symbolic until you add one", true);
-    }));
-  });
-
   /* ---------- render dispatcher + realtime ---------- */
   function render() {
+    if (!viewReady) return;
     if (currentView === "overview") renderOverview();
     if (currentView === "sales") renderSales();
     if (currentView === "inventory") renderInventory();

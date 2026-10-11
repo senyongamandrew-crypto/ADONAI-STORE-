@@ -2,6 +2,23 @@
 
 **Date:** 2026-10-02 · **Scope:** full application (Python WSGI backend, web storefront/POS/admin frontend, Android/Capacitor shell, CI, repository history)
 
+> **Access-mode update — 2026-10-10:** checkout remains password-free. Admins
+> can now create optional, area-scoped passwords from Store Settings without
+> environment variables. PBKDF2 hashes and revocable, hashed opaque sessions
+> are persisted in the database; only assigned areas are unlocked. Protected
+> APIs, sync payloads and notification feeds enforce the same rules, and private
+> data is not persisted in the shared browser cache. Unprotected areas remain
+> open. The older audit below describes legacy global credential mode; the
+> current area-password workflow is documented in README section 4c.
+
+> **Notification update — 2026-10-11:** alerts persist in SQL and commit with
+> business actions. Locked-area alerts are generic summaries, not suppressed
+> checkout signals; all protected free text/payloads are replaced server-side.
+> The browser keeps full notification text in memory only and clears it on
+> access changes, including pending privileged responses and toasts. Stream
+> tickets and their area-session context contain hashes, never JWTs/passwords
+> or reusable plaintext area tokens, and consumption is atomic across workers.
+
 Legend: 🔴 Critical · 🟠 High · 🟡 Medium · 🔵 Low/Info · ✅ Fixed in this pass
 
 ---

@@ -601,3 +601,25 @@ body.pdp-lightbox-open { overflow: hidden; }
   .sk-media, .sk-line { animation: none; }
   .plb-stage img { transition: none; }
 }
+
+/* A video is a gallery view, not a zoomable photo. Controls keep their space. */
+.pdp-slide-video { position:relative; background:#16271e; cursor:default; }
+.pdp-slide-video video { display:block; width:100%; height:100%; object-fit:contain; background:#16271e; }
+.pdp-video-thumb-cover { display:block; height:72px; position:relative; background:#213d2d; }
+.pdp-video-play { position:absolute; inset:0; display:grid; place-items:center; color:white; background:rgba(15,35,23,.25); font-size:22px; text-shadow:0 2px 8px #0008; }
+.pdp-stage-wrap.is-video .pdp-counter { top:12px; right:12px; left:auto; bottom:auto; }
+.pdp-stage-wrap.is-video .pdp-stage-nav { background:rgba(255,255,255,.75); opacity:.8; }
+.pdp-zoom-btn[hidden],.pdp-video-error[hidden] { display:none!important; }
+.pdp-video-error { position:absolute; inset:35% 12% auto; padding:15px; color:#e5f0e8; background:#192d23e8; border-radius:10px; font-size:12px; line-height:1.6; text-align:center; }
+.pdp-video-error button { display:block; margin:10px auto 0; padding:7px 13px; background:#ecf2ea; border:0; border-radius:6px; color:#294b36; font-weight:600; cursor:pointer; }
+
+.pdp-video-play svg { width:30px; height:30px; filter:drop-shadow(0 2px 6px #0008); }
+.pdp-back-link { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.pdp-back-link svg { width:15px; height:15px; flex:none; }
+.pdp-back-short { display:none; }
+@media(max-width:640px) {
+  .pdp-back-link { padding:8px 11px; font-size:11px; }
+  .pdp-back-long { display:none; }
+  .pdp-back-short { display:inline; }
+  .pdp-body .head-actions { gap:7px; }
+}

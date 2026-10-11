@@ -25,6 +25,9 @@
      history and analytics queues — so no leftover items or cart state can
      reappear on load. It then seeds a clean Day-1 database below. */
   function purgeLegacyCaches() {
+    // This migration is one-time. Re-running it on every navigation wipes
+    // valid area unlock sessions and makes saved passwords appear broken.
+    try { if (storage.getItem(PURGE_FLAG)) return []; } catch (e) {}
     const hits = [];
     const wipe = store => {
       if (!store) return;
@@ -106,9 +109,9 @@
     // of silently disappearing into the completed lane.
     return s && s.channel === "web" ? "incoming" : "completed";
   };
-  // SECURITY: there is no default/sandbox master key. Admin access requires a
-  // key explicitly configured by the owner (environment variable on the server
-  // or System Parameters). The old published default has been retired.
+  // There is no embedded/default master key. PIN-free access uses a signed
+  // session issued by the server; opt-in credential protection uses only keys
+  // explicitly configured by the owner. The old published key is retired.
   const DEFAULT_MASTER_KEY = "";
   // Live Render deployment — the public storefront and the API are served by the
   // same service. Fallback base used when the POS/admin runs inside the Android
@@ -150,7 +153,7 @@
         delivery_scope: "Adonai-managed delivery across Uganda (Central, Eastern, Western, and regional routes)",
         base_delivery_fee: 7000,
         currency: "UGX",
-        access_locked: false,               // OPEN ACCESS MODE until admin sets a key crew & flips the lock
+        access_locked: false,               // legacy cache only; the server now owns the access mode
         admin_key: ""                       // set a strong master key in System Parameters after onboarding
       },
       products: [],                         // catalog empty — ready for fresh batch/lot intake
@@ -207,7 +210,22 @@
     }
   }
   function save() {
-    try { storage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { /* quota — ignore */ }
+    try {
+      let snapshot = state;
+      const policy = typeof PosAccess !== "undefined" && PosAccess.getPolicy ? PosAccess.getPolicy() : null;
+      if (policy && policy.protected_areas.length) {
+        // This store is shared across tabs. Never write unlocked private history
+        // into it, where another cashier tab could read it without a password.
+        snapshot = JSON.parse(JSON.stringify(state));
+        if (policy.protected_areas.includes("finance") || policy.protected_areas.includes("orders")) {
+          snapshot.sales = []; snapshot.ledger = []; snapshot.guests = []; snapshot.riders = [];
+        }
+        if (policy.protected_areas.includes("stock")) snapshot.products.forEach(product => {
+          ["cost_price", "staff_notes", "stock_lot_id", "lot_grade_id"].forEach(key => { delete product[key]; });
+        });
+      }
+      storage.setItem(LS_KEY, JSON.stringify(snapshot));
+    } catch (e) { /* quota — ignore */ }
   }
   function valid(s) {
     return s && Array.isArray(s.products) && Array.isArray(s.sales) && Array.isArray(s.staff)
@@ -236,7 +254,7 @@
   /* BroadcastChannel + storage event — every tab re-renders when any tab writes. */
   let bc = null;
   function broadcast(table) {
-    subs.filter(s => s.table === table || s.table === "*").forEach(s => { try { s.cb(table); } catch (e) {} });
+    subs.filter(s => table === "*" || s.table === table || s.table === "*").forEach(s => { try { s.cb(table); } catch (e) {} });
     if (bc) { try { bc.postMessage({ table }); } catch (e) {} }
   }
 
@@ -284,6 +302,16 @@
   }
 
   let productSyncInFlight = null;
+  function normalizeProductMedia(product) {
+    if (!product) return product;
+    const mediaUrl = value => /^\/api\/media\/[a-f0-9]{32}$/.test(String(value || "")) ? apiUrl(value) : value;
+    return Object.assign({}, product, {
+      image_url: mediaUrl(product.image_url),
+      images: Array.isArray(product.images) ? product.images.map(mediaUrl) : [],
+      video: product.video ? Object.assign({}, product.video, { url: mediaUrl(product.video.url) }) : null
+    });
+  }
+
   function pullProducts(publicAvailability, reservationOwner) {
     if (productSyncInFlight || typeof fetch === "undefined") return productSyncInFlight || Promise.resolve(false);
     const isPublic = publicAvailability === true || (typeof window !== "undefined" && window.__ADONAI_STOREFRONT__ === true);
@@ -297,9 +325,10 @@
         if (!response.ok || !data || !Array.isArray(data.products)) return false;
         reload();
         const before = JSON.stringify(state.products || []);
-        const after = JSON.stringify(data.products);
+        const normalized = data.products.map(normalizeProductMedia);
+        const after = JSON.stringify(normalized);
         if (before === after) return false;
-        state.products = data.products;
+        state.products = normalized;
         save();
         broadcast("products");
         return true;
@@ -315,12 +344,12 @@
   let operationalSyncStatusCode = 0;
   function pullOperationalData() {
     if (operationalSyncInFlight || typeof fetch === "undefined") return operationalSyncInFlight || Promise.resolve(false);
-    const authH = (typeof Auth !== "undefined" && Auth.authHeaders) ? Auth.authHeaders() : {};
-    operationalSyncInFlight = fetch(apiUrl("/api/sync/pull"), {
+    const ready = typeof Auth !== "undefined" && Auth.ready ? Auth.ready() : Promise.resolve();
+    operationalSyncInFlight = ready.then(() => fetch(apiUrl("/api/sync/pull"), {
       method: "POST",
-      headers: Object.assign({ "Content-Type": "application/json" }, authH),
+      headers: apiHeaders(),
       cache: "no-store"
-    }).then(async response => {
+    })).then(async response => {
       let data = null;
       try { data = await response.json(); } catch (e) {}
       if (!response.ok || !data || !Array.isArray(data.products)) {
@@ -330,7 +359,7 @@
         return false;
       }
       reload();
-      state.products = data.products;
+      state.products = data.products.map(normalizeProductMedia);
       if (Array.isArray(data.sales)) state.sales = data.sales.map(normalizeSaleRecord);
       if (Array.isArray(data.ledger)) state.ledger = data.ledger.map(line => Object.assign({
         label: line.desc || `${line.kind} ${line.ref_id || ""}`,
@@ -359,7 +388,7 @@
       bc = new BroadcastChannel(CHANNEL);
       bc.onmessage = ev => {
         state = null; reload(); /* re-read shared cache */
-        subs.filter(s => s.table === ev.data.table || s.table === "*").forEach(s => { try { s.cb(ev.data.table); } catch (e) {} });
+        subs.filter(s => ev.data.table === "*" || s.table === ev.data.table || s.table === "*").forEach(s => { try { s.cb(ev.data.table); } catch (e) {} });
       };
     }
     if (typeof window !== "undefined") {
@@ -407,6 +436,9 @@
   try { purgeLegacyCaches(); } catch (e) {}
 
   initRealtime();
+  if (typeof window !== "undefined") window.addEventListener("pos-access-change", () => {
+    reload(); save(); pullOperationalData();
+  });
 
   /* Cross-tab atomic transaction. */
   function tx(table, fn) {
@@ -431,20 +463,25 @@
 
   /* Network guard: every API request aborts after 30s so workspaces never
      hang on a silent connection (the old UI stayed on "Loading…" forever).
-     The caller's own signal still wins when it is provided. */
+     Uploads opt into a longer deadline; caller cancellation still works. */
   const API_TIMEOUT_MS = 30000;
-  async function apiRequest(path, options = {}, withAuth = true) {
+  async function apiRequest(path, options = {}, withAuth = true, areaRetried = false) {
+    if (withAuth && typeof Auth !== "undefined" && Auth.ready && !Auth.openAccess()) await Auth.ready();
     const controller = (typeof AbortController === "function") ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => { try { controller.abort(); } catch (e) {} }, API_TIMEOUT_MS) : null;
+    let timedOut = false;
+    const externalAbort = () => { if (controller) controller.abort(); };
+    if (options.signal && controller) {
+      if (options.signal.aborted) externalAbort();
+      else options.signal.addEventListener("abort", externalAbort, { once: true });
+    }
+    const timer = controller ? setTimeout(() => { timedOut = true; controller.abort(); }, Math.min(240000, Math.max(API_TIMEOUT_MS, Number(options.timeoutMs) || API_TIMEOUT_MS))) : null;
     let response;
     try {
-      response = await fetch(apiUrl(path), Object.assign({
-        signal: options.signal || (controller && controller.signal) || undefined
-      }, options, {
-        headers: Object.assign(apiHeaders(withAuth), options.headers || {})
+      response = await fetch(apiUrl(path), Object.assign({}, options, {
+        signal: (controller && controller.signal) || options.signal || undefined,
+        headers: Object.assign(apiHeaders(withAuth), options.headers || {}, typeof PosAccess !== "undefined" && PosAccess.headers ? PosAccess.headers() : {})
       }));
     } catch (networkError) {
-      const timedOut = controller && controller.signal && controller.signal.aborted && !options.signal;
       const error = new Error(timedOut
         ? "The server took too long to answer. Check your connection and tap Try again."
         : "Could not reach the server. Check your connection and tap Try again.");
@@ -452,14 +489,25 @@
       throw error;
     } finally {
       if (timer) clearTimeout(timer);
+      if (options.signal && controller) options.signal.removeEventListener("abort", externalAbort);
     }
     let data = null;
     try { data = await response.json(); } catch (e) {}
     if (!response.ok) {
+      if (!areaRetried && data && data.code === "AREA_PASSWORD_REQUIRED" && typeof PosAccess !== "undefined") {
+        if (await PosAccess.ensure(data.area)) return apiRequest(path, options, withAuth, true);
+      }
       const error = new Error((data && (data.error || data.details)) || `Server request failed (${response.status})`);
       error.status = response.status;
       error.data = data;
       throw error;
+    }
+    // Wake the bell immediately after a committed store action. Other
+    // terminals still receive it through the independent history refresh.
+    const verb = String(options.method || "GET").toUpperCase();
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(verb) && /^\/api\/(orders|products|finance|settings|dispatch|riders)(?:\/|\?|$)/.test(path)
+        && typeof global.dispatchEvent === "function" && typeof global.CustomEvent === "function") {
+      global.dispatchEvent(new global.CustomEvent("adonai-store-activity", { detail: { path } }));
     }
     return data || {};
   }
@@ -639,6 +687,7 @@
     on(table, cb) { const s = { table, cb }; subs.push(s); return () => { const i = subs.indexOf(s); if (i >= 0) subs.splice(i, 1); }; },
     reloadNow() { state = null; reload(); },
     refreshOperationalData() { return pullOperationalData(); },
+    applyAccessPolicy() { reload(); save(); return pullOperationalData(); },
     operationalSyncStatus() {
       return {
         online: operationalSyncOnline,
@@ -656,35 +705,27 @@
       });
     },
     pullStoreSettings,
-    syncStoreSettings(patch, adminCredential, options) {
+    async syncStoreSettings(patch, adminCredential, options) {
+      const pinFree = typeof Auth !== "undefined" && Auth.openAccess && Auth.openAccess();
+      // Saving in PIN-free mode must work even if session bootstrap failed.
+      if (!pinFree && typeof Auth !== "undefined" && Auth.ready) await Auth.ready();
       const cleanPatch = Object.assign({}, patch || {});
       const opts = options || {};
-      const credential = String(adminCredential || "").trim();
+      const credential = pinFree ? "" : String(adminCredential || "").trim();
       const headers = { "Content-Type": "application/json" };
 
       if (credential) {
         if (credential.split(".").length === 3) headers.Authorization = "Bearer " + credential;
         else headers["X-Terminal-Key"] = credential;
-      } else if (typeof Auth !== "undefined" && Auth.authHeaders) {
+      } else if (!pinFree && typeof Auth !== "undefined" && Auth.authHeaders) {
         Object.assign(headers, Auth.authHeaders());
       }
 
       const body = { settings: cleanPatch };
       if (opts.applyBaseFeeToCatalog) body.apply_base_fee_to_catalog = true;
 
-      return fetch(apiUrl("/api/settings"), {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body)
-      }).then(async response => {
-        let data = null;
-        try { data = await response.json(); } catch (e) {}
-        if (!response.ok || !data || !data.ok) {
-          const message = data && data.error
-            ? data.error
-            : "Could not publish settings to the live storefront";
-          throw new Error(message);
-        }
+      return apiRequest("/api/settings", { method: "POST", headers, body: JSON.stringify(body) }, false).then(data => {
+        if (!data.ok) throw new Error(data.error || "Could not publish settings to the live storefront");
 
         const productsUpdated = Number(data.products_updated) || 0;
         // A catalog-wide transport rollout changed product prices server-side;
@@ -794,7 +835,7 @@
         method: "POST",
         body: JSON.stringify(payload)
       }, true);
-      const product = data.product;
+      const product = normalizeProductMedia(data.product);
       if (!product) throw new Error("The server did not return the registered product");
       return tx("products", st => {
         const existing = byId(st.products, product.id);
@@ -808,7 +849,7 @@
         method: "PUT",
         body: JSON.stringify(patch || {})
       }, true);
-      const product = data.product;
+      const product = normalizeProductMedia(data.product);
       return tx("products", st => {
         const local = byId(st.products, id);
         if (local && product) Object.assign(local, product);
@@ -1058,12 +1099,15 @@
     cancelWebOrder(id) {
       return this.updateOrderFulfillment(id, "Cancelled");
     },
-    assignRiderToOrder(orderId, riderId) {
-      const rider = this.listRiders().find(r => r.id === riderId);
-      return this.updateOrderFulfillment(orderId, "Dispatched", {
-        rider_id: rider ? rider.id : riderId,
-        rider_name: rider ? rider.name : ""
+    async assignRiderToOrder(orderId, riderId) {
+      const data = await apiRequest("/api/dispatch/orders/" + encodeURIComponent(orderId) + "/assign", {method:"POST", body:JSON.stringify({rider_id:riderId})}, true);
+      if (!data.order) throw new Error("The server did not return the dispatched order");
+      const order = normalizeSaleRecord(data.order);
+      await tx("sales", st => {
+        const local = byId(st.sales, orderId);
+        if (local) Object.assign(local, order); else st.sales.push(order);
       });
+      await pullOperationalData(); return order;
     },
     listSales() { reload(); return state.sales.map(s => JSON.parse(JSON.stringify(s))).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     getSale(id) { reload(); const s = byId(state.sales, id); return s ? JSON.parse(JSON.stringify(s)) : null; },
@@ -1102,28 +1146,62 @@
 
     /* ----- boda riders ----- */
     listRiders() { reload(); return state.riders.map(r => Object.assign({}, r)); },
-    updateRider(id, patch) {
-      return tx("riders", st => {
-        const r = byId(st.riders, id); if (!r) throw new Error("Rider not found");
-        ["name", "phone", "vehicle", "zone"].forEach(k => { if (patch[k] !== undefined) r[k] = shakeOn(patch[k]); });
-        if (patch.status && RIDER_STATUSES.includes(patch.status)) r.status = patch.status;
-        return Object.assign({}, r);
-      });
+    async updateRider(id, patch) {
+      const data = await apiRequest("/api/riders/" + encodeURIComponent(id), {method:"PATCH", body:JSON.stringify(patch)}, true);
+      if (!data.rider) throw new Error("The server did not save rider details");
+      return tx("riders", st => {const old=byId(st.riders,id);if(old) Object.assign(old,data.rider);else st.riders.push(data.rider);return data.rider;});
     },
-    addRider(r) {
-      return tx("riders", st => {
-        if (!shakeOn(r.name)) throw new Error("Rider name is required");
-        const rec = {
-          id: "RDR-" + (++st.counters.rider),
-          name: shakeOn(r.name), phone: shakeOn(r.phone),
-          vehicle: shakeOn(r.vehicle) || "Motorbike (Boda)", zone: shakeOn(r.zone),
-          status: "Available"
-        };
-        st.riders.push(rec);
-        return Object.assign({}, rec);
-      });
+    async addRider(rider) {
+      const data = await apiRequest("/api/riders", {method:"POST", body:JSON.stringify(rider)}, true);
+      if (!data.rider) throw new Error("The server did not save the rider");
+      return tx("riders", st => {st.riders.push(data.rider);return data.rider;});
     },
-    removeRider(id) { return tx("riders", st => { st.riders = st.riders.filter(r => r.id !== id); return true; }); },
+    async removeRider(id) {
+      await apiRequest("/api/riders/"+encodeURIComponent(id), {method:"DELETE"}, true);
+      return tx("riders", st => {st.riders=st.riders.filter(r=>r.id!==id);return true;});
+    },
+    getDispatchBoard(signal) {return apiRequest("/api/dispatch/board", {signal}, true);},
+    pairRiderPhone(id) {return apiRequest("/api/dispatch/riders/"+encodeURIComponent(id)+"/pair", {method:"POST",body:"{}"}, true);},
+    revokeRiderPhone(id) {return apiRequest("/api/dispatch/riders/"+encodeURIComponent(id)+"/revoke", {method:"POST",body:"{}"}, true);},
+
+    /* ----- authoritative, scoped report downloads ----- */
+    async prepareExport(options, signal) {
+      const data = await apiRequest("/api/exports/prepare", {
+        method: "POST", body: JSON.stringify(options || {}), signal, timeoutMs: 120000
+      }, true);
+      if (!data.download || !data.download.url) throw new Error("The report could not be prepared. Try again.");
+      return Object.assign({}, data.download, { url: apiUrl(data.download.url) });
+    },
+
+    /* ----- durable garment media (bytes never enter browser DB) ----- */
+    async uploadMedia(file, kind, signal) {
+      if (!["image", "video"].includes(kind)) throw new Error("Choose a photo or video");
+      const data = await apiRequest("/api/media/" + (kind === "video" ? "videos" : "images"), {
+        method: "POST", body: file, signal, timeoutMs: kind === "video" ? 210000 : 60000,
+        headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name || "garment") }
+      }, true);
+      if (!data.media || !data.media.id) throw new Error("The upload did not complete. Please try again.");
+      return Object.assign({}, data.media, { url: apiUrl(data.media.url) });
+    },
+    async mediaPreview(id, signal) {
+      if (!/^[a-f0-9]{32}$/.test(String(id || ""))) throw new Error("Invalid media reference");
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signal) { if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true }); }
+      const timer = setTimeout(abort, 60000);
+      try {
+        const response = await fetch(apiUrl("/api/media/" + id), {
+          method: "GET", signal: controller.signal,
+          headers: Object.assign(apiHeaders(true), typeof PosAccess !== "undefined" && PosAccess.headers ? PosAccess.headers() : {})
+        });
+        if (!response.ok) throw new Error("Preview could not load. The uploaded video will be available after saving.");
+        return await response.blob();
+      } finally { clearTimeout(timer); if (signal) signal.removeEventListener("abort", abort); }
+    },
+    discardMedia(id) {
+      if (!/^[a-f0-9]{32}$/.test(String(id || ""))) return Promise.resolve(false);
+      return apiRequest("/api/media/" + id, { method: "DELETE" }, true, true);
+    },
 
     /* ----- live backend financials & POS holds ----- */
     pullProducts,

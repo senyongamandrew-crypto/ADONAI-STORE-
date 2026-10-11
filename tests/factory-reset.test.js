@@ -46,6 +46,15 @@ assert(st.version === 4, "offline DB version bumped to 4 (v7 store)");
 assert(Array.isArray(catalog) && catalog.length === 0, "AdonaiDB API serves the clean catalog");
 assert(keysAfter.every(k => /^adonai/i.test(k)), "no non-adonai keys touched");
 
+// A second page load is not another factory reset. In particular, optional
+// area unlocks and normal staff sessions must survive POS/admin navigation.
+ss.setItem("adonai-area-sessions-v1", JSON.stringify([{ token: "fixture-scope-token", expires_at: "2099-01-01T00:00:00Z" }]));
+ls.setItem("adonai-session-v2", JSON.stringify({ id: "CURRENT-STAFF", name: "Current Staff" }));
+window.eval(fs.readFileSync("js/db.js", "utf8"));
+assert(ss.getItem("adonai-area-sessions-v1") !== null, "page navigation preserves area unlock sessions");
+assert(ls.getItem("adonai-session-v2") !== null, "page navigation preserves the current staff session");
+assert(ls.getItem("adonai-db-v7") !== null, "factory database is not wiped on subsequent loads");
+
 console.log("\nOffline factory purge verification:", process.exitCode ? "FAILURES FOUND" : "ALL CHECKS PASSED");
 
 // jsdom keeps the event loop alive (realtime polling timers installed by the

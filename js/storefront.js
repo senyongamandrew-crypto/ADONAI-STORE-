@@ -347,7 +347,7 @@
         })
       : "";
     const dots = photos.length > 1
-      ? `<div class="media-dots" title="Open the full photo set">${photos.map((src, i) =>
+      ? `<div class="media-dots" title="Open the full photo set">${photos.slice(0, 4).map((src, i) =>
           `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.resolveSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
       : "";
     const grade = PK.gradeFor(p);
@@ -358,6 +358,8 @@
         <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE"}</span>
         ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
         ${dots}
+        ${p.video && p.video.url ? '<span class="media-video-badge"><svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10" aria-hidden="true"><path d="M8 5v14l12-7z"/></svg>Video</span>' : ""}
+        ${photos.length > 4 ? `<span class="media-extra-photos">+${photos.length - 4} photos</span>` : ""}
       </div>`;
   }
 

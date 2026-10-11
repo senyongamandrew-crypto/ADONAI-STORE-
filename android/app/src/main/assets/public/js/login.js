@@ -1,5 +1,5 @@
 /* ============ Adonai — Staff & POS Terminal Login Logic ============ */
-(function () {
+(async function () {
   "use strict";
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -20,6 +20,11 @@
   }
 
   const next = safeNext(params.get("next"));
+  if (Auth.ready) await Auth.ready();
+  if (!Auth.locked()) {
+    location.replace(next);
+    return;
+  }
 
   const sessionPane = $("#sessionPane");
   const openPane = $("#openPane");

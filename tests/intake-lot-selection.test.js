@@ -69,8 +69,6 @@ window.DB = {
 };
 window.Icons = { svg: () => "", icon: () => "" };
 window.Intake = { compressImage: async () => "", imageFieldHTML: () => "" };
-window.setIntakeCondition = () => {};
-window.intakeCondition = () => "BRAND_NEW";
 window.fetch = async () => ({ ok: false, json: async () => ({}) });
 window.HTMLCanvasElement.prototype.getContext = () => ({
   scale() {}, clearRect() {}, fillRect() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fillText() {}
@@ -80,10 +78,24 @@ const pause = () => new Promise(resolve => setTimeout(resolve, 0));
 
 async function main() {
   try {
+    window.eval(fs.readFileSync(path.join(ROOT, "js/garment-media.js"), "utf8"));
+    window.eval(fs.readFileSync(path.join(ROOT, "js/audit-exports.js"), "utf8"));
+    window.eval(fs.readFileSync(path.join(ROOT, "js/receipt-printing.js"), "utf8"));
     window.eval(fs.readFileSync(path.join(ROOT, "app.js"), "utf8"));
     await pause();
 
     const doc = window.document;
+    const preLoved = doc.querySelector('[data-intake-condition="PRE_LOVED"]');
+    const brandNew = doc.querySelector('[data-intake-condition="BRAND_NEW"]');
+    preLoved.click();
+    assert.strictEqual(doc.querySelector("#inItemCondition").value, "PRE_LOVED");
+    assert.strictEqual(doc.querySelector("#inQty").readOnly, true);
+    assert.strictEqual(doc.querySelector("#inQty").value, "1");
+    assert.strictEqual(doc.querySelector("#inSizeVariantsField").hidden, true);
+    brandNew.click();
+    assert.strictEqual(doc.querySelector("#inItemCondition").value, "BRAND_NEW");
+    assert.strictEqual(doc.querySelector("#inQty").readOnly, false);
+    assert.strictEqual(doc.querySelector("#inSizeVariantsField").hidden, false);
     const lot = doc.querySelector("#inStockLot");
     const grade = doc.querySelector("#inLotGrade");
     assert.strictEqual(stockLotRequests, 1, "intake should fetch registered lots once on first open");

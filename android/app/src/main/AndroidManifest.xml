@@ -4,6 +4,13 @@
     <!-- Permissions required for POS Hardware, Scanner, Network Sync, and Camera -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Rider-initiated, visible duty tracking only. No serial/IMEI permissions. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -15,7 +22,7 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
-        android:label="@string/app_name"
+        android:label="${adonaiAppLabel}"
         android:roundIcon="@drawable/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
@@ -26,7 +33,7 @@
             android:name=".MainActivity"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
             android:exported="true"
-            android:label="@string/title_activity_main"
+            android:label="${adonaiAppLabel}"
             android:launchMode="singleTask"
             android:theme="@style/AppTheme.NoActionBarLaunch">
 
@@ -36,6 +43,8 @@
             </intent-filter>
 
         </activity>
+
+        <service android:name=".RiderTrackingService" android:exported="false" android:foregroundServiceType="location" android:stopWithTask="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

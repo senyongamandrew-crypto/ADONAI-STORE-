@@ -1,0 +1,1 @@
+Leaflet 1.9.4, BSD-2-Clause, vendored from npm package leaflet@1.9.4 (https://github.com/Leaflet/Leaflet). Source maps and remote scripts are not used. Street tiles are optional https://tile.openstreetmap.org and require attribution; no bulk/prefetch/offline tile caching.

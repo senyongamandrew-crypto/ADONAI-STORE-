@@ -17,12 +17,14 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
+    Float,
     String,
     Text,
     CheckConstraint,
     UniqueConstraint,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 
 from database import Base
 
@@ -236,6 +238,7 @@ class Product(Base):
 
     # Relationships
     inventory_items = relationship("Inventory", back_populates="product", cascade="all, delete-orphan")
+    media_assets = relationship("ProductMedia", back_populates="product", cascade="all, delete-orphan", lazy="selectin")
 
     __table_args__ = (
         Index("idx_product_search", "demographic", "category", "in_stock_count"),
@@ -289,6 +292,7 @@ class Product(Base):
         return self.slug or build_product_slug(self.name, self.sku, self.id)
 
     def to_dict(self):
+        video = next((asset for asset in self.media_assets if asset.kind == "video"), None)
         return {
             "id": self.id,
             "sku": self.sku,
@@ -328,6 +332,7 @@ class Product(Base):
             "desc": self.desc or "",
             "image_url": self.image_url or "",
             "images": self.images,
+            "video": video.to_dict() if video else None,
             "fabric": self.fabric or "",
             "measurements": self.measurements,
             "flaw_notes": self.flaw_notes or "",
@@ -341,6 +346,47 @@ class Product(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
+
+
+class ExportDownload(Base):
+    """Short-lived authorized download capabilities, shared across workers."""
+    __tablename__ = "export_downloads"
+    token_hash = Column(String(64), primary_key=True)
+    filename = Column(String(180), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    kind = Column(String(30), nullable=False)
+    record_count = Column(Integer, nullable=False)
+    byte_length = Column(Integer, nullable=False)
+    data = deferred(Column(LargeBinary, nullable=False))
+    token_hashes_json = Column(Text, nullable=False, default="[]")
+    staff_id = Column(String(64), nullable=False)
+    requires_staff_auth = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+
+class ProductMedia(Base):
+    """Durable binary media; catalog queries load metadata, never the bytes."""
+    __tablename__ = "product_media"
+    id = Column(String(32), primary_key=True)
+    product_id = Column(String(50), ForeignKey("products.id", ondelete="CASCADE"), nullable=True, index=True)
+    kind = Column(String(10), nullable=False)
+    mime_type = Column(String(40), nullable=False)
+    filename = Column(String(160), nullable=False)
+    byte_length = Column(Integer, nullable=False)
+    width = Column(Integer, nullable=False)
+    height = Column(Integer, nullable=False)
+    duration = Column(Float, nullable=True)
+    data = deferred(Column(LargeBinary, nullable=False))
+    uploaded_by = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    product = relationship("Product", back_populates="media_assets")
+    __table_args__ = (CheckConstraint("kind IN ('image', 'video')", name="ck_product_media_kind"),)
+
+    def to_dict(self):
+        return {"id": self.id, "url": "/api/media/" + self.id, "type": self.mime_type,
+                "name": self.filename, "bytes": self.byte_length, "width": self.width,
+                "height": self.height, "duration": self.duration}
 
 
 class Inventory(Base):
@@ -545,6 +591,9 @@ class Rider(Base):
     phone = Column(String(50), nullable=False)
     status = Column(String(50), default="Available", index=True)  # Available, On delivery, Offline
     vehicle_plate = Column(String(50), nullable=True)
+    vehicle = Column(String(100), default="Motorbike (Boda)")
+    zone = Column(String(100), default="")
+    archived = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -554,8 +603,53 @@ class Rider(Base):
             "phone": self.phone,
             "status": self.status,
             "plate": self.vehicle_plate or "",
+            "vehicle": self.vehicle or "Motorbike (Boda)",
+            "zone": self.zone or "",
+            "archived": bool(self.archived),
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
+
+
+class RiderDevice(Base):
+    """One paired phone per rider. Secrets are hashed; only the latest GPS fix."""
+    __tablename__ = "rider_devices"
+    id = Column(String(64), primary_key=True)
+    rider_id = Column(String(50), ForeignKey("riders.id"), nullable=False, unique=True)
+    label = Column(String(100), nullable=False)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    revoked = Column(Boolean, nullable=False, default=False)
+    sharing = Column(Boolean, nullable=False, default=False)
+    duty_until = Column(DateTime, nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    accuracy = Column(Float, nullable=True)
+    fix_at = Column(DateTime, nullable=True)
+    received_at = Column(DateTime, nullable=True)
+    mock_location = Column(Boolean, nullable=False, default=False)
+    sequence = Column(Integer, nullable=False, default=0)
+    paired_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class RiderPairing(Base):
+    __tablename__ = "rider_pairings"
+    rider_id = Column(String(50), ForeignKey("riders.id"), primary_key=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime, nullable=False)
+    issued_by = Column(String(100), nullable=True)
+
+
+class DeliveryEvent(Base):
+    """Delivery accountability, without keeping a rider's route/location trail."""
+    __tablename__ = "delivery_events"
+    id = Column(String(64), primary_key=True)
+    order_id = Column(String(50), ForeignKey("orders.id"), nullable=False, index=True)
+    rider_id = Column(String(50), ForeignKey("riders.id"), nullable=False, index=True)
+    device_id = Column(String(64), nullable=True)
+    stage = Column(String(30), nullable=False)
+    note = Column(String(500), nullable=True)
+    received_by = Column(String(100), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class LedgerEntry(Base):
@@ -901,3 +995,69 @@ class StoreSetting(Base):
             "value": self.value,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
+
+
+class PosAccessKey(Base):
+    """Owner-configured passwords for selected POS workspaces (never plaintext)."""
+    __tablename__ = "pos_access_keys"
+
+    id = Column(String(64), primary_key=True)
+    name = Column(String(80), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    areas = Column(Text, nullable=False, default="[]")
+    is_admin = Column(Boolean, nullable=False, default=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def to_public(self):
+        return {
+            "id": self.id, "name": self.name, "areas": json.loads(self.areas),
+            "is_admin": self.is_admin, "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() + "Z" if self.updated_at else None,
+        }
+
+
+class PosAccessSession(Base):
+    """Database-backed, revocable sessions shared by all server workers."""
+    __tablename__ = "pos_access_sessions"
+
+    token_hash = Column(String(64), primary_key=True)
+    key_id = Column(String(64), ForeignKey("pos_access_keys.id", ondelete="CASCADE"), nullable=False, index=True)
+    key_version = Column(Integer, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class NotificationEvent(Base):
+    """Committed store activity shared by all workers and retained on restart."""
+    __tablename__ = "notification_events"
+
+    id = Column(String(64), primary_key=True)
+    event_type = Column(String(40), nullable=False)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    payload_json = Column(Text, nullable=False, default="{}")
+    source_key = Column(String(160), nullable=True, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (Index("idx_notification_history", "created_at", "id"),)
+
+    def to_dict(self):
+        from datetime import timezone
+        return {
+            "id": self.id, "type": self.event_type, "title": self.title,
+            "message": self.message, "payload": json.loads(self.payload_json),
+            "timestamp": self.created_at.replace(tzinfo=timezone.utc).timestamp(),
+        }
+
+
+class NotificationStreamTicket(Base):
+    """Hashed, atomic one-use SSE handshakes; not tied to a server worker."""
+    __tablename__ = "notification_stream_tickets"
+
+    ticket_hash = Column(String(64), primary_key=True)
+    staff_json = Column(Text, nullable=False)
+    expires_at = Column(DateTime, nullable=False, index=True)

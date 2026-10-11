@@ -921,3 +921,10 @@ body.cart-drawer-closed { touch-action: auto; }
 .quantity-stepper button { color:#F8FAFC !important; }
 .quantity-stepper .stepper-count { color:#FFF !important; }
 .remove-btn { color:#EF4444 !important; }
+
+/* Catalog cards advertise the gallery without downloading garment videos. */
+.media-video-badge,.media-extra-photos { position:absolute; z-index:3; right:10px; padding:5px 8px; border-radius:999px; background:rgba(20,43,29,.82); color:#fff; font:600 10px var(--font-text); pointer-events:none; }
+.media-video-badge { bottom:45px; }
+.media-extra-photos { bottom:73px; font-size:9px; background:rgba(255,255,255,.9); color:#395543; }
+
+.media-video-badge { display:inline-flex; align-items:center; gap:4px; }

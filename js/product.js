@@ -98,139 +98,118 @@
      Desktop: vertical thumbnail strip + sticky main stage
      Mobile:  edge-to-edge swipeable carousel with counter + dots
      ============================================================ */
-  const ANGLE_LABELS = ["Front", "Back", "Fabric", "Tag"];
-  function angleLabel(index) {
-    return ANGLE_LABELS[index] || `View ${index + 1}`;
-  }
+  function angleLabel(index) { return index === 0 ? "Cover" : `Photo ${index + 1}`; }
+  const garmentVideo = () => product && product.video && product.video.url ? product.video : null;
+  const galleryCount = () => photos.length + (garmentVideo() ? 1 : 0);
+  const videoTime = () => `0:${String(Math.round(Number((garmentVideo() || {}).duration) || 0)).padStart(2, "0")}`;
+  let galleryGoTo = null, lastMediaSignature = "";
 
   function renderMedia() {
-    const stock = K.stockState(product);
-    const flaw = K.flawDisclosure(product);
-    const discount = K.discountPercent(product);
-    const grade = K.gradeFor(product);
-
-    if (!photos.length) {
-      $("#pdpMedia").innerHTML = `
-        <div class="pdp-media-sticky">
-          <div class="pdp-stage empty"><span>Photo coming shortly — ask us on WhatsApp for live pictures.</span></div>
-        </div>`;
+    const oldVideo = $("#pdpGarmentVideo"); if (oldVideo) oldVideo.pause();
+    const stock = K.stockState(product), flaw = K.flawDisclosure(product);
+    const discount = K.discountPercent(product), grade = K.gradeFor(product);
+    const video = garmentVideo(), total = galleryCount();
+    if (!total) {
+      galleryGoTo = null;
+      $("#pdpMedia").innerHTML = `<div class="pdp-media-sticky"><div class="pdp-stage empty"><span>Photos coming shortly — ask us on WhatsApp for live pictures.</span></div></div>`;
       return;
     }
-
-    const thumbs = photos.map((src, i) => `
-      <button class="pdp-thumb ${i === activePhoto ? "active" : ""} ${flaw.photoIndex === i ? "is-flaw" : ""}"
-              data-thumb="${i}" type="button" aria-current="${i === activePhoto}"
-              aria-label="${flaw.photoIndex === i ? "View the close-up photo of the flaw" : `View ${esc(angleLabel(i))} photo`}">
+    let thumbs = photos.map((src, i) => `
+      <button class="pdp-thumb ${flaw.photoIndex === i ? "is-flaw" : ""}" data-thumb="${i}" type="button" aria-label="${flaw.photoIndex === i ? "View the close-up photo of the flaw" : `View ${esc(angleLabel(i))}`}" aria-current="${i === activePhoto}">
         ${K.pictureHTML(src, { alt: `${product.name} — ${angleLabel(i)}`, sizes: "72px", width: 72, height: 90 })}
         <span class="pdp-thumb-tag">${flaw.photoIndex === i ? "⚠️ Flaw" : esc(angleLabel(i))}</span>
       </button>`).join("");
-
-    const slides = photos.map((src, i) => `
-      <figure class="pdp-slide" data-slide="${i}">
-        ${K.pictureHTML(src, {
-          alt: `${product.name} — ${angleLabel(i)} view`,
-          sizes: "(min-width: 1024px) 45vw, 100vw",
-          eager: i === 0,
-          className: "pdp-slide-img"
-        })}
-      </figure>`).join("");
-
+    let slides = photos.map((src, i) => `<figure class="pdp-slide" data-slide="${i}">${K.pictureHTML(src, { alt: `${product.name} — ${angleLabel(i)}`, sizes: "(min-width: 1024px) 45vw, 100vw", eager: i === 0, className: "pdp-slide-img" })}</figure>`).join("");
+    if (video) {
+      thumbs += `<button class="pdp-thumb pdp-video-thumb" data-thumb="${photos.length}" data-video-thumb type="button" aria-label="Watch garment video, ${videoTime()}" aria-current="${activePhoto === photos.length}"><span class="pdp-video-thumb-cover">${photos[0] ? K.pictureHTML(photos[0], { alt: "", sizes: "72px", width: 72, height: 90 }) : ""}<span class="pdp-video-play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l12-7z"/></svg></span></span><span class="pdp-thumb-tag">Video</span></button>`;
+      // Deliberately no src until the shopper selects the video. No autoplay.
+      slides += `<figure class="pdp-slide pdp-slide-video" data-slide="${photos.length}"><video id="pdpGarmentVideo" data-video-src="${esc(K.resolveSrc(video.url))}" ${photos[0] ? `poster="${esc(K.resolveSrc(photos[0]))}"` : ""} controls playsinline preload="none" aria-label="${esc(product.name)} garment video"></video><span class="pdp-video-error" id="pdpVideoError" role="status" hidden>Video could not load. Check your connection and try again.<button type="button" id="pdpVideoRetry">Retry video</button></span></figure>`;
+    }
     $("#pdpMedia").innerHTML = `
       <div class="pdp-media-sticky">
         <div class="pdp-gallery ${stock.sold ? "is-sold" : ""}">
-          <div class="pdp-thumbrail" id="pdpThumbRail" role="tablist" aria-label="Photo angles">${thumbs}</div>
+          <div class="pdp-thumbrail" id="pdpThumbRail" aria-label="Garment photos and video">${thumbs}</div>
           <div class="pdp-stage-wrap">
-            <div class="pdp-stage-badges">
-              <span class="pdp-grade-chip" style="--grade:${grade.color};--grade-tint:${grade.tint}">${esc(grade.short)}</span>
-              ${discount > 0 ? `<span class="pdp-disc-chip">-${discount}%</span>` : ""}
-            </div>
+            <div class="pdp-stage-badges"><span class="pdp-grade-chip" style="--grade:${grade.color};--grade-tint:${grade.tint}">${esc(grade.short)}</span>${discount > 0 ? `<span class="pdp-disc-chip">-${discount}%</span>` : ""}</div>
             ${stock.sold ? `<div class="pdp-sold-overlay"><span>SOLD OUT</span></div>` : ""}
-            <div class="pdp-stage-track" id="pdpTrack" tabindex="0" aria-label="Swipe through product photos">${slides}</div>
-            ${photos.length > 1 ? `
-              <button class="pdp-stage-nav prev" id="pdpPrev" type="button" aria-label="Previous photo">‹</button>
-              <button class="pdp-stage-nav next" id="pdpNext" type="button" aria-label="Next photo">›</button>` : ""}
-            <button class="pdp-zoom-btn" id="pdpZoom" type="button" aria-label="Open full screen photo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2M11 8v6M8 11h6"/></svg>
-              Zoom
-            </button>
-            <span class="pdp-counter" id="pdpCounter">${activePhoto + 1} / ${photos.length}</span>
+            <div class="pdp-stage-track" id="pdpTrack" tabindex="0" aria-label="Swipe through garment photos and video">${slides}</div>
+            ${total > 1 ? `<button class="pdp-stage-nav prev" id="pdpPrev" type="button" aria-label="Previous garment view">‹</button><button class="pdp-stage-nav next" id="pdpNext" type="button" aria-label="Next garment view">›</button>` : ""}
+            <button class="pdp-zoom-btn" id="pdpZoom" type="button" aria-label="Open full screen photo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2M11 8v6M8 11h6"/></svg>Zoom</button>
+            <span class="pdp-counter" id="pdpCounter"></span>
           </div>
         </div>
-        ${photos.length > 1 ? `<div class="pdp-dots" id="pdpDots">${photos.map((_, i) =>
-          `<button class="pdp-dot ${i === activePhoto ? "active" : ""}" data-dot="${i}" type="button" aria-label="Photo ${i + 1}"></button>`).join("")}</div>` : ""}
-        <p class="pdp-media-note">📷 Real daylight photos of the exact piece you receive — never a catalog stock image.</p>
+        ${total > 1 ? `<div class="pdp-dots" id="pdpDots">${Array.from({length: total}, (_, i) => `<button class="pdp-dot" data-dot="${i}" type="button" aria-label="${i === photos.length ? "Garment video" : `Photo ${i + 1}`}"></button>`).join("")}</div>` : ""}
+        <p class="pdp-media-note">📷 The exact piece you receive${video ? ` · ▶ ${videoTime()} garment video — tap Video to watch` : " — real garment photos"}.</p>
       </div>`;
-
     bindGallery();
   }
 
   function bindGallery() {
-    const track = $("#pdpTrack");
-    if (!track) return;
-
+    const track = $("#pdpTrack"); if (!track) return;
     const goTo = (index, smooth) => {
-      activePhoto = Math.max(0, Math.min(photos.length - 1, index));
+      activePhoto = Math.max(0, Math.min(galleryCount() - 1, index));
       const left = track.clientWidth * activePhoto;
-      // Older Android WebViews (common on budget devices in UG) lack
-      // Element.scrollTo — fall back to assigning scrollLeft directly.
       if (typeof track.scrollTo === "function") {
-        try {
-          track.scrollTo({ left, behavior: smooth ? "smooth" : "auto" });
-        } catch (_) {
-          track.scrollLeft = left;
-        }
-      } else {
-        track.scrollLeft = left;
-      }
+        try { track.scrollTo({ left, behavior: smooth ? "smooth" : "auto" }); }
+        catch (_) { track.scrollLeft = left; }
+      } else track.scrollLeft = left;
       paintGalleryState();
     };
-
-    $$("[data-thumb]").forEach(btn =>
-      btn.addEventListener("click", () => goTo(Number(btn.dataset.thumb), true)));
-    $$("[data-dot]").forEach(btn =>
-      btn.addEventListener("click", () => goTo(Number(btn.dataset.dot), true)));
-
-    const prev = $("#pdpPrev");
-    const next = $("#pdpNext");
-    if (prev) prev.addEventListener("click", () => goTo((activePhoto - 1 + photos.length) % photos.length, true));
-    if (next) next.addEventListener("click", () => goTo((activePhoto + 1) % photos.length, true));
-
-    // Native scroll-snap powers mobile swipe; keep the UI in sync with it.
+    galleryGoTo = goTo;
+    $$("[data-thumb]").forEach(btn => btn.addEventListener("click", () => goTo(Number(btn.dataset.thumb), true)));
+    $$("[data-dot]").forEach(btn => btn.addEventListener("click", () => goTo(Number(btn.dataset.dot), true)));
+    const prev = $("#pdpPrev"), next = $("#pdpNext");
+    if (prev) prev.addEventListener("click", () => goTo((activePhoto - 1 + galleryCount()) % galleryCount(), true));
+    if (next) next.addEventListener("click", () => goTo((activePhoto + 1) % galleryCount(), true));
     let scrollTimer;
     track.addEventListener("scroll", () => {
       clearTimeout(scrollTimer);
       scrollTimer = setTimeout(() => {
-        const index = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
-        if (index !== activePhoto) {
-          activePhoto = index;
-          paintGalleryState();
-        }
-      }, 80);
+        const index = Math.max(0, Math.min(galleryCount() - 1, Math.round(track.scrollLeft / Math.max(1, track.clientWidth))));
+        if (index !== activePhoto) { activePhoto = index; paintGalleryState(); }
+      }, 100);
     }, { passive: true });
-
     track.addEventListener("keydown", event => {
+      if (event.target.tagName === "VIDEO") return; // retain native video seek/volume keys
       if (event.key === "ArrowRight") { event.preventDefault(); goTo(activePhoto + 1, true); }
       if (event.key === "ArrowLeft") { event.preventDefault(); goTo(activePhoto - 1, true); }
     });
-
-    track.addEventListener("click", () => openLightbox(activePhoto));
-    const zoom = $("#pdpZoom");
-    if (zoom) zoom.addEventListener("click", event => { event.stopPropagation(); openLightbox(activePhoto); });
-
-    if (activePhoto) goTo(activePhoto, false);
+    track.addEventListener("click", event => {
+      if (!event.target.closest(".pdp-slide-video") && activePhoto < photos.length) openLightbox(activePhoto);
+    });
+    $("#pdpZoom").addEventListener("click", event => { event.stopPropagation(); if (activePhoto < photos.length) openLightbox(activePhoto); });
+    const video = $("#pdpGarmentVideo");
+    if (video) {
+      video.addEventListener("error", () => { $("#pdpVideoError").hidden = false; });
+      $("#pdpVideoRetry").addEventListener("click", event => { event.stopPropagation(); $("#pdpVideoError").hidden = true; video.load(); });
+    }
+    goTo(activePhoto, false);
   }
 
   function paintGalleryState() {
+    const isVideo = !!garmentVideo() && activePhoto === photos.length;
     const counter = $("#pdpCounter");
-    if (counter) counter.textContent = `${activePhoto + 1} / ${photos.length}`;
+    if (counter) counter.textContent = isVideo ? `Video · ${videoTime()}` : `${activePhoto + 1} / ${galleryCount()}`;
+    const zoom = $("#pdpZoom"); if (zoom) zoom.hidden = isVideo;
+    const wrap = $(".pdp-stage-wrap", $("#pdpMedia")); if (wrap) wrap.classList.toggle("is-video", isVideo);
     $$("[data-thumb]").forEach(btn => {
       const on = Number(btn.dataset.thumb) === activePhoto;
-      btn.classList.toggle("active", on);
-      btn.setAttribute("aria-current", String(on));
+      btn.classList.toggle("active", on); btn.setAttribute("aria-current", String(on));
     });
-    $$("[data-dot]").forEach(btn =>
-      btn.classList.toggle("active", Number(btn.dataset.dot) === activePhoto));
+    $$("[data-dot]").forEach(btn => {
+      const on = Number(btn.dataset.dot) === activePhoto;
+      btn.classList.toggle("active", on); btn.setAttribute("aria-current", String(on));
+    });
+    const video = $("#pdpGarmentVideo");
+    if (video) {
+      if (isVideo && !video.getAttribute("src")) { video.src = video.dataset.videoSrc; video.load(); }
+      if (!isVideo) video.pause();
+    }
   }
+
+  window.addEventListener("resize", () => { if (galleryGoTo) galleryGoTo(activePhoto, false); }, { passive: true });
+  document.addEventListener("visibilitychange", () => { const video = $("#pdpGarmentVideo"); if (document.hidden && video) video.pause(); });
+  window.addEventListener("pagehide", () => { const video = $("#pdpGarmentVideo"); if (video) video.pause(); });
 
   /* ---------- lightbox ---------- */
   function openLightbox(index) {
@@ -245,6 +224,7 @@
     $("#pdpLightbox").hidden = true;
     document.body.classList.remove("pdp-lightbox-open");
     lightboxZoomed = false;
+    if (galleryGoTo) galleryGoTo(activePhoto, false);
   }
   function paintLightbox() {
     const stage = $("#plbStage");
@@ -629,7 +609,7 @@
   function renderAll() {
     if (!product) return showMissing();
     photos = K.productImages(product);
-    if (activePhoto >= photos.length) activePhoto = 0;
+    if (activePhoto >= galleryCount()) activePhoto = 0;
 
     // Keep the tab title in step with the piece even when the page was served
     // from the generic shell (client-side resolve or a live price change).
@@ -641,7 +621,10 @@
     document.body.classList.toggle("is-sold-piece", K.stockState(product).sold);
 
     renderCrumbs();
-    renderMedia();
+    // A routine catalog sync must not restart a shopper's playing video.
+    const mediaSignature = JSON.stringify([photos, garmentVideo(), product.name, product.flaw_photo_index,
+      K.stockState(product).sold, K.discountPercent(product), K.gradeFor(product).short]);
+    if (mediaSignature !== lastMediaSignature) { renderMedia(); lastMediaSignature = mediaSignature; }
     renderDetail();
     renderBuyBox();
     renderActionBar();

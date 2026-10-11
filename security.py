@@ -292,6 +292,8 @@ def safe_image_url(value, max_len: int = 1000) -> str:
     lowered = url.lower()
     if lowered.startswith(("http://", "https://")):
         return url
+    if re.fullmatch(r"/api/media/[0-9a-f]{32}", url):
+        return url
     if lowered.startswith(("assets/", "./assets/", "/assets/")):
         return url
     return ""
