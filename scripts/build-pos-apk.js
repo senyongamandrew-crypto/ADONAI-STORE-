@@ -47,6 +47,8 @@ function checkToolchain() {
   if (!which('java') && !javaHome) {
     fail('Java (JDK 17) not found. Install a JDK 17 and set JAVA_HOME.');
   }
+  const javac = javaHome ? path.join(javaHome, 'bin', 'javac') : which('javac');
+  if (!javac || !fs.existsSync(javac)) fail('A full JDK is required (javac is missing), not a JRE. CI supplies JDK 17.');
   const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
   if (!sdk || !fs.existsSync(sdk)) {
     fail(
@@ -173,7 +175,8 @@ function buildApk() {
   console.log('\n====================================================');
   console.log('✅ Installable Android APK built successfully');
   console.log('   ' + path.relative(ROOT, target) + ` (${sizeMb} MB)`);
-  console.log('   Package: com.adonaithrift.pos  versionName 2.4.0');
+  console.log('   Build type: ' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? 'Adonai Store Preview (separate installation)' : 'Adonai POS'));
+  console.log('   Version: 2.5.0' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? '-preview' : ''));
   console.log('   Install: adb install -r ' + path.relative(ROOT, target));
   console.log('====================================================\n');
 }

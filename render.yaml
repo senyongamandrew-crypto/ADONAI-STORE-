@@ -3,7 +3,7 @@ services:
     name: adonai-thrift-store
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --threads 2 --timeout 120
+    startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --threads 2 --timeout 240
     plan: starter
     autoDeploy: true
     envVars:
@@ -21,13 +21,12 @@ services:
         value: 300
       - key: FORCE_HTTPS
         value: true
-      # Owner's emergency master PIN / key for /login — set the secret value
-      # in the Render dashboard (Environment tab). Entering it grants full admin access.
-      - key: ADMIN_ACCESS_PIN
-        sync: false
-      # Staff Terminal Key for cashier & POS register access from the website
-      - key: STAFF_TERMINAL_KEY
-        sync: false
+      # Checkout requires no login. Optional area passwords are configured in
+      # Store Settings and enforced by the backend. Use trusted devices for setup.
+      # To restore protection, set this to "1" and configure STORE_MASTER_KEY /
+      # STAFF_TERMINAL_KEY as secrets in the Render dashboard.
+      - key: ADONAI_REQUIRE_STAFF_AUTH
+        value: "0"
 
 databases:
   - name: adonai-postgres

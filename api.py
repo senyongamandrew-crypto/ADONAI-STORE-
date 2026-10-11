@@ -20,6 +20,10 @@ import uuid
 
 from database import DATABASE_URL, IS_POSTGRES, engine, get_db
 import payments
+import access_control
+import media
+import exports
+import dispatch
 from notifications import (
     LOW_STOCK_THRESHOLD,
     broadcast_event,
@@ -104,6 +108,19 @@ STAFF_ENV_VARS = [
     "POS_TERMINAL_KEY", "POS_ACCESS_KEY", "POS_ACCESS_PIN",
     "POS_KEY", "POS_PIN", "TERMINAL_PIN", "POS_MASTER_KEY"
 ]
+
+def staff_auth_required() -> bool:
+    """PIN-free terminals are the default; credential protection is opt-in.
+
+    This deliberately grants admin access without a PIN, key or JWT on all
+    terminal endpoints. Restrict the deployment to trusted users/devices, or
+    set ADONAI_REQUIRE_STAFF_AUTH=1 to require the existing staff/master keys.
+    Existing credential environment variables do not silently re-enable a lock.
+    """
+    return os.environ.get("ADONAI_REQUIRE_STAFF_AUTH", "0").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
 
 # Settings that may be read by the public storefront. Authentication keys and
 # operational flags are intentionally excluded from public API responses.
@@ -228,6 +245,10 @@ def verify_jwt_token(token: str) -> dict | None:
         payload = json.loads(b64url_decode(p_enc).decode("utf-8"))
         if payload.get("exp", 0) < int(time.time()):
             return None
+        # Re-enabling protection immediately revokes every PIN-free session,
+        # including tokens still cached by another tab or an Android terminal.
+        if payload.get("access_mode") == "open" and staff_auth_required():
+            return None
         return payload
     except Exception:
         return None
@@ -277,11 +298,14 @@ def match_env_credential(candidate: str, var_names: list[str]) -> str | None:
 
 def is_authenticated_staff(headers: dict = None, body: dict = None, query_params: dict = None) -> tuple[bool, dict | None]:
     """
-    Validates if incoming request comes from an authenticated POS terminal or Admin.
-    Credentials are accepted ONLY from the Authorization/X-Terminal-Key headers
-    or a JSON body — never from URL query strings, which leak into proxy and
-    access logs, browser history, and Referer headers.
+    Applies the server's terminal access policy. In PIN-free mode, no
+    credential or session bootstrap is required; stale cashier/expired tokens
+    cannot bring the removed lock back. Explicitly protected deployments still
+    validate credentials from headers or JSON, never URL query strings.
     """
+    if not staff_auth_required():
+        return True, {"id": "OPEN-TERMINAL", "name": "Store Terminal", "role": "admin"}
+
     headers = headers or {}
     body = body or {}
 
@@ -303,7 +327,7 @@ def is_authenticated_staff(headers: dict = None, body: dict = None, query_params
     jwt_payload = verify_jwt_token(candidate)
     if jwt_payload:
         return True, {
-            "id": jwt_payload.get("sub", "STF-TOKEN"),
+            "id": jwt_payload.get("id") or jwt_payload.get("sub", "STF-TOKEN"),
             "name": jwt_payload.get("name", "Staff Member"),
             "role": jwt_payload.get("role", "cashier")
         }
@@ -684,6 +708,7 @@ def expire_stale_flutterwave_orders(session, now=None):
             f"⌛ Unpaid order {order.id} released",
             "Online payment was not completed in time — the piece(s) are back on the rail.",
             {"order_id": order.id, "amount": order.total},
+            session=session,
         )
     if stale:
         session.flush()
@@ -777,6 +802,7 @@ def settle_order_payment(session, order, verified, attempt=None, source="browser
         f"💳 Paid online — Order #{order_number}",
         f"{order.customer_name or 'Online shopper'} paid UGX {int(order.total or 0):,} via Flutterwave ({attempt.channel or 'online'}).",
         {"order_id": order.id, "amount": order.total, "reference": attempt.tx_ref, "channel": attempt.channel or ""},
+        session=session,
     )
     return True, "paid", ""
 
@@ -805,7 +831,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "error": "Too many requests. Please slow down.",
                     "retry_after_seconds": retry_after,
                 }, status=429)
-            if path.rstrip("/") == "/api/auth/verify" and method == "POST":
+            if path.rstrip("/") in {"/api/auth/verify", "/api/pos-access/unlock", "/api/rider/pair"} and method == "POST":
                 # Peek only: a correct passkey must never be locked out by its
                 # own earlier successful sign-ins. Failures are recorded below.
                 allowed, retry_after = _rate_limiter.peek(
@@ -820,7 +846,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     }, status=429)
 
         body = {}
-        if body_bytes and method in ("POST", "PUT", "PATCH", "DELETE"):
+        if body_bytes and method in ("POST", "PUT", "PATCH", "DELETE") and not path.startswith("/api/media/"):
             try:
                 body = json.loads(body_bytes.decode("utf-8"))
             except Exception:
@@ -830,6 +856,60 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
         # Strip trailing slashes from path
         clean_path = path.rstrip("/")
+
+        # Owner-configured area passwords are independent of the old global
+        # staff login. The register stays open; only chosen operations are gated.
+        if clean_path.startswith("/api/pos-access/"):
+            may_bootstrap = True
+            if staff_auth_required():
+                authed, staff = is_authenticated_staff(headers, body, query_params)
+                may_bootstrap = authed and (staff or {}).get("role") == "admin"
+            status, result = access_control.handle_request(method, clean_path, body, headers, may_bootstrap)
+            if clean_path == "/api/pos-access/unlock" and method == "POST" and status in {400, 403}:
+                _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
+            return json_response(result, status=status)
+        area_error = access_control.guard_request(method, clean_path, body, headers)
+        if area_error:
+            status, result = area_error
+            return json_response(result, status=status)
+
+        if clean_path.startswith(("/api/riders", "/api/dispatch/", "/api/rider/")):
+            staff_info = None
+            if not clean_path.startswith("/api/rider/"):
+                authenticated, staff_info = is_authenticated_staff(headers, body, {})
+                if not authenticated or (staff_info or {}).get("role") == "rider":
+                    return dispatch.response({"ok":False,"error":"Staff dispatch authorization is required."},401)
+            result = dispatch.route_request(method, clean_path, body, headers, staff_info, staff_auth_required())
+            if clean_path == "/api/rider/pair" and method == "POST" and result[0] in {400,403}:
+                _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
+            return result
+
+        if clean_path == "/api/exports/prepare" and method == "POST":
+            authenticated, staff_info = is_authenticated_staff(headers, body, {})
+            if not authenticated:
+                return json_response({"ok": False, "error": "Sign in to the staff terminal to export store records."}, status=401)
+            return exports.prepare(body, headers, staff_info or {}, staff_auth_required())
+        if clean_path.startswith("/api/exports/download/") and method in {"GET", "HEAD"}:
+            # The short-lived file capability is not a staff/area credential.
+            # Its original scope is revalidated server-side, also in another browser.
+            return exports.download(method, clean_path.split("/")[-1], staff_auth_required())
+
+        if clean_path.startswith("/api/media/"):
+            # Mutation shares both existing staff and optional Stock passwords.
+            # Public reads of attached garment media need neither.
+            if method in {"POST", "DELETE"}:
+                staff_info, auth_error = authenticated_or_response(headers, {}, query_params)
+                if auth_error:
+                    return auth_error
+            else:
+                authenticated, staff_info = is_authenticated_staff(headers, {}, {})
+                if not authenticated:
+                    staff_info = None
+            return media.route_request(method, clean_path, body_bytes, headers, staff_info)
+
+        if clean_path.startswith("/api/products") and method in {"POST", "PUT", "PATCH"}:
+            if isinstance(body.get("images"), list) and len(body["images"]) > media.MAX_IMAGES:
+                return json_response({"ok": False, "error": "A garment can have up to 12 photos."}, status=400)
 
         # ----------------------------------------------------
         # 1. Health & Status (Public)
@@ -859,6 +939,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             staff_info, auth_error = authenticated_or_response(headers, body, query_params)
             if auth_error:
                 return auth_error
+            staff_info = dict(staff_info, _pos_access_tokens=next((str(v) for k, v in headers.items() if k.lower() == "x-pos-access"), ""))
             ticket = issue_stream_ticket(staff_info)
             return json_response({"ok": True, "ticket": ticket, "expires_in": 60})
 
@@ -872,7 +953,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 limit = int(query_params.get("limit", ["100"])[0])
             except (TypeError, ValueError):
                 pass
-            return json_response({"ok": True, "notifications": recent_events(limit)})
+            with get_db() as session:
+                area_access = access_control.state(headers, session)
+                return json_response({"ok": True, "notifications": [
+                    access_control.sanitize_notification(event, area_access)
+                    for event in recent_events(limit, session=session)
+                ], "server_time": datetime.utcnow().isoformat() + "Z"})
 
         # ----------------------------------------------------
         # 2. Products API (Public Catalog Read, Protected Intake)
@@ -954,8 +1040,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 )
                 sold_counts = {product_id: int(quantity or 0) for product_id, quantity in sold_rows}
                 prods = []
+                area_access = access_control.state(headers, session)
                 for product in products:
-                    data = product.to_dict()
+                    data = access_control.sanitize_product(product.to_dict(), area_access)
                     data["authoritative_stock_count"] = data["in_stock_count"]
                     data["in_stock_count"] = max(0, data["in_stock_count"] - held.get(product.id, 0))
                     data["available_count"] = data["in_stock_count"]
@@ -1100,6 +1187,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 )
                 apply_pdp_fields(prod, body)
                 session.add(prod)
+                session.flush()
+                try:
+                    media.attach_to_product(session, prod, body, staff_info or {})
+                except ValueError as exc:
+                    session.rollback()
+                    return json_response({"ok": False, "error": str(exc)}, status=400)
 
                 session.add(Inventory(
                     id=generate_uid("INV"),
@@ -1112,6 +1205,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     notes=body.get("notes", "New product intake via POS")
                 ))
                 session.flush()
+                broadcast_event("STOCK_ADDED", "Stock intake saved",
+                    f"{prod.name} · {stock_count} unit(s) added to the catalog.",
+                    {"product_id": pid, "name": prod.name, "barcode": barcode_id, "quantity": stock_count,
+                     "created_at": prod.created_at.isoformat()}, session=session)
                 return json_response({"status": "created", "product": prod.to_dict()}, status=201)
 
         if clean_path.startswith("/api/products/") and method in ("PUT", "PATCH", "DELETE"):
@@ -1132,9 +1229,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             {"ok": False, "error": "mode must be 'archive' or 'permanent'"}, status=400
                         )
                     if mode == "archive":
+                        changed = prod.inventory_status != "ARCHIVED" or prod.in_stock_count != 0
                         prod.inventory_status = "ARCHIVED"
                         prod.in_stock_count = 0
                         session.query(InventoryLock).filter_by(product_id=pid).delete(synchronize_session=False)
+                        if changed:
+                            broadcast_event("STOCK_REMOVED", "Product archived", f"{prod.name} was removed from the active rack.",
+                                {"product_id": pid, "name": prod.name, "mode": "archive"}, session=session)
                         return json_response({"ok": True, "status": "archived", "product": prod.to_dict()})
 
                     # --- Permanent (hard) removal: manager/admin only ---
@@ -1185,6 +1286,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         staff_name=staff_info.get("name"), ref_id=journal.id if journal else pid,
                     ))
                     session.flush()
+                    broadcast_event("STOCK_REMOVED", "Product deleted", f"{product_name} was permanently removed from the rack.",
+                        {"product_id": pid, "name": product_name, "mode": "permanent"}, session=session)
                     return json_response({
                         "ok": True, "status": "permanently_deleted", "product_id": pid,
                         "sku": product_sku, "unlinked_order_lines": unlinked,
@@ -1260,7 +1363,16 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 prod.quantity_type = condition_value
                 if prod.inventory_status not in {"ARCHIVED", "WRITTEN_OFF"}:
                     prod.inventory_status = "AVAILABLE" if prod.in_stock_count > 0 else "OUT_OF_STOCK"
+                changed = session.is_modified(prod, include_collections=False)
                 session.flush()
+                try:
+                    media_changed = media.attach_to_product(session, prod, body, staff_info or {})
+                except ValueError as exc:
+                    session.rollback()
+                    return json_response({"ok": False, "error": str(exc)}, status=400)
+                if changed or media_changed:
+                    broadcast_event("STOCK_UPDATED", "Product updated", f"{prod.name} · {prod.in_stock_count} unit(s) on the rack.",
+                        {"product_id": pid, "name": prod.name, "quantity": prod.in_stock_count}, session=session)
                 return json_response({"ok": True, "status": "updated", "product": prod.to_dict()})
 
         if clean_path.startswith("/api/products/") and method == "GET":
@@ -1271,7 +1383,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 prod = lookup_product(session, identifier)
                 if not prod:
                     return json_response({"error": "Product not found"}, status=404)
-                data = prod.to_dict()
+                data = access_control.sanitize_product(prod.to_dict(), access_control.state(headers, session))
                 held = (
                     session.query(func.coalesce(func.sum(InventoryLock.quantity), 0))
                     .filter(
@@ -1411,7 +1523,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 channel = query_params.get("channel", [""])[0]
                 if channel:
                     q = q.filter(Order.channel == channel)
-                orders = [o.to_dict() for o in q.order_by(Order.created_at.desc()).all()]
+                area_access = access_control.state(headers, session)
+                orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in q.order_by(Order.created_at.desc()).all()]
                 return json_response({"count": len(orders), "orders": orders})
 
         if clean_path.startswith("/api/orders/") and method in ("PUT", "PATCH"):
@@ -1425,6 +1538,16 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not order:
                     return json_response({"ok": False, "error": "Order not found"}, status=404)
 
+                assignment = None
+                if body.get("rider_id"):
+                    requested_stage = body.get("fulfillment_status",body.get("dispatch_status","Dispatched"))
+                    if normalize_fulfillment_stage(requested_stage) != "Dispatched":
+                        return json_response({"ok":False,"error":"Assign a rider separately from cancellation/completion."},status=400)
+                    try: assignment = dispatch.validate_assignment(session, order, str(body["rider_id"]))
+                    except dispatch.DispatchError as error: return dispatch.response({"ok":False,"error":str(error)},error.status)
+                elif "rider_name" in body or "rider_id" in body:
+                    return json_response({"ok":False,"error":"Choose a saved rider to assign a delivery."},status=400)
+                previous_state = (order.dispatch_status, order.status, order.rider_id, order.rider_name, order.tender_type)
                 next_stage = body.get("fulfillment_status")
                 if next_stage is None:
                     next_stage = body.get("dispatch_status")
@@ -1468,14 +1591,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         else "processing"
                     )
 
-                if "rider_id" in body or "rider_name" in body:
-                    order.rider_id = str(body.get("rider_id") or "").strip() or None
-                    order.rider_name = str(body.get("rider_name") or "").strip() or None
+                if assignment:
+                    dispatch.assign(session, order, assignment.id, (staff_info or {}).get("name","Dispatcher"))
                 if "payment_method" in body:
                     order.tender_type = str(body.get("payment_method") or "cash").strip().lower()
                 order.updated_at = datetime.utcnow()
                 session.flush()
-                return json_response({"ok": True, "order": order.to_dict(), "stock_restored_units": restored_units})
+                if not assignment and previous_state != (order.dispatch_status, order.status, order.rider_id, order.rider_name, order.tender_type):
+                    broadcast_event("ORDER_UPDATED", f"Order {order.id} updated",
+                        f"{order.dispatch_status or order.status}" + (f" · Rider: {order.rider_name}" if order.rider_name else ""),
+                        {"order_id": order.id, "status": order.status, "fulfillment_status": order.dispatch_status}, session=session)
+                return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session)), "stock_restored_units": restored_units})
 
         if clean_path == "/api/orders" and method == "POST":
             channel = str(body.get("channel", "web")).lower()
@@ -1672,23 +1798,25 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 )
                 session.flush()
 
-                # ---- Real-time notification broadcasts (non-blocking) ----
+                # Record alerts atomically with the successful checkout.
                 order_number = order_id.split("-")[-1] if "-" in order_id else order_id
                 if channel == "pos":
                     broadcast_event(
                         "NEW_ORDER",
                         f"🧾 POS Sale {order_id}",
-                        f"POS sale recorded ({order.tender_type or 'cash'})",
+                        f"UGX {grand_total:,} · {order.tender_type or 'cash'} · {sum(requested.values())} item(s)",
                         {"order_id": order_id, "amount": grand_total,
                          "customer": order.customer_name, "channel": channel},
+                        session=session,
                     )
                 else:
                     broadcast_event(
                         "NEW_ORDER",
                         f"🛍️ New {channel.title()} Order #{order_number}",
-                        "New order received",
+                        f"UGX {grand_total:,} · {order.customer_name or 'Customer'}",
                         {"order_id": order_id, "amount": grand_total,
                          "customer": order.customer_name, "channel": channel},
+                        session=session,
                     )
                     inquiry = (order.delivery_notes or "").strip()
                     if inquiry:
@@ -1698,6 +1826,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             f"{order.customer_name}: “{inquiry[:140]}”",
                             {"order_id": order_id, "customer": order.customer_name,
                              "message": inquiry[:500]},
+                            session=session,
                         )
                 for product in products.values():
                     remaining = max(0, int(product.in_stock_count or 0))
@@ -1709,12 +1838,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                              else f"Only {remaining} unit(s) of “{product.name}” left."),
                             {"product_id": product.id, "name": product.name,
                              "remaining": remaining, "barcode": product.barcode_id},
+                            session=session,
                         )
 
+                area_access = access_control.state(headers, session)
+                # A sale receipt may show the customer details just entered by
+                # this cashier, but must not disclose protected COGS.
+                own_receipt_access = dict(area_access, protected=area_access["protected"] - {"orders"})
                 order_response = {
                     "status": "success",
-                    "order": order.to_dict(),
-                    "products": [product.to_dict() for product in products.values()],
+                    "order": access_control.sanitize_sale(order.to_dict(), own_receipt_access),
+                    "products": [access_control.sanitize_product(product.to_dict(), area_access) for product in products.values()],
                 }
                 if wants_online_payment:
                     # The payment token is issued ONCE, here, to the browser
@@ -2001,7 +2135,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 ))
                 session.flush()
 
-                # ---- Real-time notification broadcast (non-blocking) ----
+                # Record the alert atomically with this expense.
                 broadcast_event(
                     "NEW_EXPENSE",
                     f"🧾 Expense logged — {category}",
@@ -2009,6 +2143,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     {"expense_id": expense_id, "category": category, "amount": amount,
                      "payment_method": payment_method,
                      "staff": staff_info.get("name", "Staff")},
+                    session=session,
                 )
 
                 return json_response({"ok": True, "status": "posted", "expense": expense.to_dict()}, status=201)
@@ -2049,6 +2184,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         staff_name=staff_info.get("name"), ref_id=expense_id, created_at=datetime.utcnow(),
                     ))
                     session.flush()
+                    broadcast_event("EXPENSE_VOIDED", "Expense voided", f"{expense.category} · UGX {int(expense.amount):,}",
+                        {"expense_id": expense_id, "amount": int(expense.amount)}, session=session)
                     return json_response({"ok": True, "status": "voided", "expense": expense.to_dict()})
 
                 try:
@@ -2100,6 +2237,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     ),
                 ])
                 session.flush()
+                broadcast_event("EXPENSE_UPDATED", "Expense updated", f"{category} · UGX {amount:,}",
+                    {"expense_id": expense_id, "category": category, "amount": amount}, session=session)
                 return json_response({"ok": True, "status": "updated", "expense": expense.to_dict()})
 
         if clean_path == "/api/finance/stock-lots" and method in ("GET", "POST"):
@@ -2187,6 +2326,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             allocated_count=0,
                         ))
                 session.flush()
+                broadcast_event("STOCK_LOT_RECEIVED", "Stock lot registered", f"{lot_code} · {item_count} pieces · {supplier}",
+                    {"lot_id": lot_id, "lot_code": lot_code, "item_count": item_count}, session=session)
                 return json_response({"ok": True, "status": "registered", "stock_lot": lot.to_dict(include_grades=True)}, status=201)
 
         if clean_path == "/api/finance/dashboard" and method == "GET":
@@ -2333,6 +2474,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     )
                     session.add(adjustment)
                     session.flush()
+                    broadcast_event("STOCK_MARKDOWN", "Stock markdown saved", f"{product.name} · UGX {new_price:,}",
+                        {"product_id": product.id, "new_price": new_price}, session=session)
                     return json_response({"ok": True, "status": "markdown_posted", "product": product.to_dict(), "adjustment": adjustment.to_dict()})
 
                 reason = str(body.get("reason") or "Damaged / unsellable inventory").strip()
@@ -2366,6 +2509,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     staff_name=staff_info.get("name"), ref_id=adjustment.id,
                 ))
                 session.flush()
+                broadcast_event("STOCK_WRITTEN_OFF", "Stock written off", f"{product.name} · {quantity} unit(s) removed.",
+                    {"product_id": product.id, "quantity": quantity}, session=session)
                 return json_response({"ok": True, "status": "written_off", "product": product.to_dict(), "adjustment": adjustment.to_dict()})
 
         # ----------------------------------------------------
@@ -2799,12 +2944,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 }, status=401)
 
             with get_db() as session:
-                products = [p.to_dict() for p in session.query(Product).order_by(Product.created_at.desc()).all()]
+                area_access = access_control.state(headers, session)
+                products = [access_control.sanitize_product(p.to_dict(), area_access) for p in session.query(Product).order_by(Product.created_at.desc()).all()]
                 categories = [c.to_dict() for c in session.query(Category).order_by(Category.sort_order.asc()).all()]
-                orders = [o.to_dict() for o in session.query(Order).order_by(Order.created_at.desc()).all()]
-                inventory = [i.to_dict() for i in session.query(Inventory).all()]
-                riders = [r.to_dict() for r in session.query(Rider).all()]
-                ledger = [l.to_dict() for l in session.query(LedgerEntry).order_by(LedgerEntry.created_at.desc()).all()]
+                orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in session.query(Order).order_by(Order.created_at.desc()).all()] if (access_control.allowed("orders", area_access) or access_control.allowed("finance", area_access)) else []
+                inventory = [i.to_dict() for i in session.query(Inventory).all()] if access_control.allowed("stock", area_access) else []
+                riders = [r.to_dict() for r in session.query(Rider).filter_by(archived=False).all()] if access_control.allowed("orders", area_access) else []
+                ledger = [l.to_dict() for l in session.query(LedgerEntry).order_by(LedgerEntry.created_at.desc()).all()] if access_control.allowed("finance", area_access) else []
                 settings_rows = session.query(StoreSetting).all()
                 settings = public_store_settings(settings_rows)
 
@@ -2816,11 +2962,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "inventory": inventory,
                     "riders": riders,
                     "ledger": ledger,
-                    "settings": settings
+                    "settings": settings,
+                    "blocked_areas": [area for area in access_control.AREAS if not access_control.allowed(area, area_access)]
                 })
 
         # ----------------------------------------------------
-        # 6. Store Settings (Public Read sanitized / Protected Update)
+        # 6. Store Settings (sanitized read / PIN-free or opt-in protected update)
         # ----------------------------------------------------
         if clean_path == "/api/settings" and method == "GET":
             with get_db() as session:
@@ -2835,7 +2982,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
         if clean_path == "/api/settings" and method in ("POST", "PUT", "PATCH"):
             is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
-            if not is_authed or (staff_info or {}).get("role") != "admin":
+            if staff_auth_required() and (not is_authed or (staff_info or {}).get("role") != "admin"):
                 return json_response({
                     "ok": False,
                     "error": "Unauthorized: Admin authorization required to update store settings"
@@ -2884,8 +3031,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 return json_response({"ok": False, "error": "No store settings supplied"}, status=400)
 
             with get_db() as session:
+                changed_keys = []
                 for key, value in updates.items():
                     setting = session.query(StoreSetting).filter_by(key=key).first()
+                    if not setting or setting.value != value:
+                        changed_keys.append(key)
                     if setting:
                         setting.value = value
                     else:
@@ -2897,6 +3047,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 # System Parameters change reflects across the whole system.
                 apply_to_catalog = body.get("apply_base_fee_to_catalog") in (True, 1, "1", "true", "yes")
                 products_updated = 0
+                catalog_changed = False
                 if apply_to_catalog:
                     fee_row = session.query(StoreSetting).filter_by(key="base_delivery_fee").first()
                     try:
@@ -2905,6 +3056,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         fee_value = None
                     if fee_value is not None:
                         for product in session.query(Product).all():
+                            if product.total_transport_cost != fee_value:
+                                catalog_changed = True
                             product.total_transport_cost = fee_value
                             # Keep the customer-facing price consistent with the
                             # 50/50 split: base price + embedded half of transport.
@@ -2913,6 +3066,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             products_updated += 1
                         session.flush()
 
+                if changed_keys or catalog_changed:
+                    broadcast_event("SETTINGS_UPDATED", "Store settings published",
+                        f"{len(changed_keys)} store parameter(s) updated." + (f" Delivery pricing applied to {products_updated} product(s)." if catalog_changed else ""),
+                        {"setting_count": len(changed_keys)}, session=session)
                 public_rows = session.query(StoreSetting).all()
                 return json_response({
                     "ok": True,
@@ -2931,9 +3088,35 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             has_staff_env = any(bool(os.environ.get(v, "").strip()) for v in STAFF_ENV_VARS)
             return json_response({
                 "status": "active",
+                "requires_staff_auth": staff_auth_required(),
+                "access_mode": "credential" if staff_auth_required() else "open",
                 "has_env_admin_key": has_admin_env,
                 "has_env_staff_key": has_staff_env,
                 "supported_keys": ["STORE_MASTER_KEY", "ADMIN_ACCESS_PIN", "STAFF_TERMINAL_KEY", "TERMINAL_KEY", "ADMIN_KEY", "STAFF_KEY", "MASTER_KEY"]
+            })
+
+        if clean_path == "/api/auth/terminal-session" and method == "POST":
+            # Kept for installed clients that expect a signed terminal session.
+            # PIN-free endpoints do not depend on this handshake or its JWT.
+            # Stock validation and transactional accounting remain unchanged.
+            if staff_auth_required():
+                return json_response({
+                    "ok": True,
+                    "requires_staff_auth": True,
+                    "access_mode": "credential"
+                })
+            staff_data = {
+                "id": "OPEN-TERMINAL",
+                "name": "Store Terminal",
+                "role": "admin"
+            }
+            token = create_jwt_token(dict(staff_data, access_mode="open"))
+            return json_response({
+                "ok": True,
+                "requires_staff_auth": False,
+                "access_mode": "open",
+                "staff": staff_data,
+                "token": token
             })
 
         if clean_path == "/api/auth/verify" and method == "POST":

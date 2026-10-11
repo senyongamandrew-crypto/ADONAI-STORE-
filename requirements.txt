@@ -3,3 +3,10 @@ psycopg2-binary>=2.9.10
 psycopg[binary]>=3.2.4
 gunicorn>=23.0.0
 typing-extensions>=4.12.2
+
+# Durable product media: JPEG validation and short MP4 video optimization
+Pillow>=11.3.0
+imageio-ffmpeg>=0.6.0,<0.7
+
+# Genuine Excel workbooks for audit-log downloads
+openpyxl>=3.1.5,<4

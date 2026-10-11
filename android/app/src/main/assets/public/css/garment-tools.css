@@ -1,0 +1,100 @@
+/* Garment tags & phone-camera checkout — shared register / intake tools. */
+.pos-catalog-section .lookup-row { flex-wrap: wrap; gap: 10px; }
+.pos-catalog-section .barcode-in { min-width: 0; flex: 1 1 220px; }
+.scan-tag-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  flex: 0 0 auto; min-height: 50px; padding: 0 20px; border: 1px solid #365744;
+  border-radius: 16px; background: #365744; color: #fff; font: 700 13px var(--font-ui, sans-serif);
+  cursor: pointer; white-space: nowrap; box-shadow: 0 4px 12px #23402f12;
+}
+.scan-tag-button:hover { background: #294535; }
+.scan-tag-button svg { width: 19px; height: 19px; flex-shrink: 0; }
+.scan-tag-hint { display: flex; align-items: center; gap: 7px; margin: 8px 2px 18px; color: #586b5d; font-size: 11px; line-height: 1.6; }
+.scan-tag-hint::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #82a68a; flex-shrink: 0; }
+.gt-intake-guide { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 24px; margin: 18px 0; background: #f0f5ec; border: 1px solid #d7e3d1; border-radius: 18px; }
+.gt-intake-guide h2 { color: #284231; margin: 0 0 6px; font-family: var(--font-display, Georgia, serif); font-size: 23px; }
+.gt-intake-guide p { margin: 0; color: #526656; font-size: 12px; line-height: 1.7; max-width: 580px; }
+.gt-intake-guide .gt-eyebrow { margin: 0 0 5px; }
+.gt-intake-guide-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.gt-intake-guide-actions a { color: #365744; font-size: 12px; font-weight: 700; }
+.gt-draft-note { font-size: 11px; line-height: 1.7; color: #607063; margin-top: 15px; }
+.gt-last-print { margin-top: 10px; }
+.gt-recent-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.gt-recent-empty { color: #687567; padding: 20px 0; line-height: 1.7; font-size: 12px; }
+.gt-dialog { display: none; position: fixed; inset: 0; margin: auto; border: 0; padding: 12px; width: min(100%, 610px); max-width: 100vw; max-height: 96vh; max-height: 96dvh; overflow: auto; background: transparent; color: #243b2d; }
+.gt-dialog[open] { display: block; }
+.gt-dialog::backdrop { background: #0c1b14b8; backdrop-filter: blur(4px); }
+.gt-dialog[role="dialog"][open] { box-shadow: 0 0 0 100vmax #0c1b14b8; }
+.gt-panel { padding: 26px; border: 1px solid #dbe5d5; border-radius: 24px; background: #f8faf5; box-shadow: 0 24px 80px #07160c38; font-family: var(--font-ui, Arial, sans-serif); }
+.gt-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.gt-eyebrow { color: #647d66; font: 700 9px/1.5 var(--font-ui, Arial, sans-serif); letter-spacing: .16em; margin: 0 0 5px; }
+.gt-heading h2 { font: 700 28px/1.2 var(--font-display, Georgia, serif); color: #284231; margin: 0; }
+.gt-icon-button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid #d5dfcf; background: #eff3e9; color: #4a604d; font-size: 23px; cursor: pointer; flex-shrink: 0; }
+.gt-description { margin: 12px 0 18px; font-size: 12px; line-height: 1.8; color: #5c6e5f; }
+.gt-camera-frame { position: relative; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 18px; background: radial-gradient(ellipse at center, #243b30, #12241b); border: 1px solid #425f4a; }
+.gt-camera-frame video { display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.gt-camera-frame.gt-camera-live video { opacity: 1; }
+.gt-camera-guide { position: absolute; left: 8%; right: 8%; top: 29%; bottom: 29%; border: 1px solid #c4e1bd44; border-radius: 5px; }
+.gt-camera-guide > span { position: absolute; width: 21px; height: 21px; border-color: #c4e1bd; border-style: solid; border-width: 0; }
+.gt-camera-guide > span:nth-child(1) { top: -2px; left: -2px; border-top-width: 3px; border-left-width: 3px; border-top-left-radius: 6px; }
+.gt-camera-guide > span:nth-child(2) { top: -2px; right: -2px; border-top-width: 3px; border-right-width: 3px; border-top-right-radius: 6px; }
+.gt-camera-guide > span:nth-child(3) { bottom: -2px; left: -2px; border-bottom-width: 3px; border-left-width: 3px; border-bottom-left-radius: 6px; }
+.gt-camera-guide > span:nth-child(4) { bottom: -2px; right: -2px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 6px; }
+.gt-camera-line { position: absolute; top: 50%; left: 4%; right: 4%; height: 1px; background: #c4e1bd; box-shadow: 0 0 12px #bdfdb29e; opacity: .65; }
+.gt-camera-caption { position: absolute; left: 0; right: 0; bottom: 12%; margin: 0; color: #e0edda; font-size: 9px; font-weight: 600; text-align: center; letter-spacing: .15em; text-shadow: 0 1px 4px #000; }
+.gt-torch-button { position: absolute; right: 12px; bottom: 10px; padding: 6px 12px; border-radius: 20px; border: 1px solid #fff6; color: #fff; background: #112619c9; font-size: 11px; cursor: pointer; }
+.gt-torch-button[aria-pressed="true"] { background: #eff5dd; color: #23402d; }
+.gt-torch-button[hidden] { display: none; }
+.gt-message { font-size: 12px; line-height: 1.7; color: #4e6852; margin: 12px 0; min-height: 20px; }
+.gt-message.gt-error { color: #9a3a28; }
+.gt-camera-actions { display: flex; gap: 9px; flex-wrap: wrap; }
+.gt-camera-actions .btn, .gt-actions .btn, .gt-manual-form .btn { min-height: 42px; font-size: 12px; border-radius: 12px; padding: 9px 14px; }
+.gt-panel .btn.primary { background: #365744; border-color: #365744; color: #fff; }
+.gt-panel .btn.primary:hover { background: #294535; }
+.gt-panel button:disabled { opacity: .5; cursor: not-allowed; }
+.gt-panel input, .gt-panel select { min-width: 0; width: 100%; padding: 11px 12px; border: 1px solid #cedbca; border-radius: 10px; background: #fff; color: #2d4333; font: 500 13px var(--font-ui, Arial, sans-serif); }
+.gt-panel label { display: block; font-size: 11px; line-height: 1.6; font-weight: 600; color: #526655; }
+.gt-panel label input, .gt-panel label select { margin-top: 5px; }
+.gt-manual-form { padding-top: 18px; margin-top: 18px; border-top: 1px solid #dfe7d8; }
+.gt-manual-form > div { display: flex; gap: 8px; margin-top: 6px; }
+.gt-manual-form input { flex: 1 1 auto; }
+.gt-manual-form button { flex-shrink: 0; }
+.gt-camera-foot { display: flex; flex-direction: column; gap: 5px; padding-top: 18px; font-size: 10px; line-height: 1.7; color: #647867; }
+.gt-camera-foot a { color: #365744; font-weight: 600; }
+.gt-tag-stage { display: flex; align-items: center; justify-content: center; padding: 26px 18px; border-radius: 18px; background: radial-gradient(#c7d1bf 1px, transparent 1px) 0 0 / 12px 12px, #e9eee3; min-height: 250px; border: 1px solid #d9e1d2; }
+.gt-hangtag { display: flex; flex-direction: column; align-items: center; text-align: center; width: var(--gt-tag-width, 320px); max-width: 100%; aspect-ratio: var(--gt-tag-ratio, 80 / 50); min-height: 205px; padding: 14px; box-sizing: border-box; border-radius: 3px; background: #fff; color: #000; box-shadow: 0 5px 18px #2839211c; font-family: Arial, sans-serif; overflow: hidden; }
+.gt-hangtag p, .gt-hangtag h3 { margin: 0; }
+.gt-tag-brand { width: 100%; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; line-height: 1.4; padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid #111; }
+.gt-tag-name { font-size: 18px; font-weight: 700; line-height: 1.25; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.gt-tag-bars { width: 100%; height: 54px; flex-shrink: 0; margin-top: auto; background: #fff; }
+.gt-tag-bars svg { width: 100% !important; max-width: none !important; height: 100% !important; display: block; }
+.gt-tag-code { font: 11px/1.6 monospace; white-space: nowrap; }
+.gt-tag-website { font-size: 9px; line-height: 1.5; margin-top: 5px; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; }
+.gt-draft-tag-stage { margin-top: 12px; }
+.gt-print-options { display: grid; grid-template-columns: minmax(0, 1fr) 90px; align-items: end; gap: 14px; margin-top: 20px; }
+.gt-print-help { margin: 10px 0 0; color: #647366; font-size: 11px; line-height: 1.8; }
+.gt-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+#garmentPrintSheet { display: none; }
+.gt-panel button:focus-visible, .gt-panel a:focus-visible, .gt-panel input:focus-visible, .gt-panel select:focus-visible, .scan-tag-button:focus-visible { outline: 3px solid #809875; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .pos-catalog-section .lookup-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .pos-catalog-section .barcode-in { grid-row: 1; grid-column: 1; width: 100%; }
+  .pos-catalog-section .lookup-btn { grid-row: 1; grid-column: 2; min-width: 0; height: 48px; padding: 0 16px; }
+  .scan-tag-button { grid-row: 2; grid-column: 1 / -1; width: 100%; min-height: 48px; border-radius: 13px; }
+  .scan-tag-hint { font-size: 10px; margin-bottom: 14px; }
+  .gt-intake-guide { padding: 18px; gap: 12px; }
+  .gt-intake-guide h2 { font-size: 21px; }
+  .gt-dialog { padding: 10px; max-height: calc(100dvh - 12px); }
+  .gt-panel { padding: 19px 17px; border-radius: 20px; }
+  .gt-heading h2 { font-size: 24px; }
+  .gt-description { font-size: 11px; }
+  .gt-tag-stage { padding: 20px 10px; }
+  .gt-camera-caption { font-size: 8px; }
+  .gt-print-options { grid-template-columns: minmax(0, 1fr) 70px; gap: 9px; }
+  .gt-panel input, .gt-panel select { font-size: 16px; }
+  .gt-recent-actions { gap: 7px; }
+  .gt-manual-form > div { flex-wrap: wrap; }
+  .gt-manual-form input { flex-basis: 100%; }
+  .gt-manual-form button { width: 100%; }
+}
+@media print { .gt-dialog { display: none !important; } }

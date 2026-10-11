@@ -23,6 +23,7 @@ import tempfile
 _TMP_DB = os.path.join(tempfile.mkdtemp(prefix="adonai-grading-test-"), "grading.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
 os.environ["STORE_MASTER_KEY"] = "test-master-key-grading"
+os.environ["ADONAI_REQUIRE_STAFF_AUTH"] = "1"
 os.environ["JWT_SECRET"] = "test-jwt-secret-grading"
 os.environ["ADONAI_RATE_LIMIT_DISABLED"] = "1"
 

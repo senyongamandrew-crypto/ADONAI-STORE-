@@ -10,7 +10,7 @@
   /**
    * Compress an image File from local files / gallery into a compact
    * JPEG data-url that is safe and fast to keep in the local DB
-   * (max 800px on the long edge, ~80% quality).
+   * (max 1200px on the long edge, ~80% quality).
    * @returns Promise<string> data-url
    */
   function compressImage(file) {
@@ -27,7 +27,7 @@
         img.onerror = () => reject(new Error("Could not decode image file"));
         img.onload = () => {
           try {
-            const MAX = 800;
+            const MAX = 1200;
             let { width: w, height: h } = img;
             const scale = Math.min(1, MAX / Math.max(w, h));
             w = Math.max(1, Math.round(w * scale));

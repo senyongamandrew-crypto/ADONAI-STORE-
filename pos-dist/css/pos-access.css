@@ -1,0 +1,71 @@
+/* Optional POS passwords — shared by the register and operations console. */
+.pa-settings-card { max-width:860px; margin:0 0 22px; padding:24px; }
+.pa-settings-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:14px; }
+.pa-settings-heading h3 { margin:4px 0 7px; font-size:21px; color:#0f172a; }
+.pa-settings-heading p, .pa-section > p { margin:4px 0 15px; color:#64748b; font-size:13px; line-height:1.6; }
+.pa-eyebrow { font-size:10px !important; color:#15803d !important; font-weight:800; letter-spacing:.12em; margin:0 0 5px; }
+.pa-status-badge { flex:none; color:#166534; background:#ecfdf5; border:1px solid #bbf7d0; border-radius:99px; padding:6px 10px; font-size:11px; font-weight:700; }
+.pa-setup-intro { display:flex; gap:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:16px; margin:16px 0; }
+.pa-setup-intro strong { color:#0f172a; font-size:14px; }
+.pa-setup-intro p { color:#64748b; font-size:13px; margin:5px 0 0; line-height:1.6; }
+.pa-status-dot { width:9px; height:9px; border-radius:50%; background:#16a34a; flex:none; margin-top:6px; }
+.pa-section { margin:22px 0 0; padding-top:22px; border-top:1px solid #e2e8f0; }
+.pa-section h4, .pa-owner-form h4 { margin:0 0 10px; color:#0f172a; font-size:15px; }
+.pa-owner-form .field, .pa-password-row .field, .pa-edit-dialog .field { margin:0; min-width:0; }
+.pa-two-fields { display:grid; grid-template-columns:1fr 1fr; gap:15px; margin:12px 0 16px; }
+.pa-owner-form label, .pa-password-row label, .pa-edit-dialog label { font-size:12px; color:#334155; font-weight:700; }
+.pa-owner-form input, .pa-password-row input:not([type=checkbox]), .pa-edit-dialog input:not([type=checkbox]) { width:100%; margin-top:7px; min-height:44px; }
+.pa-footnote { margin:14px 0 0; font-size:11.5px; line-height:1.6; color:#64748b; }
+.pa-admin-banner { display:flex; align-items:center; justify-content:space-between; gap:12px; background:#ecfdf5; border:1px solid #bbf7d0; border-radius:12px; padding:15px; }
+.pa-admin-banner strong { display:block; font-size:13px; color:#166534; }
+.pa-admin-banner span { display:block; color:#4b7c62; font-size:11px; margin-top:3px; }
+.pa-policy-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0 16px; }
+.pa-choice { display:flex; gap:10px; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; align-items:flex-start; cursor:pointer; min-width:0; }
+.pa-choice input { width:17px; height:17px; margin:1px 0 0; flex:none; accent-color:#15803d; }
+.pa-choice strong { display:block; color:#334155; font-size:11.5px; }
+.pa-choice small { display:block; font-size:10.5px; color:#64748b; line-height:1.5; font-weight:400; margin-top:4px; }
+.pa-password-row { border:1px solid #e2e8f0; border-radius:12px; margin:12px 0; padding:16px; min-width:0; }
+.pa-row-top, .pa-batch-actions { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.pa-row-top legend { color:#334155; font-size:12px; font-weight:800; }
+.pa-assign-label { color:#64748b; font-size:11px; font-weight:600; margin-bottom:8px; }
+.pa-key-areas { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin:10px 0; }
+.pa-key-areas .pa-choice { padding:9px; }
+.pa-key-card { display:flex; justify-content:space-between; gap:12px; border:1px solid #e2e8f0; border-radius:12px; padding:15px; margin-top:10px; }
+.pa-key-card strong { font-size:13px; color:#0f172a; }
+.pa-key-card p { margin:6px 0 0; color:#64748b; font-size:11px; }
+.pa-key-state { display:inline-block; padding:3px 7px; margin-left:7px; background:#f1f5f9; color:#64748b; border-radius:99px; font-size:9px; font-weight:700; }
+.pa-key-state.enabled { background:#ecfdf5; color:#166534; }
+.pa-key-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:6px; }
+.pa-empty { margin:12px 0; padding:13px; border:1px dashed #cbd5e1; color:#64748b; font-size:12px; border-radius:10px; }
+.pa-admin-controls summary { color:#334155; font-weight:700; font-size:12px; cursor:pointer; }
+.pa-admin-controls[open] .pa-owner-form { padding:18px 0; }
+.pa-error { color:#b91c1c !important; font-size:12px; min-height:18px; }
+.pos-access-overlay { position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,.64); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:20px; }
+.pos-access-dialog { width:100%; max-width:440px; border-radius:20px; background:#fff; border:1px solid #e2e8f0; padding:27px; box-shadow:0 24px 80px rgba(0,0,0,.22); max-height:90dvh; overflow:auto; color:#334155; }
+.pos-access-dialog h2 { margin:8px 0 10px; color:#0f172a; font-size:23px; font-weight:800; }
+.pos-access-dialog > p:not(.pa-eyebrow) { font-size:13px; color:#64748b; line-height:1.65; }
+.pa-dialog-icon { width:46px; height:46px; display:grid; place-items:center; border-radius:14px; background:#ecfdf5; color:#15803d; margin-bottom:18px; }
+.pos-access-dialog form > label { display:block; font-size:12px; font-weight:700; margin:18px 0 8px; }
+.pa-password-input { display:flex; border:1px solid #cbd5e1; border-radius:10px; overflow:hidden; background:#f8fafc; }
+.pa-password-input input { flex:1; min-width:0; width:100%; border:0; background:transparent; padding:13px; outline:none; font-size:16px; color:#0f172a; }
+.pa-password-input:focus-within { border-color:#16a34a; box-shadow:0 0 0 3px #16a34a20; }
+.pa-password-input button { border:0; background:transparent; padding:0 12px; color:#15803d; font-size:11px; font-weight:700; cursor:pointer; }
+.pa-dialog-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:14px; }
+.pa-dialog-foot { font-size:10.5px !important; margin:17px 0 0; }
+.pa-edit-dialog { max-width:540px; }
+.pa-locked-view { max-width:650px; margin:48px auto; text-align:center; border:1px solid #e2e8f0; background:#fff; padding:35px; border-radius:18px; }
+.pa-locked-view h2 { font-size:24px; color:#0f172a; margin:12px 0; }
+.pa-locked-view p { color:#64748b; font-size:13px; line-height:1.65; }
+.pa-locked-actions { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:20px; }
+.pa-settings-card .btn.primary, .pos-access-dialog .btn.primary { background:#15803d; color:#fff; border-color:#15803d; }
+@media (max-width:640px) {
+  .pa-settings-card { padding:18px; }
+  .pa-settings-heading { flex-direction:column; gap:8px; }
+  .pa-two-fields, .pa-policy-grid, .pa-key-areas { grid-template-columns:1fr; }
+  .pa-key-card, .pa-admin-banner { flex-direction:column; align-items:stretch; }
+  .pa-key-actions { justify-content:flex-start; }
+  .pa-batch-actions { align-items:stretch; flex-direction:column; }
+  .pos-access-overlay { padding:14px; }
+  .pos-access-dialog { padding:22px; }
+  .pa-locked-view { margin:22px 0; padding:25px 18px; }
+}

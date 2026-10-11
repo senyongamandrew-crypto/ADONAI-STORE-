@@ -7,9 +7,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.3" />
-<link rel="stylesheet" href="css/notifications.css?v=1.0" />
+<link rel="stylesheet" href="styles.css?v=7.6" />
+<link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
+<link rel="stylesheet" href="css/dispatch.css?v=1.0" />
+<link rel="stylesheet" href="css/notifications.css?v=2.0" />
 <link rel="stylesheet" href="css/admin-overhaul.css?v=1.0" />
+<link rel="stylesheet" href="css/pos-access.css?v=1.0" />
+<link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
+<link rel="stylesheet" href="css/garment-media.css?v=1.0" />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -72,11 +77,11 @@
         <span class="me-avatar" id="meAvatar">OA</span>
         <div>
           <strong id="meName">Open access</strong>
-          <span id="meRole">No PIN set yet</span>
+          <span id="meRole">PIN-free · Admin tools available</span>
         </div>
       </div>
       <div class="foot-actions">
-        <button class="mini-link" id="btnMasterKey"><i data-icon="key-round" data-size="13"></i> Master Key</button>
+        <button class="mini-link" id="btnMasterKey" data-credential-control><i data-icon="key-round" data-size="13"></i> Master Key</button>
         <button class="mini-link" id="btnAdminExit" type="button">Sign out</button>
       </div>
     </div>
@@ -94,6 +99,8 @@
         <span class="notif-badge" id="notifBadge">0</span>
       </button>
     </header>
+
+    <section class="pa-locked-view" id="protectedAreaView" hidden><p class="pa-eyebrow">ADMIN-CONFIGURED PROTECTION</p><h2 id="protectedAreaTitle">Protected area</h2><p id="protectedAreaMessage">Enter the password set by the admin to continue. The register stays open.</p><div class="pa-locked-actions"><button class="btn primary" type="button" id="protectedAreaRetry">Unlock area</button><a class="btn" href="pos.html">Back to register</a></div></section>
 
     <!-- ==================== SALES ANALYTICS ==================== -->
     <section class="view active" id="view-overview">
@@ -251,6 +258,11 @@
         <p class="muted">Register factory-fresh multi-quantity products or curated 1-of-1 vintage pieces with barcode tags, variants, photos, and UGX pricing.</p>
       </div>
 
+      <section class="gt-intake-guide" aria-labelledby="garmentWorkflowTitle">
+        <div><p class="gt-eyebrow">PHYSICAL TAGS · PHONE-CAMERA CHECKOUT</p><h2 id="garmentWorkflowTitle">Save. Tag. Scan.</h2><p>Save the garment and price, print a barcode hangtag, then scan it at the register. No searching through catalog cards.</p></div>
+        <div class="gt-intake-guide-actions"><button class="btn" type="button" data-sample-tag>Preview tag layout</button><a href="pos.html">Open camera checkout ↗</a></div>
+      </section>
+
       <div class="card intake-card">
         <div class="flip" id="flipDemo" hidden></div>
         <h4 class="sec">1. Target Audience &amp; Category</h4>
@@ -269,7 +281,7 @@
         <div class="field"><label>Item title / name</label><input class="sel-full" id="inTitle" placeholder="e.g. Factory Cotton Crew Tee or 1990s Denim Jacket" /></div>
         <div class="fgrid third">
           <div class="field"><label>Barcode / SKU</label>
-            <div class="sku-row"><input class="sel-full" id="inSku" /><button class="btn sm ghost" id="btnRollSku" type="button">Roll</button></div>
+            <div class="sku-row"><input class="sel-full" id="inSku" maxlength="45" aria-label="Unique garment SKU" /><button class="btn sm ghost" id="btnRollSku" type="button">Roll</button></div>
           </div>
           <div class="field"><label>Condition grade</label><select id="inCond" class="sel-full"></select></div>
         </div>
@@ -307,13 +319,13 @@
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
         </div>
 
-        <h4 class="sec">4. Item Photos (4 Angles)</h4>
+        <h4 class="sec">4. Garment Photos &amp; Video</h4>
         <div class="photos-head">
-          <div><label class="flab">Multi-angle item photography (gallery &amp; local files)</label>
-            <p class="muted small">Upload high-resolution product photos from your gallery or local files</p></div>
-          <span class="muted small" id="angleCount">0 / 4 angles</span>
+          <div><label class="flab">A flexible gallery, straight from your phone</label>
+            <p class="muted small">More than four views? Add extra photos and a short garment video.</p></div>
+          <span class="muted small" id="angleCount">0 / 12 photos</span>
         </div>
-        <div class="photo-row" id="photoRow"></div>
+        <div id="photoRow"></div>
 
         <div class="field"><label>Item story / description (visible on catalog)</label><textarea class="sel-full" id="inStory" placeholder="Describe fit, fabric feel, vintage era, and standout features…"></textarea></div>
         <div class="field"><label>Notes for shoppers / floor staff (intake notes)</label><textarea class="sel-full" id="inNotes" placeholder="Any minor wear details, dry clean status, or special handling notes…"></textarea></div>
@@ -353,29 +365,30 @@
         <div class="field"><label>Which photo shows the flaw?<span class="fhint">Flags that thumbnail with a warning icon</span></label>
           <select class="sel-full" id="inFlawPhoto">
             <option value="-1">No flaw close-up</option>
-            <option value="0">Photo 1</option>
-            <option value="1">Photo 2</option>
-            <option value="2">Photo 3</option>
-            <option value="3">Photo 4</option>
           </select>
         </div>
 
         <div class="intake-actions">
-          <button class="btn primary big" id="btnIntakeSave">Tag &amp; Save (UGX 0)</button>
-          <button class="btn big" id="btnIntakeMore">Save &amp; Tag Another Piece</button>
+          <button class="btn primary big" id="btnIntakePrint" type="button">Save &amp; Print Tag</button>
+          <button class="btn big" id="btnIntakeSave" type="button">Save Garment (UGX 0)</button>
+          <button class="btn big" id="btnIntakeMore" type="button">Save &amp; Add Another Piece</button>
         </div>
       </div>
 
-      <!-- print-style tag preview -->
+      <!-- Customer-facing draft: no pricing, condition or operational notes. -->
       <div class="card tag-card">
-        <div class="card-head"><span class="flab">Print tag preview</span><span class="chip-gold" id="tagCondition">1-OF-1 VINTAGE</span></div>
-        <p class="kicker" id="tagKicker">MEN · TOPS &amp; SHIRTS</p>
-        <h3 class="tag-title" id="tagTitle">Item Title</h3>
-        <p class="muted small" id="tagMeta">Brand: Unbranded | Size: L | Color: Standard</p>
-        <p class="tag-price"><span id="tagPrice">UGX 0</span> <s id="tagStrike"></s></p>
-        <div class="tag-bars" id="tagBars"></div>
-        <p class="tag-code" id="tagCode">ADN-XXX-0000</p>
-        <p class="tag-store">ADONAI STORE · BRAND-NEW + CURATED VINTAGE · KAMPALA, UGANDA</p>
+        <div class="card-head"><span class="flab">Draft garment tag</span></div>
+        <div class="gt-tag-stage gt-draft-tag-stage">
+          <article class="gt-hangtag">
+            <header class="gt-tag-brand" id="tagStoreName">ADONAI STORE</header>
+            <h3 class="gt-tag-name" id="tagTitle">Garment name</h3>
+            <div class="gt-tag-bars" id="tagBars"></div>
+            <p class="gt-tag-code" id="tagCode">ADN-XXX-0000</p>
+            <footer class="gt-tag-website" id="tagWebsite">adonai-store.onrender.com</footer>
+          </article>
+        </div>
+        <p class="gt-draft-note">Save first to print. The tag contains only the store name, garment name, barcode and website. Prices stay in the catalog and appear at checkout.</p>
+        <button class="btn gt-last-print" id="btnPrintLastTag" type="button" disabled>Print last saved tag</button>
       </div>
 
       <div class="card">
@@ -384,42 +397,87 @@
       </div>
     </section>
 
-    <!-- ==================== DATA POSTING AUDIT LOGS ==================== -->
+    <!-- ==================== DAILY POSTING / RECEIPT HISTORY ==================== -->
     <section class="view" id="view-customers">
       <div class="page-head row">
         <div>
-          <p class="kicker">POSTED RECORDS · CHRONOLOGICAL</p>
+          <p class="kicker">DAILY RECEIPTS · STORED HISTORY</p>
           <h1>Data Posting Audit Logs</h1>
-          <p class="muted">Review completed sales, print receipts, and export posted records for documentation.</p>
+          <p class="muted">Today's posted sales, from morning through midnight. Tap any invoice to print it, or print the day's receipts and summary at closing.</p>
         </div>
         <div class="row audit-actions">
-          <details class="export-menu-wrap" id="auditExportDetails">
-            <summary class="btn ghost" id="btnExportAudit">Export CSV <span aria-hidden="true">⌄</span></summary>
-            <div class="export-menu" id="auditExportMenu">
-              <button type="button" data-export-audit="sales"><span>▣</span><span><strong>Sales records</strong><small>Posted transactions</small></span></button>
-              <button type="button" data-export-audit="stock"><span>▤</span><span><strong>Stock inventory</strong><small>Catalog and quantities</small></span></button>
-              <button type="button" data-export-audit="ledger"><span>▥</span><span><strong>Financial ledger</strong><small>Payment and value summary</small></span></button>
-              <button type="button" data-export-audit="staff"><span>♙</span><span><strong>Staff directory</strong><small>Cashier and role records</small></span></button>
-              <button type="button" data-export-audit="demo"><span>✦</span><span><strong>Demo examples</strong><small>Safe sample rows — delete anytime</small></span></button>
-            </div>
-          </details>
-          <button class="btn primary" id="btnPrintAudit" type="button">Print summary</button>
-          <a class="audit-download-fallback" id="auditDownloadFallback" hidden download>Download file</a>
+          <button class="btn primary" id="btnPrintDayReceipts" type="button"><span aria-hidden="true">▤</span> Print day's invoices</button>
+          <button class="btn ghost" id="btnPrintAudit" type="button">Print day summary</button>
         </div>
       </div>
-      <input class="search-wide" id="auditSearch" type="search" placeholder="Search receipt, customer, cashier or payment method" />
+      <div class="audit-day-bar">
+        <div class="audit-day-copy"><span class="audit-day-badge" id="auditDayBadge">TODAY</span><h2 id="auditDayTitle">Today's receipts</h2><p id="auditDayCaption">Kampala time · 00:00 up to midnight. Yesterday's receipts stay safely in saved history.</p></div>
+        <div class="audit-day-controls">
+          <div class="audit-single-day"><label for="auditReceiptDay">Receipt date</label><input class="sel-full" id="auditReceiptDay" type="date" /></div>
+          <button class="btn sm" id="btnAuditToday" type="button">Today</button>
+          <button class="btn sm" id="btnAuditYesterday" type="button">Yesterday</button>
+          <button class="btn sm" id="btnRefreshAudit" type="button">↻ Refresh receipts</button>
+        </div>
+      </div>
+      <p class="audit-retention-note">A new day shows a new list — <strong>no records are deleted</strong>. Select Yesterday or a receipt date above, or a report period below to reprint older invoices or export them. Financial Ledgers keeps the saved postings.</p>
+      <div class="audit-receipts-toolbar"><label class="sr-only" for="auditSearch">Search selected receipts or records</label><input class="search-wide" id="auditSearch" type="search" placeholder="Search receipt, customer, phone or reference" /><div class="audit-print-layout"><label for="auditPrintPaper">Invoice paper</label><select class="sel-full" id="auditPrintPaper"><option value="a4">A4 / Save as PDF</option><option value="receipt">Receipt roll (80 mm)</option></select></div></div>
+      <div class="audit-feed-heading"><h2 id="auditReceiptsTitle">Today's receipts</h2><span>Tap a receipt to open printing. Copies do not change the sale.</span></div>
       <div class="audit-summary" id="auditSummary"></div>
+      <p class="audit-sync-state" id="auditSyncState" role="status" aria-live="polite">Checking saved records…</p>
+      <div class="audit-print-status" id="auditPrintStatus" role="status" aria-live="polite" hidden></div>
       <div class="guest-list" id="auditList"></div>
+      <div class="audit-export-heading"><h2>Saved records &amp; spreadsheet exports</h2><p>Choose a recent or older period below. Download CSV or Excel, then print the file from your spreadsheet app.</p></div>
+      <div class="audit-export-panel">
+        <div class="audit-filter-grid">
+          <div class="field">
+            <label for="auditReport">Records to download</label>
+            <select class="sel-full" id="auditReport">
+              <option value="sales">Sales records</option>
+              <option value="orders">Orders &amp; fulfillment</option>
+              <option value="customers">Customer details</option>
+              <option value="ledger">Financial ledger</option>
+              <option value="expenses">Expenses</option>
+              <option value="journal">General journal</option>
+              <option value="stock">Current stock inventory</option>
+              <option value="staff">Staff directory</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="auditDatePreset">Receipt day / export period</label>
+            <select class="sel-full" id="auditDatePreset">
+              <option value="today" selected>Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="custom">Choose a past day / custom dates</option>
+              <option value="all">All saved dates</option>
+            </select>
+          </div>
+          <div class="field"><label for="auditDateFrom">From (inclusive)</label><input class="sel-full" id="auditDateFrom" type="date" /></div>
+          <div class="field"><label for="auditDateTo">To (inclusive)</label><input class="sel-full" id="auditDateTo" type="date" /></div>
+        </div>
+        <p class="audit-report-note" id="auditReportNote">Completed POS checkouts and confirmed paid online orders, by posting/payment date. Pending or cancelled orders are excluded.</p>
+        <div class="audit-export-foot"><span>Dates use <strong>Kampala time (EAT)</strong>. CSV &amp; Excel can be printed from your spreadsheet app.</span><div class="audit-file-actions"><button class="btn sm" id="btnExportAudit" type="button">↓ Export CSV</button><button class="btn sm" id="btnExportAuditExcel" type="button">↓ Excel (.xlsx)</button></div></div>
+        <div class="audit-download-status" id="auditDownloadStatus" role="status" aria-live="polite" hidden>
+          <span class="audit-download-message" id="auditDownloadMessage"></span>
+          <a class="audit-download-fallback" id="auditDownloadFallback" hidden download target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Download again</a>
+        </div>
+      </div>
     </section>
 
     <!-- ==================== DELIVERY PARTNERS & DISPATCH ==================== -->
-    <section class="view" id="view-dispatch">
-      <div class="page-head">
-        <p class="kicker">DISPATCH</p>
-        <h1>Delivery Partners</h1>
-        <p class="muted">Assign an authorized boda rider or courier from an order. Adonai owns the customer communication and delivery handoff throughout the route.</p>
+    <section class="view dispatch-center" id="view-dispatch">
+      <div class="page-head dc-page-head"><div><p class="kicker">DELIVERY OPERATIONS · CONSENT-BASED GPS</p><h1>Delivery Partners &amp; Dispatch</h1><p class="muted">Your delivery team, assigned orders and latest shared GPS positions — in one workspace.</p></div><div class="head-actions"><button class="btn" id="btnRefreshDispatch" type="button">↻ Refresh</button><button class="btn primary" type="button" data-add-rider>+ Add delivery partner</button></div></div>
+      <div class="dc-stats"><div><span>DELIVERY PARTNERS</span><strong id="dcCount-partners">0</strong><small>Server-saved roster</small></div><div><span>LIVE GPS</span><strong id="dcCount-live">0</strong><small>Fresh fix within 90 seconds</small></div><div><span>ACTIVE DELIVERIES</span><strong id="dcCount-jobs">0</strong><small>Assigned &amp; dispatched</small></div><div><span>GPS ATTENTION</span><strong id="dcCount-attention">0</strong><small>Waiting, stale or simulated</small></div></div>
+      <div class="dc-status" id="dispatchStatus" role="status" aria-live="polite" hidden></div>
+      <div class="dc-privacy" id="dispatchPrivacy" role="status" hidden></div>
+      <div class="dc-layout">
+        <div class="dc-map-panel"><div class="dc-panel-heading"><div><p class="kicker">LIVE LOCATOR</p><h2>Rider positions</h2></div><div class="dc-map-actions"><button class="btn sm" id="btnFitDispatch" type="button">Fit riders</button><button class="btn sm" id="btnDispatchStreetMap" type="button">Load street map</button></div></div><div class="dc-map-wrap"><div id="dispatchMap" aria-label="Map of consented rider GPS positions"></div><div class="dc-map-empty" id="dispatchMapEmpty">No shared GPS positions yet.</div></div><div class="dc-map-footer"><span><i class="dc-legend-dot live"></i> Live <i class="dc-legend-dot"></i> Last known / paused</span><span id="dispatchSync">Connecting to saved dispatch records…</span></div><p class="dc-map-note">Locations are GPS estimates with accuracy and timestamps, not phone-serial tracking. Street tiles are optional and reveal the viewed map area to OpenStreetMap. No route or ETA is invented.</p></div>
+        <aside class="dc-jobs-panel"><div class="dc-panel-heading"><div><p class="kicker">ORDER ALLOCATION</p><h2>Delivery queue <span id="dispatchOrderCount">0</span></h2></div></div><div id="dispatchOrders"></div></aside>
       </div>
-      <div class="rider-list" id="riderList"></div>
+      <div class="dc-pair-card" id="dispatchPairCard" hidden><button class="dc-text-button" id="btnCloseDispatchPair" type="button">Close</button><p class="kicker">PAIR AN AUTHORIZED ANDROID PHONE</p><h3 id="dispatchPairName"></h3><strong class="dc-pair-code" id="dispatchPairCode"></strong><p id="dispatchPairExpiry"></p><p>On the rider's updated Android app: Menu → Rider delivery app → enter this code. The rider then chooses Start sharing and permits Location + the visible tracking notification. A phone serial/IMEI is not required.</p><a class="btn" href="rider.html">View rider app instructions ↗</a></div>
+      <div class="dc-section-heading"><div><p class="kicker">AUTHORIZED DELIVERY TEAM</p><h2>Partners &amp; device status</h2></div><span class="muted small">GPS stops when the rider ends duty or phone access is revoked.</span></div><div class="rider-list dc-rider-grid" id="riderList"></div>
+      <div class="dc-bottom-grid"><section class="dc-activity"><p class="kicker">DELIVERY ACCOUNTABILITY</p><h2>Latest delivery updates</h2><ul id="dispatchEvents"></ul></section><section class="dc-how"><p class="kicker">ANDROID SCREEN-LOCK TRACKING</p><h2>Pair → start duty → deliver</h2><ol><li>Add a delivery partner and create a private pairing code.</li><li>The rider pairs their phone in the updated Android app and explicitly starts GPS sharing.</li><li>Assign a prepared, paid delivery order. The rider reports acceptance, collection, arrival and recipient-confirmed delivery.</li><li>End sharing from the app or its ongoing notification. Each duty ends after 12 hours.</li></ol><p>GPS, mobile data and notifications must be enabled. Battery controls, force-stop or lost network can interrupt updates; the locator shows stale data honestly. Existing APKs need a rebuild/install for this service.</p><a class="btn" href="rider.html">Open rider app instructions ↗</a></section></div>
     </section>
 
     <!-- ==================== FINANCIAL LEDGERS HUB ==================== -->
@@ -612,9 +670,8 @@
         <span class="live-dot"></span>
         <div class="grow">
           <strong id="lockState">Open access mode — stores &amp; terminals are unlocked</strong>
-          <p class="small muted">Flip the lock after setting passkeys on each staff account (via Edit Key).</p>
+          <p class="small muted" id="lockHint">No PIN, master key or environment-variable credentials are needed to use this terminal.</p>
         </div>
-        <label class="switch"><input type="checkbox" id="lockToggle" /><span class="slider"></span></label>
       </div>
 
       <!-- top filtering & control bar -->
@@ -652,14 +709,28 @@
     <section class="view" id="view-settings">
       <div class="page-head row">
         <div>
-          <p class="kicker">STORE &amp; SECURITY CONFIGURATION</p>
+          <p class="kicker">STORE CONFIGURATION</p>
           <h1>System Parameters</h1>
-          <p class="muted">Global delivery fee benchmarks, official WhatsApp numbers, and Admin Master Key controls.</p>
+          <p class="muted">Store details, delivery fees and optional passwords for sensitive POS areas.</p>
         </div>
-        <button class="chip-gold big" id="unlockChip"><i data-icon="lock" data-size="14"></i> Unlock Master Key</button>
+        <span class="chip-gold big on terminal-access-status" id="openAccessChip" role="status" hidden><i data-icon="unlock" data-size="14"></i> Register stays open</span>
+        <button class="chip-gold big" id="unlockChip" data-credential-control><i data-icon="lock" data-size="14"></i> Unlock Master Key</button>
       </div>
 
-      <div class="card" style="max-width:860px">
+      <div class="access-card" id="terminalAccessNotice" style="max-width:860px;margin-bottom:16px" hidden>
+        <span class="live-dot" aria-hidden="true"></span>
+        <div class="grow">
+          <strong>Checkout stays password-free</strong>
+          <p class="small muted">Passwords are optional. Create them below and choose the areas they protect — no environment-variable setup.</p>
+        </div>
+      </div>
+
+      <section class="card pa-settings-card" id="passwordsSettingsCard" aria-labelledby="passwordSettingsTitle">
+        <div class="pa-settings-heading"><div><p class="pa-eyebrow">OPTIONAL POS SECURITY</p><h3 id="passwordSettingsTitle">Passwords &amp; protected areas</h3><p>Admin-controlled passwords for important workspaces — never for the cashier register.</p></div><span class="pa-status-badge" id="posPasswordStatus">Optional</span></div>
+        <div id="posPasswordSettings" aria-live="polite"><p class="muted small">Loading password settings…</p></div>
+      </section>
+
+      <div class="card" id="storeProfileSettings" style="max-width:860px">
         <div class="fgrid">
           <div class="field full"><label>Store name</label><input class="sel-full" id="setName" /></div>
           <div class="field"><label>WhatsApp customer notification line (raw digits)<span class="fhint">e.g. 256758873398</span></label><input class="sel-full" id="setWaRaw" /></div>
@@ -673,7 +744,7 @@
           <div class="field full"><label>Opening hours</label><input class="sel-full" id="setHours" /></div>
           <div class="field"><label>Base delivery fee (UGX)<span class="fhint">Single source of truth · delivery zones &amp; new catalog items use it instantly</span></label><input class="sel-full" id="setFee" type="number" min="0" /></div>
           <div class="field full"><label style="display:flex;gap:10px;align-items:center;font-weight:600;cursor:pointer"><input type="checkbox" id="setFeeApplyAll" style="width:16px;height:16px;accent-color:#15803d;flex:none" /><span>Also apply this fee to all existing catalog items<span class="fhint" style="font-weight:400">overwrites each item&apos;s transport &amp; adjusts selling prices by the 50 / 50 split</span></span></label></div>
-          <div class="field"><label>Update Admin Master Key<span class="fhint">Minimum 6 characters — leave blank to keep current key</span></label><input class="sel-full" id="setKey" placeholder="Leave blank to keep current key" /></div>
+          <div class="field" data-credential-control><label>Update Admin Master Key<span class="fhint">Minimum 6 characters — leave blank to keep current key</span></label><input class="sel-full" id="setKey" placeholder="Leave blank to keep current key" /></div>
         </div>
         <div class="settings-foot">
           <span class="muted small">Changes apply instantly across public storefront &amp; cashier terminals.</span>
@@ -693,11 +764,19 @@
 
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.0"></script>
-<script src="js/notifications.js?v=1.0"></script>
+<script src="js/notifications.js?v=2.0"></script>
 <script src="js/icons.js?v=1.1"></script>
-<script src="js/db.js?v=4.0"></script>
-<script src="js/auth.js?v=2.7"></script>
-<script src="js/intake.js?v=5.0"></script>
-<script src="app.js?v=6.4"></script>
+<script src="js/db.js?v=4.7"></script>
+<script src="js/auth.js?v=3.0"></script>
+<script src="js/pos-access.js?v=1.1"></script>
+<script src="js/intake.js?v=5.1"></script>
+<script src="js/garment-media.js?v=1.0"></script>
+<script src="js/garment-tools.js?v=1.1"></script>
+<script src="js/file-downloads.js?v=1.0"></script>
+<script src="js/audit-exports.js?v=1.1"></script>
+<script src="js/receipt-printing.js?v=1.0"></script>
+<script src="js/vendor/leaflet/leaflet.js"></script>
+<script src="js/dispatch-center.js?v=1.0"></script>
+<script src="app.js?v=7.3"></script>
 </body>
 </html>

@@ -1,10 +1,10 @@
 {
   "name": "adonai-store-pos-android",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Adonai Store \u2014 Android POS Cashier Terminal App & Hybrid Mobile Architecture",
   "main": "pos.html",
   "scripts": {
-    "test": "node tests/factory-reset.test.js && node tests/mobile-scroll.test.js && node tests/intake-lot-selection.test.js && node tests/pos-ui.test.js",
+    "test": "node tests/factory-reset.test.js && node tests/mobile-scroll.test.js && node tests/intake-lot-selection.test.js && node tests/pos-ui.test.js && node tests/terminal-access.test.js && node tests/area-passwords.test.js && node tests/notifications.test.js && node tests/register-design.test.js && node tests/garment-tools.test.js && node tests/garment-media.test.js && node tests/audit-exports.test.js && node tests/receipt-printing.test.js && node tests/dispatch.test.js",
     "test:mobile-scroll": "node tests/mobile-scroll.test.js",
     "test:intake-lot-selection": "node tests/intake-lot-selection.test.js",
     "bundle:pos": "node scripts/bundle-pos.js",
@@ -13,7 +13,15 @@
     "cap:sync": "npx @capacitor/cli sync android",
     "cap:open": "npx @capacitor/cli open android",
     "cap:run": "npx @capacitor/cli run android",
-    "test:factory-reset": "node tests/factory-reset.test.js"
+    "test:factory-reset": "node tests/factory-reset.test.js",
+    "test:terminal-access": "node tests/terminal-access.test.js",
+    "test:notifications": "node tests/notifications.test.js",
+    "test:register-design": "node tests/register-design.test.js",
+    "test:garment-tools": "node tests/garment-tools.test.js",
+    "test:garment-media": "node tests/garment-media.test.js",
+    "test:audit-exports": "node tests/audit-exports.test.js",
+    "test:receipt-printing": "node tests/receipt-printing.test.js",
+    "test:dispatch": "node tests/dispatch.test.js"
   },
   "keywords": [
     "pos",
@@ -32,7 +40,8 @@
     "@capacitor/cli": "^6.0.0",
     "@capacitor/core": "^6.0.0",
     "@capacitor/keyboard": "^6.0.0",
-    "@capacitor/status-bar": "^6.0.0"
+    "@capacitor/status-bar": "^6.0.0",
+    "@zxing/browser": "0.1.5"
   },
   "devDependencies": {
     "css-tree": "^3.2.1",

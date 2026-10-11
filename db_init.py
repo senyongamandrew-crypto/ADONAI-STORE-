@@ -154,6 +154,11 @@ def _dual_inventory_backfill_statements(
 def apply_additive_schema_migrations():
     """Add columns create_all cannot add, without changing or dropping live data."""
     additions = {
+        "riders": [
+            ("vehicle", "VARCHAR(100) NOT NULL DEFAULT 'Motorbike (Boda)'"),
+            ("zone", "VARCHAR(100) NOT NULL DEFAULT ''"),
+            ("archived", "BOOLEAN NOT NULL DEFAULT FALSE"),
+        ],
         "products": [
             # These columns are backed by native PostgreSQL enums in the
             # explicit migration. SQLite uses VARCHAR + checks for local POS
@@ -858,6 +863,8 @@ def init_db() -> bool:
             seed_products(session)
             seed_sample_sales(session)
             backfill_financial_journal(session)
+            from notifications import backfill_history
+            backfill_history(session)
 
         logger.info("Database schema verification and auto-migration completed successfully.")
         return True

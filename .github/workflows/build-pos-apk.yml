@@ -21,11 +21,18 @@ on:
         description: 'Release Tag (e.g. v2.4.0)'
         required: false
         type: string
-        default: 'v2.4.0'
+        default: 'v2.5.0-preview.1'
+
+concurrency:
+  group: pos-apk-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
-  packages: write
+
+# Branch/PR install candidates use a separate app ID: existing app data is safe.
+env:
+  ADONAI_PREVIEW_BUILD: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') && '1' || '0' }}
 
 jobs:
   backend-tests:
@@ -54,11 +61,28 @@ jobs:
       - name: Run Backend Integration & Security Tests
         run: |
           python test_render_postgres.py
+          python -m unittest discover -s tests -p test_notifications.py -v
+          python -m unittest discover -s tests -p test_product_media.py -v
+          python -m unittest discover -s tests -p test_audit_exports.py -v
+          python -m unittest discover -s tests -p test_dispatch.py -v
+          python -m unittest discover -s tests -p test_apk_packaging.py -v
+
+  frontend-tests:
+    name: Web and phone-interface regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
 
   build-pos-apk:
     name: 📱 Build & Package Android POS APK
     runs-on: ubuntu-latest
-    needs: backend-tests
+    needs: [backend-tests, frontend-tests]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -66,7 +90,7 @@ jobs:
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Set up Java JDK 17
         uses: actions/setup-java@v4
@@ -150,11 +174,19 @@ jobs:
             "$BT/apksigner" verify --verbose "$f"
           done
 
+      - name: Verify packaged rider service and create installation metadata
+        run: |
+          python scripts/verify-pos-apk.py dist/adonai-pos-v2.apk
+
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: adonai-pos-v2-apk
-          path: dist/adonai-pos-v2.apk
+          path: |
+            dist/adonai-pos-v2.apk
+            dist/adonai-pos-v2.5.0-preview.apk
+            dist/SHA256SUMS.txt
+            dist/BUILD-INFO.json
           if-no-files-found: error
           retention-days: 30
 
@@ -172,26 +204,40 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           name: "Adonai POS ${{ github.event.inputs.release_tag || github.ref_name }}"
+          target_commitish: ${{ github.sha }}
           draft: false
-          prerelease: false
+          prerelease: ${{ env.ADONAI_PREVIEW_BUILD == '1' }}
           files: |
             dist/adonai-pos-v2.apk
-            dist/adonai-pos-v2-debug.apk
+            dist/adonai-pos-v2.5.0-preview.apk
+            dist/SHA256SUMS.txt
+            dist/BUILD-INFO.json
           body: |
-            ## Adonai Store — Android POS APK Release
+            ## Adonai Store — installation-ready Android build
 
-            ### 📦 Download & Installation
-            - **Direct APK**: `adonai-pos-v2.apk` (signed release build)
-            - **Package ID**: `com.adonaithrift.pos`
-            - **Min Android**: 5.1 (API 22) · **Target**: API 34
-            - Enable "Install unknown apps" for your browser/file manager, then tap the APK.
+            Download the signed **adonai-pos-v2.5.0-preview.apk** for a branch
+            installation candidate, or **adonai-pos-v2.apk** for a normal build.
+            Allow "Install unknown apps" for your browser/Files and open the APK.
+            You do not need Android Studio or any build tools on your phone.
 
-            ### ✨ Features
-            - Offline SQLite & local cache sync
-            - Barcode & SKU lookup
-            - Camera intake & photo compression
-            - Cash & MTN / Airtel MoMo tender settlement
-            - 80mm thermal receipt printing
-            - Outbound one-way navigation to live web storefront (`https://adonaithrift.ug`)
+            Branch builds are labelled **Adonai Store Preview** and install
+            alongside the existing POS, not over it. Do not uninstall your
+            existing app or clear its data. No unsynced phone data is copied.
+            Use a device already assigned to you or pair an authorized rider.
+
+            Includes server-saved delivery partners/manual dispatch, native
+            explicit Start/Stop location foreground service, 12-hour duties,
+            secure pairing, freshness/accuracy/simulated labels, recipient
+            delivery updates, receipt printing, spreadsheet exports and
+            garment media/tag scanning. The cashier remains open; sensitive
+            GPS access requires the configured private Orders protection.
+
+            The **updated backend must also be deployed** to the store HTTPS
+            origin before pairing/dispatch endpoints can work. This build does
+            not itself deploy the backend or alter your live store database.
+            Physical-device screen-lock/GPS and printer checks remain necessary.
+            APK compile, package content and signature verification are checked
+            by this workflow; checksums/build identity accompany the download.
+            Minimum Android 5.1 (API 22); target API 34.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

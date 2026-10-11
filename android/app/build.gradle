@@ -13,17 +13,20 @@ def keystorePassword = System.getenv('ADONAI_KEYSTORE_PASSWORD') ?: project.find
 def keyAliasName = System.getenv('ADONAI_KEY_ALIAS') ?: project.findProperty('ADONAI_KEY_ALIAS')
 def keyPasswordValue = System.getenv('ADONAI_KEY_PASSWORD') ?: project.findProperty('ADONAI_KEY_PASSWORD')
 def hasReleaseKeystore = keystoreFilePath != null && file(keystoreFilePath).exists()
+// Safe installation candidate: no signing-key conflict or overwrite of an existing POS.
+def previewBuild = System.getenv('ADONAI_PREVIEW_BUILD') == '1'
 
 android {
     namespace "com.adonaithrift.pos"
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.adonaithrift.pos"
+        applicationId previewBuild ? "com.adonaithrift.pos.preview" : "com.adonaithrift.pos"
         minSdk 22
         targetSdk 34
-        versionCode 20400
-        versionName "2.4.0"
+        versionCode 20500
+        versionName previewBuild ? "2.5.0-preview" : "2.5.0"
+        manifestPlaceholders = [adonaiAppLabel: previewBuild ? "Adonai Store Preview" : "@string/app_name"]
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

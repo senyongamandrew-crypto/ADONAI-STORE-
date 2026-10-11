@@ -22,6 +22,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import uuid
 
 # Ensure current directory in python path
@@ -31,6 +32,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # unit requests, and a dedicated master key is provided via the environment
 # (the old hardcoded default key has been permanently retired).
 os.environ.setdefault("ADONAI_RATE_LIMIT_DISABLED", "1")
+# Security regressions exercise the optional protected mode. PIN-free tests
+# explicitly unset/disable this flag and must prove credential-free saves.
+os.environ["ADONAI_REQUIRE_STAFF_AUTH"] = "1"
 TEST_MASTER_KEY = "TEST-MASTER-KEY-9271-SECURE"
 os.environ.setdefault("STORE_MASTER_KEY", TEST_MASTER_KEY)
 
@@ -57,6 +61,9 @@ from models import (
     Product,
     Order,
     OrderItem,
+    Rider,
+    RiderDevice,
+    DeliveryEvent,
     Category,
     User,
     Inventory,
@@ -86,7 +93,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
         if not init_db():
             raise RuntimeError("Test schema bootstrap failed — see the init_db log above.")
 
-    def api_request(self, method, path, payload=None, terminal_key=None, query=""):
+    def api_request(self, method, path, payload=None, terminal_key=None, query="", headers=None):
         raw = json.dumps(payload or {}).encode("utf-8") if payload is not None else b""
         environ = {
             "REQUEST_METHOD": method,
@@ -97,6 +104,8 @@ class TestRenderPostgresHardening(unittest.TestCase):
         }
         if terminal_key:
             environ["HTTP_X_TERMINAL_KEY"] = terminal_key
+        for name, value in (headers or {}).items():
+            environ["HTTP_" + name.upper().replace("-", "_")] = value
         status = []
         response = wsgi_app(environ, lambda value, headers: status.append(value))
         decoded = b"".join(response).decode("utf-8")
@@ -456,6 +465,313 @@ class TestRenderPostgresHardening(unittest.TestCase):
                 os.environ.pop("STORE_MASTER_KEY", None)
             else:
                 os.environ["STORE_MASTER_KEY"] = original
+
+    def test_05b_pin_free_terminal_session_publishes_settings(self):
+        """Opening a terminal needs no PIN but receives a real admin JWT."""
+        from api import is_authenticated_staff, verify_jwt_token
+
+        with mock.patch.dict(os.environ, {"ADMIN_ACCESS_PIN": "unused-legacy-admin-key"}):
+            # The absence of the optional protection flag must be PIN-free,
+            # even if old (or misconfigured) credential variables still exist.
+            os.environ.pop("ADONAI_REQUIRE_STAFF_AUTH", None)
+            status, info = self.api_request("GET", "/api/auth/status")
+            self.assertTrue(status.startswith("200"))
+            self.assertFalse(info["requires_staff_auth"])
+            self.assertEqual(info["access_mode"], "open")
+            self.assertNotIn("unused-legacy-admin-key", json.dumps(info))
+
+            status, opened = self.api_request("POST", "/api/auth/terminal-session", {})
+            self.assertTrue(status.startswith("200"))
+            self.assertTrue(opened["ok"])
+            self.assertFalse(opened["requires_staff_auth"])
+            self.assertEqual(opened["staff"]["role"], "admin")
+            token = opened["token"]
+            claims = verify_jwt_token(token)
+            self.assertEqual(claims["access_mode"], "open")
+            self.assertEqual(claims["id"], "OPEN-TERMINAL")
+            authed, staff = is_authenticated_staff({"authorization": "Bearer " + token})
+            self.assertTrue(authed)
+            self.assertEqual(staff["id"], "OPEN-TERMINAL")
+
+            status, state = self.api_request("POST", "/api/sync/pull", {}, terminal_key=token)
+            self.assertTrue(status.startswith("200"))
+            self.assertIn("sales", state)
+            status, _ = self.api_request("GET", "/api/finance/dashboard", terminal_key=token)
+            self.assertTrue(status.startswith("200"))
+
+            _, before = self.api_request("GET", "/api/settings")
+            old_name = before["settings"].get("store_name", "Adonai Store")
+            try:
+                status, saved = self.api_request("POST", "/api/settings", {
+                    "settings": {"store_name": "PIN-free terminal regression"}
+                }, terminal_key=token)
+                self.assertTrue(status.startswith("200"))
+                self.assertTrue(saved["ok"])
+                _, public = self.api_request("GET", "/api/settings")
+                self.assertEqual(public["settings"]["store_name"], "PIN-free terminal regression")
+                self.assertNotIn("master_key", public["settings"])
+                self.assertNotIn("token", public)
+            finally:
+                self.api_request("POST", "/api/settings", {
+                    "settings": {"store_name": old_name}
+                }, terminal_key=token)
+
+    def test_05c_optional_protection_revokes_pin_free_sessions(self):
+        """Opt-in protection issues no open token and revokes cached ones."""
+        from api import verify_jwt_token
+
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "0"}):
+            _, opened = self.api_request("POST", "/api/auth/terminal-session", {})
+            token = opened["token"]
+            self.assertIsNotNone(verify_jwt_token(token))
+
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            status, info = self.api_request("GET", "/api/auth/status")
+            self.assertTrue(status.startswith("200"))
+            self.assertTrue(info["requires_staff_auth"])
+            self.assertEqual(info["access_mode"], "credential")
+            status, denied = self.api_request("POST", "/api/auth/terminal-session", {
+                "requires_staff_auth": False, "role": "admin"
+            })
+            self.assertTrue(status.startswith("200"))
+            self.assertTrue(denied["requires_staff_auth"])
+            self.assertNotIn("token", denied)
+            self.assertNotIn("staff", denied)
+            self.assertIsNone(verify_jwt_token(token))
+            status, _ = self.api_request("POST", "/api/sync/pull", {}, terminal_key=token)
+            self.assertTrue(status.startswith("401"))
+            status, _ = self.api_request("POST", "/api/settings", {
+                "settings": {"store_name": "Must not be published"}
+            }, terminal_key=token)
+            self.assertTrue(status.startswith("403"))
+
+            status, signed_in = self.api_request("POST", "/api/auth/verify", {"key": TEST_MASTER_KEY})
+            self.assertTrue(status.startswith("200"))
+            self.assertIsNotNone(verify_jwt_token(signed_in["token"]))
+            status, _ = self.api_request("POST", "/api/sync/pull", {}, terminal_key=signed_in["token"])
+            self.assertTrue(status.startswith("200"))
+
+    def test_05d_pin_free_settings_save_without_session_or_valid_token(self):
+        """The photographed 403 must not recur for missing/stale credentials."""
+        from api import create_jwt_token, is_authenticated_staff, verify_jwt_token
+
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "0"}):
+            expired = create_jwt_token({"id": "OLD-ADMIN", "role": "admin"}, expires_in_sec=-60)
+            cashier = create_jwt_token({"id": "OLD-CASHIER", "role": "cashier"})
+            self.assertIsNone(verify_jwt_token(expired))
+            variants = [
+                ("no credential", {}),
+                ("expired admin JWT", {"Authorization": "Bearer " + expired}),
+                ("old cashier session", {"Authorization": "Bearer " + cashier}),
+                ("JWT from a different worker", {"Authorization": "Bearer other.worker.signature"}),
+                ("old environment key", {"X-Terminal-Key": "outdated-staff-key"}),
+            ]
+            _, before = self.api_request("GET", "/api/settings")
+            original = before["settings"]["store_name"]
+            try:
+                for index, (label, headers) in enumerate(variants):
+                    with self.subTest(credential=label):
+                        name = f"PIN-free save regression {index}"
+                        status, saved = self.api_request("POST", "/api/settings", {
+                            "settings": {"store_name": name}
+                        }, headers=headers)
+                        self.assertTrue(status.startswith("200"), saved)
+                        self.assertTrue(saved["ok"])
+                        _, current = self.api_request("GET", "/api/settings")
+                        self.assertEqual(current["settings"]["store_name"], name)
+                        authed, staff = is_authenticated_staff({k.lower(): v for k, v in headers.items()})
+                        self.assertTrue(authed)
+                        self.assertEqual(staff["role"], "admin")
+
+                # No terminal-session request or auth header is necessary for
+                # PUT/PATCH, or the flat payload sent by older installed apps.
+                for method in ("PUT", "PATCH"):
+                    status, saved = self.api_request(method, "/api/settings", {
+                        "settings": {"store_name": "PIN-free " + method}
+                    })
+                    self.assertTrue(status.startswith("200"), saved)
+                status, saved = self.api_request("POST", "/api/settings", {"store_name": "Legacy PIN-free client"})
+                self.assertTrue(status.startswith("200"), saved)
+
+                status, state = self.api_request("POST", "/api/sync/pull", {})
+                self.assertTrue(status.startswith("200"), state)
+                status, dashboard = self.api_request("GET", "/api/finance/dashboard")
+                self.assertTrue(status.startswith("200"), dashboard)
+                status, ticket = self.api_request("POST", "/api/notifications/ticket", {})
+                self.assertTrue(status.startswith("200"), ticket)
+                self.assertTrue(ticket["ticket"])
+
+                # Removing authorization must not remove real input validation
+                # or lie about persistence when the submitted fields are invalid.
+                status, invalid = self.api_request("POST", "/api/settings", {
+                    "settings": {"not_a_store_setting": "invalid"}
+                })
+                self.assertTrue(status.startswith("400"), invalid)
+                _, current = self.api_request("GET", "/api/settings")
+                self.assertEqual(current["settings"]["store_name"], "Legacy PIN-free client")
+            finally:
+                self.api_request("POST", "/api/settings", {"settings": {"store_name": original}})
+
+    def test_05e_optional_area_passwords_and_checkout(self):
+        """Admin-created passwords protect selected routes, not the register."""
+        from models import PosAccessKey, PosAccessSession
+        import access_control
+        owner_password = "Owner-Optional-Password-947!"
+        finance_password = "Accounts-Team-Password-258!"
+        stock_password = "Stock-Team-Password-369!"
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "0"}):
+            try:
+                status, policy = self.api_request("GET", "/api/pos-access/policy")
+                self.assertTrue(status.startswith("200"), policy)
+                self.assertFalse(policy["admin_configured"])
+                self.assertEqual(policy["protected_areas"], [])
+                status, created = self.api_request("POST", "/api/pos-access/admin", {"password": owner_password})
+                self.assertTrue(status.startswith("200"), created)
+                admin = {"X-Pos-Access": created["session"]["token"]}
+                self.assertEqual(created["policy"]["protected_areas"], [], "Admin setup alone must not lock checkout or other workspaces")
+                status, batch = self.api_request("POST", "/api/pos-access/keys", {"keys": [
+                    {"name": "Accounts", "password": finance_password, "areas": ["finance"]},
+                    {"name": "Stock & fulfillment", "password": stock_password, "areas": ["stock", "orders"]},
+                ]}, headers=admin)
+                self.assertTrue(status.startswith("201"), batch)
+                self.assertEqual(len(batch["keys"]), 2)
+                finance_id = batch["keys"][0]["id"]
+                self.assertEqual(set(batch["policy"]["protected_areas"]), {"stock", "orders", "finance"})
+                status, all_protected = self.api_request("PATCH", "/api/pos-access/policy", {"protected_areas": list(access_control.AREAS)}, headers=admin)
+                self.assertTrue(status.startswith("200"), all_protected)
+
+                with get_db() as session:
+                    rows = session.query(PosAccessKey).all()
+                    self.assertEqual(len(rows), 3)
+                    self.assertTrue(all(row.password_hash.startswith("pbkdf2_sha256$") for row in rows))
+                    self.assertTrue(all(row.password_hash not in {owner_password, finance_password, stock_password} for row in rows))
+                    self.assertFalse(session.query(PosAccessSession).filter_by(token_hash=created["session"]["token"]).first(), "Only a hash of the unlock token is stored")
+                for path, method, payload in [
+                    ("/api/finance/dashboard", "GET", None),
+                    ("/api/orders", "GET", None),
+                    ("/api/settings", "POST", {"settings": {"store_name": "Must not change"}}),
+                    ("/api/products/unknown", "PATCH", {"name": "Must not change"}),
+                    ("/api/pos-access/keys", "GET", None),
+                ]:
+                    status, denied = self.api_request(method, path, payload)
+                    self.assertTrue(status.startswith("403"), denied)
+                    self.assertEqual(denied["code"], "AREA_PASSWORD_REQUIRED")
+                status, wrong = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": "Incorrect-Password-891!"})
+                self.assertTrue(status.startswith("403"), wrong)
+                self.assertEqual(wrong["code"], "INCORRECT_AREA_PASSWORD")
+                status, unlocked = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": finance_password})
+                self.assertTrue(status.startswith("200"), unlocked)
+                finance = {"X-Pos-Access": unlocked["session"]["token"]}
+                status, _ = self.api_request("GET", "/api/finance/dashboard", headers=finance)
+                self.assertTrue(status.startswith("200"))
+                status, _ = self.api_request("PATCH", "/api/products/unknown", {"name": "Must not change"}, headers=finance)
+                self.assertTrue(status.startswith("403"), "A finance password must not unlock stock")
+                status, _ = self.api_request("GET", "/api/pos-access/keys", headers=finance)
+                self.assertTrue(status.startswith("403"), "Area passwords must never manage other passwords")
+                status, _ = self.api_request("POST", "/api/pos-access/admin", {"password": "Malicious-Replacement-123!"}, headers=finance)
+                self.assertTrue(status.startswith("403"), "Cannot overwrite the owner password")
+                _, metadata = self.api_request("GET", "/api/pos-access/keys", headers=admin)
+                encoded = json.dumps(metadata)
+                self.assertNotIn("password_hash", encoded)
+                self.assertNotIn(finance_password, encoded)
+                self.assertNotIn(owner_password, encoded)
+
+                _, public_sync = self.api_request("POST", "/api/sync/pull", {})
+                self.assertEqual(public_sync["ledger"], [])
+                self.assertEqual(public_sync["sales"], [])
+                self.assertEqual(public_sync["riders"], [])
+                self.assertTrue(all("cost_price" not in product for product in public_sync["products"]))
+                _, finance_sync = self.api_request("POST", "/api/sync/pull", {}, headers=finance)
+                self.assertTrue(finance_sync["ledger"])
+                self.assertTrue(all("customer_phone" not in sale for sale in finance_sync["sales"]))
+                self.assertNotIn(access_control.POLICY_KEY, public_sync["settings"])
+
+                # Stock and financial protection cannot add a password to a sale.
+                with get_db() as session:
+                    product = session.query(Product).filter(Product.in_stock_count > 1).first()
+                    self.assertIsNotNone(product)
+                    product_id, price = product.id, product.selling_price
+                lock_owner = "POS-OPTIONAL-" + uuid.uuid4().hex
+                status, hold = self.api_request("POST", "/api/inventory-locks/acquire", {"lock_owner": lock_owner, "product_id": product_id, "quantity": 1})
+                self.assertTrue(status.startswith("200"), hold)
+                status, sale = self.api_request("POST", "/api/orders", {
+                    "channel": "pos", "lock_owner": lock_owner, "items": [{"product_id": product_id, "qty": 1}],
+                    "tender": {"type": "cash", "tendered": price, "paid": True},
+                    "customer_name": "Own receipt customer", "delivery_type": "pickup", "delivery_fee": 0,
+                })
+                self.assertTrue(status.startswith("201"), sale)
+                self.assertEqual(sale["order"]["customer_name"], "Own receipt customer")
+                self.assertNotIn("unit_cost", sale["order"]["items"][0])
+
+                # Changing, disabling and deleting a password revoke sessions;
+                # area protection remains on until the admin explicitly removes it.
+                new_password = "Changed-Accounts-Password-741!"
+                status, changed = self.api_request("PATCH", "/api/pos-access/keys/" + finance_id, {"password": new_password}, headers=admin)
+                self.assertTrue(status.startswith("200"), changed)
+                status, _ = self.api_request("GET", "/api/finance/dashboard", headers=finance)
+                self.assertTrue(status.startswith("403"))
+                status, _ = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": finance_password})
+                self.assertTrue(status.startswith("403"))
+                _, again = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": new_password})
+                renewed = {"X-Pos-Access": again["session"]["token"]}
+                self.api_request("PATCH", "/api/pos-access/keys/" + finance_id, {"enabled": False}, headers=admin)
+                status, _ = self.api_request("GET", "/api/finance/dashboard", headers=renewed)
+                self.assertTrue(status.startswith("403"))
+                status, _ = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": new_password})
+                self.assertTrue(status.startswith("403"))
+                self.api_request("DELETE", "/api/pos-access/keys/" + finance_id, headers=admin)
+                _, policy = self.api_request("GET", "/api/pos-access/policy")
+                self.assertIn("finance", policy["protected_areas"])
+                status, backup = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": owner_password})
+                self.assertTrue(status.startswith("200"), backup)
+                self.assertTrue(backup["session"]["is_admin"])
+                self.api_request("PATCH", "/api/pos-access/policy", {"protected_areas": ["stock", "orders", "settings"]}, headers=admin)
+                status, _ = self.api_request("GET", "/api/finance/dashboard")
+                self.assertTrue(status.startswith("200"), "Turning off an area restores direct access")
+                status, reset = self.api_request("DELETE", "/api/pos-access/admin", {"confirm": True}, headers=admin)
+                self.assertTrue(status.startswith("200"), reset)
+                self.assertFalse(reset["policy"]["admin_configured"])
+                self.assertEqual(reset["policy"]["protected_areas"], [])
+            finally:
+                with get_db() as session:
+                    session.query(PosAccessSession).delete(synchronize_session=False)
+                    session.query(PosAccessKey).delete(synchronize_session=False)
+                    session.query(StoreSetting).filter_by(key=access_control.POLICY_KEY).delete(synchronize_session=False)
+
+    def test_05f_area_password_validation_expiry_and_lock(self):
+        from models import PosAccessKey, PosAccessSession
+        import access_control
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "0"}):
+            try:
+                _, owner = self.api_request("POST", "/api/pos-access/admin", {"password": "Owner-Validation-Password-458!"})
+                admin = {"X-Pos-Access": owner["session"]["token"]}
+                for invalid in [
+                    [{"name": "Weak", "password": "1234", "areas": ["finance"]}],
+                    [{"name": "Register", "password": "Valid-Test-Password-369!", "areas": ["pos"]}],
+                    [{"name": "Reuse owner", "password": "Owner-Validation-Password-458!", "areas": ["finance"]}],
+                    [{"name": "Valid first", "password": "Valid-Test-Password-369!", "areas": ["finance"]}, {"name": "Invalid second", "password": "x", "areas": ["stock"]}],
+                ]:
+                    status, result = self.api_request("POST", "/api/pos-access/keys", {"keys": invalid}, headers=admin)
+                    self.assertTrue(status.startswith("400"), result)
+                with get_db() as session:
+                    self.assertEqual(session.query(PosAccessKey).filter_by(is_admin=False).count(), 0, "An invalid batch is atomic")
+                self.api_request("PATCH", "/api/pos-access/policy", {"protected_areas": ["finance"]}, headers=admin)
+                _, first = self.api_request("POST", "/api/pos-access/unlock", {"area": "finance", "password": "Owner-Validation-Password-458!"})
+                access = {"X-Pos-Access": first["session"]["token"]}
+                self.api_request("POST", "/api/pos-access/lock", {}, headers=access)
+                status, _ = self.api_request("GET", "/api/finance/dashboard", headers=access)
+                self.assertTrue(status.startswith("403"))
+                with get_db() as session:
+                    session.query(PosAccessSession).update({"expires_at": datetime.utcnow() - timedelta(seconds=1)}, synchronize_session=False)
+                status, _ = self.api_request("GET", "/api/finance/dashboard", headers=admin)
+                self.assertTrue(status.startswith("403"), "Expired sessions cannot read protected data")
+                status, _ = self.api_request("GET", "/api/finance/dashboard", headers={"X-Pos-Access": "A" * 43})
+                self.assertTrue(status.startswith("403"), "An invented token cannot unlock any area")
+            finally:
+                with get_db() as session:
+                    session.query(PosAccessSession).delete(synchronize_session=False)
+                    session.query(PosAccessKey).delete(synchronize_session=False)
+                    session.query(StoreSetting).filter_by(key=access_control.POLICY_KEY).delete(synchronize_session=False)
 
     def test_06_staff_and_admin_auth_verification(self):
         """Test Staff Terminal Key and Admin Access PIN verification via environment variables and database."""
@@ -1323,6 +1639,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
         rider_name = "Fulfillment Regression Rider"
         try:
             with get_db() as session:
+                session.add(Rider(id=rider_id,name=rider_name,phone="+256700000002",status="Available",archived=False))
                 session.add(Order(
                     id=order_id,
                     channel="web",
@@ -1334,7 +1651,7 @@ class TestRenderPostgresHardening(unittest.TestCase):
                     subtotal=12500,
                     total=12500,
                     tender_type="cash",
-                    payment_status="unpaid",
+                    payment_status="paid",
                     created_at=datetime.utcnow(),
                 ))
 
@@ -1370,8 +1687,11 @@ class TestRenderPostgresHardening(unittest.TestCase):
             self.assertEqual(completed["order"]["assigned_rider_id"], rider_id)
         finally:
             with get_db() as session:
+                session.query(DeliveryEvent).filter_by(order_id=order_id).delete(synchronize_session=False)
+                session.query(RiderDevice).filter_by(rider_id=rider_id).delete(synchronize_session=False)
                 session.query(OrderItem).filter_by(order_id=order_id).delete(synchronize_session=False)
                 session.query(Order).filter_by(id=order_id).delete(synchronize_session=False)
+                session.query(Rider).filter_by(id=rider_id).delete(synchronize_session=False)
 
         print("✅ PASS: Rider assignment is returned on dispatch, preserved in order sync, and retained after completion.")
 
