@@ -656,6 +656,25 @@
     return isSalePaid(s) ? "paid" : "unpaid";
   }
 
+  // Orders list day boundary: Kampala calendar day. Server timestamps are UTC without a suffix.
+  const KAMPALA_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Kampala", year: "numeric", month: "2-digit", day: "2-digit" });
+  function kampalaDay(value) {
+    if (!value) return "";
+    const text = /[zZ]|[+-]\d\d:?\d\d$/.test(String(value)) ? String(value) : String(value) + "Z";
+    const time = Date.parse(text);
+    return Number.isFinite(time) ? KAMPALA_DAY.format(new Date(time)) : "";
+  }
+  // Web orders leave the working list once they were removed, or once they were dispatched/completed
+  // on an earlier Kampala day. Their records and exports are unaffected.
+  function leavesOrdersList(s) {
+    if (!s || s.channel !== "web") return false;
+    if (s.list_archived_at) return true;
+    const stage = fulfillmentStage(s);
+    if (stage !== "Dispatched" && stage !== "Completed" && stage !== "Ready for Pickup") return false;
+    const day = kampalaDay(s.dispatched_at || s.updated_at || s.created_at);
+    return !!day && day < kampalaDay(new Date().toISOString());
+  }
+
   function isOrderInLane(s, laneKey) {
     const lane = DB.laneOf(s);
     if (laneKey === "active") return ["incoming", "fulfillment", "ready"].includes(lane);
@@ -711,7 +730,7 @@
   }
 
   function renderSales() {
-    const sales = allSales();
+    const sales = allSales().filter(s => !leavesOrdersList(s));
     const webPend = sales.filter(isOpenWebOrder);
     const openOrders = sales.filter(s => ["incoming", "fulfillment", "ready"].includes(DB.laneOf(s)));
     const needsReview = stageOrders(sales, "incoming");
@@ -866,6 +885,7 @@
         <div class="order-actions">
           ${actionButton}
           <button type="button" class="btn order-details-action" data-open-order="${esc(s.id)}">Details</button>
+          ${(stage === "Dispatched" || stage === "Completed") && s.channel === "web" ? `<button type="button" class="btn ghost order-list-action" data-order-action="list-archive" data-order-id="${esc(s.id)}">Remove from list</button>` : ""}
           ${cancellable ? `<button type="button" class="btn danger order-cancel-action" data-order-action="cancel" data-order-id="${esc(s.id)}">Cancel</button>` : stage === "Completed" || stage === "Cancelled" ? `<button type="button" class="btn order-details-action" data-print-order="${esc(s.id)}">Receipt</button>` : ""}
         </div>
       </div>
@@ -3660,6 +3680,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (!order) {
         if (DB.refreshOperationalData) await DB.refreshOperationalData();
         return toast("Order not found in the saved list. Refresh and try again.", false);
+      }
+      if (orderAction.dataset.orderAction === "list-archive") {
+        if (!window.confirm(`Remove ${orderId} from the Orders list? It stays in Records and exports.`)) return;
+        await performOrderAction(
+          orderAction,
+          () => DB.setOrderListVisibility(orderId, false),
+          `${orderId} removed from the list · kept in Records`
+        );
+        return;
       }
       if (orderAction.dataset.orderAction === "cancel") {
         if (!confirmOrderCancellation(order)) return;

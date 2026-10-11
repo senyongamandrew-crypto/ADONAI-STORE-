@@ -154,6 +154,10 @@ def _dual_inventory_backfill_statements(
 def apply_additive_schema_migrations():
     """Add columns create_all cannot add, without changing or dropping live data."""
     additions = {
+        "orders": [
+            ("dispatched_at", "TIMESTAMP"),
+            ("list_archived_at", "TIMESTAMP"),
+        ],
         "riders": [
             ("vehicle", "VARCHAR(100) NOT NULL DEFAULT 'Motorbike (Boda)'"),
             ("zone", "VARCHAR(100) NOT NULL DEFAULT ''"),

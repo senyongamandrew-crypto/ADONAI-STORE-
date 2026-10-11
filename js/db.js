@@ -1112,6 +1112,14 @@
       order.rider_notice = data.rider_notice || null;
       return order;
     },
+    /* Removes an assigned/completed order from the working Orders list only; the record and exports stay. */
+    async setOrderListVisibility(orderId, visible) {
+      const data = await apiRequest("/api/orders/" + encodeURIComponent(orderId) + (visible ? "/list-restore" : "/list-archive"), {method:"POST", body:"{}"}, true);
+      if (!data.order) throw new Error("The server did not return the order");
+      const order = normalizeSaleRecord(data.order);
+      await tx("sales", st => { const local = byId(st.sales, orderId); if (local) Object.assign(local, order); else st.sales.push(order); });
+      return order;
+    },
     listSales() { reload(); return state.sales.map(s => JSON.parse(JSON.stringify(s))).sort((a, b) => b.created_at.localeCompare(a.created_at)); },
     getSale(id) { reload(); const s = byId(state.sales, id); return s ? JSON.parse(JSON.stringify(s)) : null; },
     setDispatchStatus(id, dispatch_status) {

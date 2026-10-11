@@ -1527,6 +1527,27 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 orders = [access_control.sanitize_sale(o.to_dict(), area_access) for o in q.order_by(Order.created_at.desc()).all()]
                 return json_response({"count": len(orders), "orders": orders})
 
+        if clean_path.startswith("/api/orders/") and clean_path.endswith(("/list-archive", "/list-restore")) and method == "POST":
+            # Removes an assigned/completed order from the working Orders list only. The order row,
+            # its items, payments, dispatch history and exports are untouched.
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            parts = clean_path.split("/")
+            order_id, restore = parts[-2], parts[-1] == "list-restore"
+            with get_db() as session:
+                order = session.query(Order).filter_by(id=order_id).with_for_update().first()
+                if not order:
+                    return json_response({"ok": False, "error": "Order not found"}, status=404)
+                if restore:
+                    order.list_archived_at = None
+                elif order.dispatch_status not in {"Dispatched", "Ready for Pickup", "Completed"}:
+                    return json_response({"ok": False, "error": "Only assigned or completed orders can be removed from the list. Their records are kept."}, status=409)
+                else:
+                    order.list_archived_at = datetime.utcnow()
+                session.flush()
+                return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session))})
+
         if clean_path.startswith("/api/orders/") and method in ("PUT", "PATCH"):
             staff_info, auth_error = authenticated_or_response(headers, body, query_params)
             if auth_error:
@@ -1587,6 +1608,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     if next_stage == "Dispatched" and not assignment and not order.rider_id and order.channel == "web" and str(order.delivery_type or "").strip().lower() != "pickup":
                         return json_response({"ok": False, "error": "Choose a delivery partner, then dispatch. Assigning the rider sends them the WhatsApp job message."}, status=409)
                     order.dispatch_status = next_stage
+                    if next_stage in {"Dispatched", "Ready for Pickup", "Completed"} and order.dispatched_at is None:
+                        order.dispatched_at = datetime.utcnow()
                     order.status = (
                         "completed" if next_stage == "Completed"
                         else "cancelled" if next_stage == "Cancelled"

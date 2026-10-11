@@ -232,6 +232,7 @@ def assign(session, order, rider_id, staff_name, outbox=None):
     if order.rider_id == rider.id and order.dispatch_status == "Dispatched": return rider
     previous = order.rider_id
     order.rider_id = rider.id; order.rider_name = rider.name; order.dispatch_status = "Dispatched"; order.status = "processing"; order.updated_at = now()
+    if order.dispatched_at is None: order.dispatched_at = now()
     rider.status = "On delivery"
     event = add_event(session, order, rider, "assigned", note=f"Assigned by {staff_name}"[:500])
     if outbox is not None:
@@ -408,6 +409,7 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             event=add_event(session,order,rider,stage,device,note,received)
             if stage=="delivered":
                 order.dispatch_status="Completed";order.status="completed";order.updated_at=now()
+                if order.dispatched_at is None: order.dispatched_at=now()
                 others=session.query(Order).filter(Order.rider_id==rider.id,Order.id!=order.id,Order.dispatch_status=="Dispatched",Order.status.notin_(["cancelled","completed"])).count()
                 if not others and rider.status=="On delivery": rider.status="Available"
             broadcast_event("ORDER_UPDATED",f"Delivery {order.id}: {stage}",f"{rider.name} reported {stage}" + (f" · received by {received}" if received else ""),

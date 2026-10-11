@@ -230,4 +230,29 @@ class DispatchTests(unittest.TestCase):
         with get_db() as s:self.assertEqual(s.get(Order,"O2").rider_id,"R1")
         self.assertTrue(self.call("GET","/api/dispatch/board",headers=HEADERS)["orders"])
 
+    def test_removed_from_list_only_after_assignment_and_records_are_kept(self):
+        import exports
+        self.protect()
+        # Not yet assigned: removal is refused, the order stays in the working list.
+        self.call("POST","/api/orders/O1/list-archive",{},HEADERS,409)
+        self.call("POST","/api/dispatch/orders/O1/assign",{"rider_id":"R1"},HEADERS)
+        with get_db() as s:
+            self.assertIsNotNone(s.get(Order,"O1").dispatched_at)
+        removed=self.call("POST","/api/orders/O1/list-archive",{},HEADERS)["order"]
+        self.assertIsNotNone(removed["list_archived_at"])
+        # The record still exists and is still returned by the orders API (the list hides it client-side).
+        ids=[o["id"] for o in self.call("GET","/api/orders",headers=HEADERS)["orders"]]
+        self.assertIn("O1",ids)
+        with get_db() as s:
+            self.assertEqual(s.get(Order,"O1").rider_name,"Authorized rider");self.assertEqual(s.get(Order,"O1").payment_status,"paid")
+        # Export keeps dispatch and removal times for the records.
+        with get_db() as s:
+            header,rows=exports.report_rows(s,"orders",None,None,"")
+            rows=list(rows)
+        self.assertIn("Dispatched (EAT)",header);self.assertIn("Removed from Orders list (EAT)",header)
+        row=next(r for r in rows if r[0]=="O1");self.assertNotEqual(row[header.index("Dispatched (EAT)")],"");self.assertNotEqual(row[header.index("Removed from Orders list (EAT)")],"")
+        # Restore brings it back onto the working list.
+        self.assertIsNone(self.call("POST","/api/orders/O1/list-restore",{},HEADERS)["order"]["list_archived_at"])
+        self.call("POST","/api/orders/MISSING/list-archive",{},HEADERS,404)
+
 if __name__=="__main__":unittest.main()
