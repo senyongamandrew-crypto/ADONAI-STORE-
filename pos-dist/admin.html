@@ -70,6 +70,7 @@
       <button class="nav-item" data-view="staff"><span class="nav-ico"><i data-icon="key-round" class="ico-lime"></i></span><span>Staff &amp; Permissions</span></button>
       <button class="nav-item" data-view="settings"><span class="nav-ico"><i data-icon="settings"></i></span><span>Store Settings</span></button>
       <button class="nav-item store-nav-item" id="btnAdminSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
+      <button class="nav-item" id="btnRefreshSystem" type="button" title="Reload the whole system (keeps saved sales and stock)"><span class="nav-ico"><i data-icon="refresh-cw"></i></span><span>Refresh system</span></button>
     </nav>
 
     <div class="sidebar-foot">
@@ -778,5 +779,20 @@
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
 <script src="app.js?v=7.5"></script>
+  <script>
+    /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
+       re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */
+    (function () {
+      var btn = document.getElementById("btnRefreshSystem");
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.querySelector("span:last-child").textContent = "Refreshing…";
+        var url = new URL(location.href);
+        url.searchParams.set("_refresh", Date.now().toString(36));
+        location.replace(url.toString());
+      });
+    })();
+  </script>
 </body>
 </html>
