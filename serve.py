@@ -100,7 +100,10 @@ CSP_POLICY = (
     f"connect-src 'self' {FLUTTERWAVE_ORIGINS}; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     f"script-src 'self' 'unsafe-inline' https://checkout.flutterwave.com; "
-    "frame-src https://checkout.flutterwave.com; "
+    # 'self' lets the device-fit preview harness (device-preview.html) frame the
+    # app's own POS / Admin pages side by side. It cannot frame, and cannot be
+    # framed by, any other origin.
+    "frame-src 'self' https://checkout.flutterwave.com; "
     "object-src 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "

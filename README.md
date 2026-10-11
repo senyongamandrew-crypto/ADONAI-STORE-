@@ -713,3 +713,56 @@ compilation or physical phone tracking. Before an APK release, validate Location
 and notification denial, screen lock for a full delivery, Stop action, airplane
 mode/reconnect, session revocation, duty expiry and OEM battery restrictions on
 real Android devices. Production deployment and APK installation are not implied.
+
+## Device fit: words sized for the screen in hand
+
+The register, the Admin Suite, the login gate and the rider app always render the
+same words — but never at the same size, and never at a size the phone did not ask
+for. Three fixes ship together in `css/adaptive-display.css` + `js/adaptive.js`:
+
+- **Mobile font inflation is switched off.** Neither shell ever told the mobile
+  browser to keep the authored font size, so iOS Safari inflated every text block
+  when a phone was rotated to landscape and Android Chrome/WebView "font boosting"
+  inflated text on pages wider than the screen. Words rendered up to ~1.5× larger
+  than designed (most visibly in landscape, where the POS is normally used) while
+  images, cards and controls kept their authored size — the layout looked stretched
+  and "not fair" on a phone. `text-size-adjust: 100%` (with the `-webkit-` prefix)
+  now disables that inflation for the whole staff shell.
+- **Type scales with the SHORT side of the screen.** Type decisions used to be keyed
+  to viewport width, so a phone held in landscape (780 × 360) is wider than the
+  767px phone breakpoint and was served the *laptop* type scale: 30px register
+  titles, 34px admin headings and 13.5px card names on a palm-sized screen. Every
+  size is now a fluid `vmin` token (`--fs-hero`, `--fs-h1`, `--fs-stat`, `--fs-name`,
+  `--fs-meta`, …), so portrait phones, landscape phones, tablets, laptops and
+  desktops each get text proportional to the physical screen. `js/adaptive.js` also
+  classifies the device from the short side (`data-device="phone"` for a landscape
+  phone) and publishes `data-viewport`, so the compact layout is no longer skipped
+  just because the phone is sideways.
+- **A Display size control, saved per device.** `Menu → Display size` in the POS and
+  the same panel in the Admin sidebar offer **Compact / Standard / Large**. The
+  choice is stored as `adonai.ui.display-size` and published as `--ui-font-scale`,
+  so the register can be tuned to the phone in hand without rebuilding the APK.
+  `?display=compact|standard|large` previews a density for one load without saving,
+  and `?fit=off` renders the shell exactly as it looked *before* this layer existed —
+  the before/after switch used by the preview harness and by support calls.
+
+Component rules are scoped to the staff shells (`.pos-app`, `#shell`, `.suite-gate`,
+the shared modal host), so the public storefront, the rider app's own layout and the
+print sheets keep their own typography. Receipts, garment tags and A4 invoices are
+printed from self-contained documents with fixed physical measurements and are
+deliberately **not** affected by the on-screen density. Text fields keep a 16px floor
+on touch widths even in Compact — that is what stops mobile browsers from
+auto-zooming a focused field — and the native shell keeps `setTextZoom(100)`, so a
+phone's system font-size setting cannot stretch the terminal UI.
+
+**Verify it on the real thing.** Open `/device-preview.html` (served by `serve.py`)
+to see the POS and the Admin Suite rendered side by side in true 360 × 740 phone,
+780 × 360 landscape-phone, 834 × 1112 tablet and 1280 × 800 laptop viewports, and
+switch the density from the page. Unlock the POS/Admin once in a normal tab first —
+a fresh profile shows the login gate inside the frames. `npm run test:adaptive-display`
+covers the CSS invariants (font inflation off, every token `vmin` + `--ui-font-scale`,
+no rule leaking outside the shells), the short-side device classification and the
+persisted control. Embedding the harness requires `frame-src 'self'`, and viewing the
+app inside any sandboxed preview needs `ALLOW_FRAME_EMBED=1` (`X-Frame-Options` and
+`frame-ancestors` stay locked in production). What these changes cannot do is resize
+Android's own system UI, another app's screen, or the printed receipt.

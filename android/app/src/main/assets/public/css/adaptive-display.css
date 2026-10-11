@@ -1,0 +1,333 @@
+/* ======================================================================
+   ADONAI — DEVICE-FIT DISPLAY LAYER (v1.0)
+   Shared by the POS register, the Admin Suite, the login gate and the
+   rider app. Presentation only: no markup contract, sale, stock, tender
+   or print logic is touched.
+
+   WHY THIS FILE EXISTS (the "words are abnormally bigger on a phone" bug)
+   ---------------------------------------------------------------------
+   1. MOBILE FONT INFLATION.  Neither the POS, the Admin Suite nor any
+      other staff shell ever told the mobile browser to keep the authored
+      font size.  iOS Safari inflates every text block when a page is
+      rotated to landscape, and Android Chrome/WebView "font boosting"
+      inflates text on pages whose content is wider than the screen.  The
+      result: words render up to ~1.5x larger than designed on a phone
+      (most visibly in landscape, where the POS is normally used) while
+      images, cards and controls keep their authored size — so the layout
+      looks stretched and "not fair" on the phone.  `text-size-adjust:
+      100%` below switches that inflation off, everywhere, for good.
+
+   2. WIDTH-ONLY BREAKPOINTS.  Type decisions were keyed to viewport
+      WIDTH, so a phone held in landscape (e.g. 780 x 360) is wider than
+      the 767px phone breakpoint and was served the *laptop* type scale:
+      30px register titles, 34px admin headings, 13.5px card names on a
+      screen the size of a palm.  Every size below is fluid in `vmin`
+      (the SHORT side of the screen), so portrait phones, landscape
+      phones, tablets, laptops and desktops each get text proportional to
+      the physical screen — the same "words fit any device" behaviour the
+      reference dashboards have.  A 1440x900 laptop therefore still gets
+      full-size type; a 780x360 phone gets phone-size type.
+
+   3. NO USER CONTROL.  Different people, devices and eyes need different
+      densities.  A persisted Display size control (Compact / Standard /
+      Large, published by js/adaptive.js as --ui-font-scale) now scales
+      every token in this file, so the register can be matched to the
+      phone in hand without recompiling the APK.
+
+   HOW TO TUNE
+   -----------
+   Every token is `calc(clamp(min, Avmin + Bpx, max) * var(--ui-font-scale))`.
+   Edit A/B to change the growth curve, min/max to change the floor and
+   ceiling.  Keep the token names — the component rules below reference
+   them.  Component rules are scoped to the app shells (`.pos-app`,
+   `#shell`, the suite gate, the shared modal host) so the storefront,
+   rider app and print sheets keep their own typography untouched.
+   ====================================================================== */
+
+/* ---- 1. Stop mobile font inflation (iOS landscape + Android boosting) ---- */
+html {
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+/* Text is never inflated inside the staff shells, whatever the browser does
+   to the root. Long-form receipts keep their own print rules. */
+body, button, input, select, textarea {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* ---- 2. One fluid type scale for every screen ---- */
+:root {
+  /* User density multiplier: .86 (Compact) | 1 (Standard) | 1.15 (Large) */
+  --ui-font-scale: 1;
+
+  --fs-hero:    calc(clamp(20px,   2.05vmin + 13.6px,  32px) * var(--ui-font-scale)); /* register / page hero */
+  --fs-hero-xl: calc(clamp(23px,   1.39vmin + 19.0px,  34px) * var(--ui-font-scale)); /* suite gate hero */
+  --fs-h1:      calc(clamp(21px,   1.53vmin + 17.5px,  34px) * var(--ui-font-scale)); /* dashboard titles */
+  --fs-h2:      calc(clamp(15px,   0.35vmin + 15.25px, 19px) * var(--ui-font-scale)); /* section / card titles */
+  --fs-stat:    calc(clamp(17px,   1.25vmin + 14.5px,  28px) * var(--ui-font-scale)); /* KPI numbers, dashboard stats */
+  --fs-money:   calc(clamp(19px,   0.97vmin + 17.5px,  28px) * var(--ui-font-scale)); /* tendered / due / change */
+  --fs-amount:  calc(clamp(13px,   0.42vmin + 12.5px,  17px) * var(--ui-font-scale)); /* prices, totals */
+  --fs-body:    calc(clamp(12px,   0.28vmin + 11.5px,  14.5px) * var(--ui-font-scale));
+  --fs-name:    calc(clamp(11.5px, 0.21vmin + 11.25px, 13.5px) * var(--ui-font-scale)); /* item / card names */
+  --fs-meta:    calc(clamp(9.5px,  0.21vmin + 9.25px,  11.5px) * var(--ui-font-scale)); /* secondary lines */
+  --fs-micro:   calc(clamp(8px,    0.21vmin + 7.75px,  10px) * var(--ui-font-scale));   /* badges, eyebrow caps */
+  --fs-input:   calc(clamp(14.5px, 0.14vmin + 14.5px,  16px) * var(--ui-font-scale));
+  --fs-btn:     calc(clamp(11.5px, 0.21vmin + 11.25px, 13.5px) * var(--ui-font-scale));
+  --fs-btn-lg:  calc(clamp(13.5px, 0.35vmin + 12.7px,  16px) * var(--ui-font-scale));   /* primary actions */
+  --fs-chip:    calc(clamp(11px,   0.21vmin + 10.75px, 13px) * var(--ui-font-scale));   /* filter pills */
+}
+
+@media screen {
+
+  /* ==================================================================
+     DISPLAY SIZE CONTROL (Compact / Standard / Large)
+     Dark-sidebar friendly; mirrors the emerald active language used by
+     the navigation items on both shells.
+     ================================================================== */
+  .ds-panel {
+    margin: 10px 0 4px;
+    padding: 11px 12px 12px;
+    border: 1px solid rgba(255, 255, 255, .1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .04);
+  }
+  .ds-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 9px;
+    color: #94A3B8;
+    font-size: var(--fs-micro);
+    font-weight: 800;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+  }
+  .ds-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .ds-opt {
+    min-height: 40px;
+    padding: 0 4px;
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .05);
+    color: #E2E8F0;
+    font-family: var(--font-text, "Plus Jakarta Sans", system-ui, sans-serif);
+    font-size: var(--fs-micro);
+    font-weight: 800;
+    letter-spacing: .02em;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .ds-opt:hover { border-color: rgba(34, 197, 94, .55); color: #fff; }
+  .ds-opt.is-active,
+  .ds-opt[aria-pressed="true"] {
+    border-color: #22C55E;
+    background: #22C55E;
+    color: #052E16;
+  }
+  .ds-opt:focus-visible { outline: 3px solid rgba(34, 197, 94, .55); outline-offset: 2px; }
+  .ds-hint {
+    margin: 8px 0 0;
+    color: #94A3B8;
+    font-size: var(--fs-micro);
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  /* ==================================================================
+     POS REGISTER (shell: #appShell.pos-app)
+     ================================================================== */
+  html[data-display-size] body .pos-app .pos-title h1 { font-size: var(--fs-hero); }
+  html[data-display-size] body .pos-app .pos-title .kicker { font-size: var(--fs-micro); }
+
+  html[data-display-size] body .pos-app input[type="text"],
+  html[data-display-size] body .pos-app input[type="search"],
+  html[data-display-size] body .pos-app input[type="tel"],
+  html[data-display-size] body .pos-app input[type="number"],
+  html[data-display-size] body .pos-app .barcode-in,
+  html[data-display-size] body .pos-app .grid-search,
+  html[data-display-size] body .pos-app .pos-search-input,
+  html[data-display-size] body .pos-app .in,
+  html[data-display-size] body .pos-app .sel { font-size: var(--fs-input); }
+
+  html[data-display-size] body .pos-app .btn,
+  html[data-display-size] body .pos-app .pill,
+  html[data-display-size] body .pos-app .lookup-btn,
+  html[data-display-size] body .pos-app .scan-tag-button,
+  html[data-display-size] body .pos-app .charge-btn,
+  html[data-display-size] body .pos-app .qchip,
+  html[data-display-size] body .pos-app .ttab,
+  html[data-display-size] body .pos-app .pos-checkout-pay { font-size: var(--fs-btn); }
+  html[data-display-size] body .pos-app .btn.big { font-size: var(--fs-btn-lg); }
+  html[data-display-size] body .pos-app .btn.sm { font-size: var(--fs-meta); }
+
+  html[data-display-size] body .pos-app .dtab,
+  html[data-display-size] body .pos-app .ctab,
+  html[data-display-size] body .pos-app .cat-lab { font-size: var(--fs-chip); }
+
+  html[data-display-size] body .pos-app .tile .t-name { font-size: var(--fs-name); }
+  html[data-display-size] body .pos-app .tile .t-meta { font-size: var(--fs-meta); }
+  html[data-display-size] body .pos-app .tile .t-price { font-size: var(--fs-amount); }
+  html[data-display-size] body .pos-app .stock-dot,
+  html[data-display-size] body .pos-app .pos-condition-tag { font-size: var(--fs-micro); }
+
+  html[data-display-size] body .pos-app .cart-head h3 { font-size: var(--fs-h2); }
+  html[data-display-size] body .pos-app .cart-empty { font-size: var(--fs-body); }
+  html[data-display-size] body .pos-app .cline .c-name { font-size: var(--fs-name); }
+  html[data-display-size] body .pos-app .cline .c-unit { font-size: var(--fs-meta); }
+  html[data-display-size] body .pos-app .cline .c-amt { font-size: var(--fs-amount); }
+  html[data-display-size] body .pos-app .sum-row { font-size: var(--fs-body); }
+  html[data-display-size] body .pos-app .sum-row.total { font-size: var(--fs-money); }
+  html[data-display-size] body .pos-app .cart-toggle .ct-total { font-size: var(--fs-amount); }
+  html[data-display-size] body .pos-app .cart-toggle .ct-label { font-size: var(--fs-meta); }
+
+  html[data-display-size] body .pos-app .pos-catalog-empty h2 { font-size: var(--fs-h2); }
+  html[data-display-size] body .pos-app .pos-catalog-empty p { font-size: var(--fs-body); }
+
+  html[data-display-size] body .pos-app .pos-checkout-copy > span,
+  html[data-display-size] body .pos-app .pos-checkout-total > span { font-size: var(--fs-micro); }
+  html[data-display-size] body .pos-app .pos-checkout-copy > strong { font-size: var(--fs-meta); }
+  html[data-display-size] body .pos-app .pos-checkout-total > strong { font-size: var(--fs-amount); }
+
+  html[data-display-size] body .pos-app .tender-head h3 { font-size: var(--fs-h2); }
+  html[data-display-size] body .pos-app .due { font-size: var(--fs-meta); }
+  html[data-display-size] body .pos-app .due strong { font-size: var(--fs-money); }
+  html[data-display-size] body .pos-app .fld-label,
+  html[data-display-size] body .pos-app .fld-sublabel { font-size: var(--fs-meta); }
+  html[data-display-size] body .pos-app .big-in { font-size: var(--fs-money); }
+  html[data-display-size] body .pos-app .change-box strong { font-size: var(--fs-money); }
+  html[data-display-size] body .pos-app .verify { font-size: var(--fs-body); }
+
+  html[data-display-size] body .pos-app .nav-item { font-size: var(--fs-body); }
+  html[data-display-size] body .pos-app .brand-meta,
+  html[data-display-size] body .pos-app .mini-link { font-size: var(--fs-meta); }
+  html[data-display-size] body .pos-app .me-card strong { font-size: var(--fs-body); }
+  html[data-display-size] body .pos-app .me-card span { font-size: var(--fs-meta); }
+
+  /* ==================================================================
+     ADMIN SUITE / OPS CONSOLE (shells: #shell, .suite-gate,
+     #modalBackdrop — the shared modal host sits outside #shell)
+     ================================================================== */
+  html[data-display-size] body .suite-gate .suite-title,
+  html[data-display-size] body .suite-gate h1 { font-size: var(--fs-hero-xl); }
+  html[data-display-size] body .suite-gate .suite-sub,
+  html[data-display-size] body .suite-gate p { font-size: var(--fs-body); }
+
+  html[data-display-size] body #shell .page-head h1,
+  html[data-display-size] body #shell .orders-heading-copy h1,
+  html[data-display-size] body #shell .finance-title-row h1 { font-size: var(--fs-h1); }
+  html[data-display-size] body #shell .kicker { font-size: var(--fs-micro); }
+
+  html[data-display-size] body #shell .card-head h3,
+  html[data-display-size] body #shell .modal h3,
+  html[data-display-size] body #shell .sec { font-size: var(--fs-h2); }
+  html[data-display-size] body #modalBackdrop .modal h3,
+  html[data-display-size] body #modalBackdrop .odm-title { font-size: var(--fs-h2); }
+
+  html[data-display-size] body #shell .kpi-val,
+  html[data-display-size] body #shell .kpi-value,
+  html[data-display-size] body #shell .order-stat-copy > strong,
+  html[data-display-size] body #shell .finance-metric strong,
+  html[data-display-size] body #shell .stock-price,
+  html[data-display-size] body #shell .tot-strip strong { font-size: var(--fs-stat); }
+
+  html[data-display-size] body #shell .kpi-lab,
+  html[data-display-size] body #shell .kpi-label,
+  html[data-display-size] body #shell .order-stat-label,
+  html[data-display-size] body #shell .order-stat-hint,
+  html[data-display-size] body #shell .order-stat-value,
+  html[data-display-size] body #shell .finance-metric .metric-label,
+  html[data-display-size] body #shell .micro-cap { font-size: var(--fs-micro); }
+
+  html[data-display-size] body #shell .kpi-sub,
+  html[data-display-size] body #shell .small { font-size: var(--fs-meta); }
+
+  html[data-display-size] body #shell .tbl th,
+  html[data-display-size] body #modalBackdrop .tbl th { font-size: var(--fs-micro); }
+  html[data-display-size] body #shell .tbl td,
+  html[data-display-size] body #shell .rack-lbl,
+  html[data-display-size] body #shell .stock-name,
+  html[data-display-size] body #modalBackdrop .odm-item-name,
+  html[data-display-size] body #modalBackdrop .odm-item-price,
+  html[data-display-size] body #modalBackdrop .tbl td { font-size: var(--fs-body); }
+
+  html[data-display-size] body #shell .stock-sku,
+  html[data-display-size] body #shell .cash-pill,
+  html[data-display-size] body #modalBackdrop .odm-item-sku,
+  html[data-display-size] body #modalBackdrop .odm-sub,
+  html[data-display-size] body #modalBackdrop .odm-sum-row { font-size: var(--fs-meta); }
+  html[data-display-size] body #modalBackdrop .odm-total-row .rust { font-size: var(--fs-amount); }
+
+  html[data-display-size] body #shell .status,
+  html[data-display-size] body #shell .tag,
+  html[data-display-size] body #shell .stat-chip,
+  html[data-display-size] body #shell .inventory-badge-inline,
+  html[data-display-size] body #shell .ver-chip { font-size: var(--fs-micro); }
+
+  html[data-display-size] body #shell .lane-tab,
+  html[data-display-size] body #shell .finance-tab,
+  html[data-display-size] body #shell .dpill { font-size: var(--fs-chip); }
+
+  html[data-display-size] body #shell .btn,
+  html[data-display-size] body #modalBackdrop .btn { font-size: var(--fs-btn); }
+  html[data-display-size] body #shell .btn.big,
+  html[data-display-size] body #modalBackdrop .btn.big { font-size: var(--fs-btn-lg); }
+  html[data-display-size] body #shell .btn.sm,
+  html[data-display-size] body #modalBackdrop .btn.sm { font-size: var(--fs-meta); }
+
+  html[data-display-size] body #shell .field label,
+  html[data-display-size] body #shell .flab,
+  html[data-display-size] body #shell .intake-card .field label,
+  html[data-display-size] body #modalBackdrop .field label { font-size: var(--fs-meta); }
+
+  html[data-display-size] body #shell .in,
+  html[data-display-size] body #shell .sel,
+  html[data-display-size] body #shell .sel-full,
+  html[data-display-size] body #shell .dispatch-sel,
+  html[data-display-size] body #modalBackdrop .in,
+  html[data-display-size] body #modalBackdrop .sel { font-size: var(--fs-input); }
+
+  html[data-display-size] body #shell .nav-item,
+  html[data-display-size] body #shell .mini-link,
+  html[data-display-size] body #shell .me-card strong { font-size: var(--fs-body); }
+  html[data-display-size] body #shell .brand-meta,
+  html[data-display-size] body #shell .me-card span { font-size: var(--fs-meta); }
+
+  /* ==================================================================
+     SHORT SCREENS (landscape phones, split-screen windows)
+     Reclaim vertical space the laptop layout would spend on decoration.
+     ================================================================== */
+  @media (max-height: 520px) and (orientation: landscape) {
+    html[data-display-size] body .pos-app .pos-title { min-height: 0; padding: 9px 14px 8px; }
+    html[data-display-size] body .pos-app .pos-title-art { display: none; }
+    html[data-display-size] body .pos-app .pos-catalog-empty { min-height: 190px; padding: 20px 16px 26px; }
+    html[data-display-size] body .pos-app .pos-catalog-empty img { width: 132px; height: 99px; }
+    html[data-display-size] body .pos-app .pos-sidebar { max-height: 100dvh; overflow-y: auto; }
+    html[data-display-size] body .pos-app .pos-dashboard-layout.has-cart-items .pos-cart-sidebar {
+      width: min(330px, 46vw);
+    }
+  }
+}
+
+/* ---- Touch-width input floor (16px stops the mobile focus auto-zoom) ---- */
+@media screen and (max-width: 767px), screen and (max-height: 520px) {
+  html[data-display-size] body .pos-app input[type="text"],
+  html[data-display-size] body .pos-app input[type="search"],
+  html[data-display-size] body .pos-app input[type="tel"],
+  html[data-display-size] body .pos-app input[type="number"],
+  html[data-display-size] body .pos-app input[type="password"],
+  html[data-display-size] body .pos-app .barcode-in,
+  html[data-display-size] body .pos-app .grid-search,
+  html[data-display-size] body .pos-app .pos-search-input,
+  html[data-display-size] body .pos-app .in,
+  html[data-display-size] body #shell .in,
+  html[data-display-size] body #shell .sel,
+  html[data-display-size] body #shell .sel-full { font-size: max(16px, var(--fs-input)); }
+  html[data-display-size] body .ds-opt { min-height: 44px; }
+}
+
+/* ---- Very narrow phones: the density buttons stack instead of squeezing ---- */
+@media screen and (max-width: 360px) {
+  html[data-display-size] body .ds-options { grid-template-columns: 1fr; }
+}
