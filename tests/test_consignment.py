@@ -293,6 +293,40 @@ def main():
     kpi = data.get("kpis", {})
     check("paid-out KPI reflects both PAID payouts", kpi.get("paid_out") == 40_000 + 350_000, f"{kpi}")
 
+    print("\n[8] Transport cannot leak onto consignment pieces")
+    status, data = call("POST", "/api/finance/consignment/lots", {
+        "supplier_id": supplier_id, "description": "Transport probe", "agreement_ref": "AGR-4",
+        "lot_code": "CON-TRANSPORT-1", "items": [compliant_item("Transport probe jacket", 40_000)],
+    }, MGR1)
+    check("transport probe consignment lot registers", status == 201, f"{status} {data}")
+    with get_db() as session:
+        probe_id = session.query(Product).filter(Product.name == "Transport probe jacket").one().id
+    # A routine System Parameters change with the catalogue roll-out must not put transport on consignment stock.
+    ADMIN = token_for("ADM-1", "Store Admin", "admin")
+    status, data = call("POST", "/api/settings", {"settings": {"base_delivery_fee": "5000"}, "apply_base_fee_to_catalog": True}, ADMIN)
+    check("base delivery fee change with catalogue roll-out is accepted", status == 200, f"{status} {data}")
+    with get_db() as session:
+        probe_transport = int(session.query(Product).filter_by(id=probe_id).one().total_transport_cost or 0)
+    check("consignment piece keeps zero transport after the roll-out", probe_transport == 0, f"transport={probe_transport}")
+    status, data = call("POST", "/api/orders", {
+        "channel": "web", "items": [{"product_id": probe_id, "qty": 1}],
+        "delivery_type": "pickup", "customer_name": "Transport Probe",
+    }, NO_AUTH)
+    check("web checkout of a consignment piece still succeeds after the roll-out", status in (200, 201), f"{status} {data}")
+    probe_order = (data.get("order") or {}).get("id") or data.get("order_id") or data.get("id")
+    with get_db() as session:
+        probe_split = session.query(ConsignmentSalesSplit).filter_by(order_id=probe_order).first()
+        probe_journal = probe_split.journal_entry_id if probe_split else None
+    if probe_journal:
+        with get_db() as session:
+            from models import AccountingJournalLine
+            plines = session.query(AccountingJournalLine).filter_by(journal_entry_id=probe_journal).all()
+            pdr = sum(int(l.debit or 0) for l in plines)
+            pcr = sum(int(l.credit or 0) for l in plines)
+        check("the probe sale journal balances", pdr == pcr and pdr > 0, f"dr={pdr} cr={pcr}")
+    else:
+        check("the probe sale journal balances", False, "no split row was written for the probe sale")
+
     print("\n" + "=" * 60)
     print(f"  {len(PASSED)} passed, {len(FAILED)} failed")
     if FAILED:

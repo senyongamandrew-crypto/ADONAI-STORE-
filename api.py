@@ -772,7 +772,9 @@ def sale_journal_lines(total: int, cogs: int, tender_type: str, transport_total:
     consignment_commission = max(0, int(consignment_commission or 0))
     consignment_partner = max(0, int(consignment_partner or 0))
     consignment_gross = consignment_commission + consignment_partner
-    sales_revenue = max(0, int(total) - transport_total - consignment_gross)
+    sales_revenue = int(total) - transport_total - consignment_gross
+    if sales_revenue < 0:
+        raise ValueError("Sale lines exceed the order total (transport plus consignment share); refusing to post an unbalanced sale")
     lines = [
         {"account_code": payment_code, "account_name": payment_name, "debit": total},
         *([{"account_code": "4000", "account_name": ACCOUNT_NAMES["4000"], "credit": sales_revenue}] if sales_revenue else []),
@@ -1473,6 +1475,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     try:
                         base = body.get("base_price", prod.base_price or prod.selling_price)
                         transport = body.get("total_transport_cost", prod.total_transport_cost or 0)
+                        if getattr(prod, "is_consignment", False):
+                            # Partner stock never carries Adonai transport.
+                            transport = 0
                         allocation = transport_allocation(base, transport)
                     except (ValueError, TypeError) as exc:
                         return json_response({"ok": False, "error": str(exc)}, status=400)
@@ -1824,9 +1829,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     products[pid] = prod
                     active_locks[pid] = own_lock
 
+                # Consignment pieces carry no Adonai transport: they are excluded from the delivery
+                # fee and from the ledger transport line, so a stray transport value cannot unbalance a sale.
+                transport_pids = [pid for pid in requested if not getattr(products[pid], "is_consignment", False)]
                 delivery_fee = 0 if body.get("delivery_type", "boda") == "pickup" else sum(
                     whole_money((products[pid].checkout_transport_portion if products[pid].checkout_transport_portion is not None else (products[pid].total_transport_cost or 0) * 0.5) * requested[pid])
-                    for pid in requested
+                    for pid in transport_pids
                 )
                 # SECURITY: only accept well-formed client order IDs
                 # (alphanumeric/dash/underscore); anything else is replaced
@@ -1886,7 +1894,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 # the product price but is included in this ledger total.
                 transport_total = sum(
                     whole_money((products[pid].total_transport_cost or 0) * requested[pid])
-                    for pid in requested
+                    for pid in transport_pids
                 )
                 tender = body.get("tender") or {}
                 cashier = body.get("cashier") or staff_info or {}
@@ -3600,6 +3608,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         fee_value = None
                     if fee_value is not None:
                         for product in session.query(Product).all():
+                            if getattr(product, "is_consignment", False):
+                                continue  # partner stock keeps zero transport
                             if product.total_transport_cost != fee_value:
                                 catalog_changed = True
                             product.total_transport_cost = fee_value
