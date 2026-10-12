@@ -66,7 +66,8 @@ function buildWindow(overview, lots, suppliers) {
       return Promise.reject(new Error("unexpected " + path));
     },
   };
-  window.GarmentMedia = { mount: () => ({ snapshot: () => ({ images: [], video_id: "" }), reset() {}, pause() {} }) };
+  window.__mediaMountOptions = null;
+  window.GarmentMedia = { mount: (root, opts) => { window.__mediaMountOptions = opts || null; return { snapshot: () => ({ images: [], video_id: "" }), reset() {}, pause() {} }; } };
   window.eval(bundle);
   return { window, calls };
 }
@@ -199,6 +200,10 @@ async function tick(window) { for (let i = 0; i < 5; i += 1) await new Promise(r
   check("a ledger mismatch is shown as an attention state with the difference", () => {
     assert.ok(bad.window.document.querySelector("#bcKpis").textContent.includes("Attention"));
     assert.ok(bad.window.document.querySelector("#bcRecon").textContent.includes("difference"));
+  });
+
+  check("the consignment media uploader is limited to the 15-second policy", () => {
+    assert.equal(window.__mediaMountOptions && window.__mediaMountOptions.maxVideoSeconds, 15);
   });
 
   console.log(`\n${passed} bale-costs checks ${process.exitCode ? "FAILED" : "passed"}.`);
