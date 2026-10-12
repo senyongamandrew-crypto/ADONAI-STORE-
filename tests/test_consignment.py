@@ -42,6 +42,7 @@ import api  # noqa: E402
 from api import handle_api_request, create_jwt_token  # noqa: E402
 from database import get_db  # noqa: E402
 from models import ProductMedia, Order, ConsignmentSalesSplit, Product  # noqa: E402
+from sqlalchemy import func  # noqa: E402
 
 PASSED = []
 FAILED = []
@@ -326,6 +327,28 @@ def main():
         check("the probe sale journal balances", pdr == pcr and pdr > 0, f"dr={pdr} cr={pcr}")
     else:
         check("the probe sale journal balances", False, "no split row was written for the probe sale")
+
+    print("\n[9] Register dashboard counts only Adonai revenue")
+    today = datetime.now(api.KAMPALA_TZ).date().isoformat()
+    status, _ctype, payload = handle_api_request("GET", "/api/finance/dashboard", {"date": [today]}, b"{}", MGR1, client_addr="127.0.0.1")
+    data = json.loads(payload.decode("utf-8"))
+    m = data.get("metrics", {})
+    with get_db() as session:
+        start_utc, end_utc, _ = api.date_bounds_utc(today)
+        day_orders = session.query(Order).filter(
+            Order.created_at >= start_utc, Order.created_at < end_utc,
+            ~Order.status.in_(["cancelled", "void"]),
+        ).all()
+        day_ids = [o.id for o in day_orders]
+        gross_db = sum(int(o.total or 0) for o in day_orders)
+        partner_db = int(session.query(func.coalesce(func.sum(ConsignmentSalesSplit.partner_share), 0)).filter(ConsignmentSalesSplit.order_id.in_(day_ids)).scalar() or 0) if day_ids else 0
+    check("dashboard loads for today", status == 200 and data.get("ok") is True, f"{status} {data}")
+    check("gross sales still reflect what customers paid", m.get("gross_sales") == gross_db, f"{m.get('gross_sales')} vs {gross_db}")
+    check("partner share is reported separately", m.get("partner_share") == partner_db and partner_db > 0, f"{m.get('partner_share')} vs {partner_db}")
+    check("Adonai revenue excludes the partner share", m.get("adonai_revenue") == gross_db - partner_db, f"{m.get('adonai_revenue')}")
+    check("gross profit is Adonai revenue less COGS (partner share is not profit)", m.get("gross_profit") == m.get("adonai_revenue") - m.get("cogs"), f"{m}")
+    cat_sales = sum(int(r.get("sales", 0)) for r in data.get("category_profitability", []))
+    check("category sales add up to Adonai revenue", cat_sales == m.get("adonai_revenue"), f"{cat_sales} vs {m.get('adonai_revenue')}")
 
     print("\n" + "=" * 60)
     print(f"  {len(PASSED)} passed, {len(FAILED)} failed")

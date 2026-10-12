@@ -2879,6 +2879,14 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 cogs = 0
                 channels = {"POS": 0, "WhatsApp / TikTok": 0, "Web": 0}
                 categories = {}
+                # Consignment lines: customers pay the full price, but only the commission is Adonai revenue.
+                # The partner share is owed to the partner, so it is excluded from profit.
+                order_ids = [order.id for order in orders]
+                split_by_item = {}
+                if order_ids:
+                    for split_row in session.query(ConsignmentSalesSplit).filter(ConsignmentSalesSplit.order_id.in_(order_ids)).all():
+                        split_by_item[split_row.order_item_id] = split_row
+                partner_share_total = sum(int(s.partner_share or 0) for s in split_by_item.values())
                 for order in orders:
                     if order.channel == "pos":
                         channel_name = "POS"
@@ -2892,15 +2900,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         if not item_cost and item.product_id:
                             product = session.query(Product).filter_by(id=item.product_id).first()
                             item_cost = int(product.cost_price or 0) * int(item.qty or 0) if product else 0
-                        item_revenue = int(item.line_total or 0)
+                        split_row = split_by_item.get(item.id)
+                        item_revenue = int(split_row.commission_amount or 0) if split_row else int(item.line_total or 0)
                         cogs += item_cost
                         name = item.category or "Uncategorised"
                         bucket = categories.setdefault(name, {"category": name, "sales": 0, "cogs": 0, "profit": 0})
                         bucket["sales"] += item_revenue
                         bucket["cogs"] += item_cost
                         bucket["profit"] += item_revenue - item_cost
-                gross_profit = gross_sales - cogs
-                gross_margin = round((gross_profit / gross_sales * 100), 1) if gross_sales else 0
+                adonai_revenue = gross_sales - partner_share_total
+                gross_profit = adonai_revenue - cogs
+                gross_margin = round((gross_profit / adonai_revenue * 100), 1) if adonai_revenue else 0
                 # Journal-derived expense totals include new records, imported
                 # legacy cash-book expenses, reversals, and inventory losses.
                 expense_debit, expense_credit = session.query(
@@ -2927,6 +2937,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "date": selected_date,
                     "metrics": {
                         "gross_sales": gross_sales,
+                        "partner_share": partner_share_total,
+                        "adonai_revenue": adonai_revenue,
                         "cogs": cogs,
                         "gross_profit": gross_profit,
                         "gross_margin": gross_margin,
