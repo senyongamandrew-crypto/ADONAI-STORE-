@@ -358,6 +358,7 @@
       onChange: () => { state.mediaSnapshot = null; renderMediaChecklist(); },
       onBusy: () => updateAddButton(),
       onError: message => notify(message, false),
+      maxVideoSeconds: POLICY.videoMaxSeconds,
     });
     renderMediaChecklist();
   }
