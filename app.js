@@ -33,6 +33,7 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2600);
   }
+  window.adonaiToast = toast;
 
   /* ---------------- modal shell ---------------- */
   const backdrop = $("#modalBackdrop");
@@ -2466,6 +2467,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   }
 
   async function loadStockLots() {
+    // The Bale Costs panel (js/bale-costs.js) owns the lots register, cash share and payouts.
+    if (window.BaleCosts && typeof window.BaleCosts.refresh === "function") return window.BaleCosts.refresh();
     const host = $("#stockLotList");
     if (!host) return;
     host.innerHTML = `<div class="finance-empty">Syncing stock-lot allocations…</div>`;
