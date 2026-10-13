@@ -35,6 +35,50 @@ def hash_pin(pin: str) -> str:
     return pbkdf2_hash_pin(pin)
 
 
+# PostgreSQL guards for partner consignment. Mirrors migrations/20261012_consignment_partner_intake.sql
+# so databases built or booted by the app get the same constraints and append-only
+# triggers as databases where the explicit migration was run. Every statement is
+# idempotent and runs inside its own savepoint (see run_isolated).
+CONSIGNMENT_POSTGRES_GUARDS = (
+    """DO $$ BEGIN
+      ALTER TABLE financial_stock_lots ADD CONSTRAINT fk_stock_lot_supplier
+        FOREIGN KEY (supplier_id) REFERENCES consignment_suppliers(id);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
+    """DO $$ BEGIN
+      ALTER TABLE products ADD CONSTRAINT fk_products_supplier
+        FOREIGN KEY (supplier_id) REFERENCES consignment_suppliers(id);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
+    """DO $$ BEGIN
+      ALTER TABLE financial_stock_lots ADD CONSTRAINT ck_stock_lot_type
+        CHECK (lot_type IN ('OWNED_BALE', 'PARTNER_CONSIGNMENT'));
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
+    """DO $$ BEGIN
+      ALTER TABLE financial_stock_lots ADD CONSTRAINT ck_stock_lot_supplier_matches_type
+        CHECK ((lot_type = 'PARTNER_CONSIGNMENT' AND supplier_id IS NOT NULL)
+            OR (lot_type = 'OWNED_BALE' AND supplier_id IS NULL));
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
+    """CREATE OR REPLACE FUNCTION consignment_block_settlement_change() RETURNS trigger AS $$
+    BEGIN
+      RAISE EXCEPTION '% on % is not allowed: consignment settlement records are append-only', TG_OP, TG_TABLE_NAME
+        USING ERRCODE = 'restrict_violation';
+    END;
+    $$ LANGUAGE plpgsql;""",
+    "DROP TRIGGER IF EXISTS trg_consignment_splits_immutable ON consignment_sales_splits",
+    """CREATE TRIGGER trg_consignment_splits_immutable
+      BEFORE UPDATE OR DELETE ON consignment_sales_splits
+      FOR EACH ROW EXECUTE FUNCTION consignment_block_settlement_change()""",
+    "DROP TRIGGER IF EXISTS trg_consignment_paid_payouts_immutable ON consignment_payouts",
+    """CREATE TRIGGER trg_consignment_paid_payouts_immutable
+      BEFORE UPDATE OR DELETE ON consignment_payouts
+      FOR EACH ROW WHEN (OLD.status = 'PAID')
+      EXECUTE FUNCTION consignment_block_settlement_change()""",
+    "DROP TRIGGER IF EXISTS trg_consignment_payouts_no_delete ON consignment_payouts",
+    """CREATE TRIGGER trg_consignment_payouts_no_delete
+      BEFORE DELETE ON consignment_payouts
+      FOR EACH ROW EXECUTE FUNCTION consignment_block_settlement_change()""",
+)
+
+
 def _postgres_column_types(connection, table_name: str) -> dict[str, str]:
     """Return PostgreSQL type names for a table's real (non-dropped) columns.
 
@@ -192,6 +236,17 @@ def apply_additive_schema_migrations():
             ("flaw_photo_index", "INTEGER DEFAULT -1"),
             ("care_notes", "TEXT"),
             ("staff_notes", "TEXT"),
+            # Partner consignment: consignment pieces carry no Adonai cost.
+            ("is_consignment", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("supplier_id", "VARCHAR(64)"),
+            ("consignment_reference_value", "INTEGER NOT NULL DEFAULT 0"),
+        ],
+        "financial_stock_lots": [
+            # Partner consignment lots. Existing rows are owned bales.
+            ("lot_type", "VARCHAR(30) NOT NULL DEFAULT 'OWNED_BALE'"),
+            ("supplier_id", "VARCHAR(64)"),
+            ("agreement_ref", "VARCHAR(80)"),
+            ("return_by_date", "TIMESTAMP WITHOUT TIME ZONE"),
         ],
         "order_items": [
             ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
@@ -306,6 +361,10 @@ def apply_additive_schema_migrations():
             "UPDATE products SET inventory_status = CASE WHEN in_stock_count > 0 THEN 'AVAILABLE' ELSE 'OUT_OF_STOCK' END WHERE inventory_status NOT IN ('ARCHIVED', 'WRITTEN_OFF')",
             "inventory_status refresh",
         )
+        if IS_POSTGRES:
+            # Partner consignment guards (append-only settlement records, lot/supplier coherence).
+            for guard_sql in CONSIGNMENT_POSTGRES_GUARDS:
+                run_isolated(guard_sql, "consignment guard")
         if IS_POSTGRES:
             # PostgreSQL aborts the WHOLE transaction on any failed statement,
             # so "run it and ignore the 'already exists' error" is unsafe here.

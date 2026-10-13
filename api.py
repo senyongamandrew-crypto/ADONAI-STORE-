@@ -32,6 +32,7 @@ from notifications import (
     recent_events,
 )
 from pricing import transport_allocation, whole_money
+import consignment
 from security import (
     RateLimiter,
     clean_multiline_text,
@@ -50,9 +51,13 @@ from models import (
     AccountingJournalEntry,
     AccountingJournalLine,
     Category,
+    ConsignmentPayout,
+    ConsignmentSalesSplit,
+    ConsignmentSupplier,
     ExpenseRecord,
     Inventory,
     InventoryAdjustment,
+    ProductMedia,
     InventoryLock,
     ItemCondition,
     LedgerEntry,
@@ -374,8 +379,10 @@ ACCOUNT_NAMES = {
     "1100": "Accounts Receivable",
     "1200": "Inventory Asset",
     "1300": "Logistics / Transport Expense",
+    "2100": "Consignment Payable — Partners",
     "4000": "Sales Revenue",
     "4100": "Transport Fee Revenue",
+    "4200": "Consignment Commission Revenue",
     "5000": "Cost of Goods Sold",
     "5100": "Operating Expense",
     "5200": "Inventory Write-Off Loss",
@@ -650,14 +657,130 @@ def reverse_journal_entry(session, original, *, source, description, staff, occu
     return reversal
 
 
-def sale_journal_lines(total: int, cogs: int, tender_type: str, transport_total: int = 0):
+def consignment_position(session, supplier_id: str) -> dict:
+    """What is owed to one partner right now.
+
+    * eligible: partner shares on orders the store has fulfilled (status completed)
+    * in_fulfilment: shares on orders still open (not yet payable)
+    * cancelled: shares on cancelled orders (must be reversed by staff, never paid)
+    * payable_now = eligible − payouts paid − payouts still open (requested/approved)
+    """
+    rows = (
+        session.query(ConsignmentSalesSplit.partner_share, Order.status)
+        .join(Order, Order.id == ConsignmentSalesSplit.order_id)
+        .filter(ConsignmentSalesSplit.supplier_id == supplier_id)
+        .all()
+    )
+    eligible = sum(int(share) for share, status in rows if status == consignment.COMPLETED_ORDER_STATUS)
+    cancelled = sum(int(share) for share, status in rows if status == "cancelled")
+    in_fulfilment = sum(int(share) for share, status in rows if status not in (consignment.COMPLETED_ORDER_STATUS, "cancelled"))
+    paid = int(session.query(func.coalesce(func.sum(ConsignmentPayout.amount), 0)).filter(
+        ConsignmentPayout.supplier_id == supplier_id, ConsignmentPayout.status == "PAID").scalar() or 0)
+    open_total = int(session.query(func.coalesce(func.sum(ConsignmentPayout.amount), 0)).filter(
+        ConsignmentPayout.supplier_id == supplier_id,
+        ConsignmentPayout.status.in_(consignment.OPEN_PAYOUT_STATUSES)).scalar() or 0)
+    return {
+        "eligible": eligible,
+        "in_fulfilment": in_fulfilment,
+        "cancelled": cancelled,
+        "paid": paid,
+        "open": open_total,
+        "payable_now": eligible - paid - open_total,
+    }
+
+
+def consignment_overview(session) -> dict:
+    """Cash-share dashboard data: partner balances, lot performance and reconciliation."""
+    suppliers = session.query(ConsignmentSupplier).order_by(ConsignmentSupplier.partner_name).all()
+    supplier_rows = []
+    total_eligible = total_open = total_paid = total_in_fulfilment = total_cancelled = 0
+    for supplier in suppliers:
+        position = consignment_position(session, supplier.id)
+        total_eligible += position["eligible"]
+        total_open += position["open"]
+        total_paid += position["paid"]
+        total_in_fulfilment += position["in_fulfilment"]
+        total_cancelled += position["cancelled"]
+        supplier_rows.append({**supplier.to_dict(), **position})
+
+    lots = session.query(StockLot).filter(StockLot.lot_type == "PARTNER_CONSIGNMENT").order_by(StockLot.acquired_at.desc()).limit(250).all()
+    lot_rows = []
+    for lot in lots:
+        products = session.query(Product).filter_by(stock_lot_id=lot.id).all()
+        product_ids = [p.id for p in products]
+        sold = sum(1 for p in products if int(p.in_stock_count or 0) == 0)
+        on_floor = [p for p in products if int(p.in_stock_count or 0) > 0]
+        splits = session.query(ConsignmentSalesSplit).filter(ConsignmentSalesSplit.product_id.in_(product_ids)).all() if product_ids else []
+        lot_rows.append({
+            **lot.to_dict(),
+            "items": len(products),
+            "sold": sold,
+            "on_floor": len(on_floor),
+            "on_floor_reference_value": sum(int(p.consignment_reference_value or 0) for p in on_floor),
+            "sell_through_pct": round(100 * sold / len(products), 1) if products else 0,
+            "sales_gross": sum(int(s.line_total) for s in splits),
+            "commission": sum(int(s.commission_amount) for s in splits),
+            "partner_share": sum(int(s.partner_share) for s in splits),
+        })
+
+    all_splits_total = int(session.query(func.coalesce(func.sum(ConsignmentSalesSplit.partner_share), 0)).scalar() or 0)
+    commission_total = int(session.query(func.coalesce(func.sum(ConsignmentSalesSplit.commission_amount), 0)).scalar() or 0)
+    payable_journal_credit = int(session.query(func.coalesce(func.sum(AccountingJournalLine.credit), 0)).filter(AccountingJournalLine.account_code == "2100").scalar() or 0)
+    payable_journal_debit = int(session.query(func.coalesce(func.sum(AccountingJournalLine.debit), 0)).filter(AccountingJournalLine.account_code == "2100").scalar() or 0)
+    commission_journal = int(session.query(func.coalesce(func.sum(AccountingJournalLine.credit), 0)).filter(AccountingJournalLine.account_code == "4200").scalar() or 0)
+    paid_total_all = int(session.query(func.coalesce(func.sum(ConsignmentPayout.amount), 0)).filter(ConsignmentPayout.status == "PAID").scalar() or 0)
+    payable_recon = consignment.reconcile(all_splits_total, payable_journal_credit - payable_journal_debit, paid_total_all)
+    commission_recon = {"expected": commission_total, "journal": commission_journal, "difference": commission_journal - commission_total}
+    commission_recon["balanced"] = commission_recon["difference"] == 0
+
+    floor_products = session.query(Product).filter(Product.is_consignment.is_(True), Product.in_stock_count > 0).all()
+    payouts = session.query(ConsignmentPayout).order_by(ConsignmentPayout.created_at.desc()).limit(50).all()
+    return {
+        "kpis": {
+            "partner_payable_now": sum(row["payable_now"] for row in supplier_rows),
+            "partner_in_fulfilment": total_in_fulfilment,
+            "partner_cancelled_to_reverse": total_cancelled,
+            "commission_earned": commission_total,
+            "paid_out": total_paid,
+            "payouts_open": total_open,
+            "stock_on_floor": len(floor_products),
+            "stock_on_floor_reference_value": sum(int(p.consignment_reference_value or 0) for p in floor_products),
+        },
+        "suppliers": supplier_rows,
+        "lots": lot_rows,
+        "payouts": [row.to_dict() for row in payouts],
+        "reconciliation": {
+            "partner_payable": payable_recon,
+            "commission": commission_recon,
+        },
+        "policy": {
+            "commission_rate": float(consignment.COMMISSION_RATE),
+            "dual_approval_threshold": consignment.DUAL_APPROVAL_THRESHOLD,
+            "photo_min": consignment.PHOTO_MIN,
+            "photo_max": consignment.PHOTO_MAX,
+            "video_max_seconds": consignment.VIDEO_MAX_SECONDS,
+        },
+    }
+
+
+def sale_journal_lines(total: int, cogs: int, tender_type: str, transport_total: int = 0,
+                       consignment_commission: int = 0, consignment_partner: int = 0):
+    """Balanced sale lines. Consignment lines split into partner payable (2100)
+    and Adonai commission (4200); only the remainder is ordinary sales revenue."""
     payment_code, payment_name = payment_account(tender_type)
     transport_total = max(0, int(transport_total or 0))
-    sales_revenue = max(0, int(total) - transport_total)
+    consignment_commission = max(0, int(consignment_commission or 0))
+    consignment_partner = max(0, int(consignment_partner or 0))
+    consignment_gross = consignment_commission + consignment_partner
+    sales_revenue = int(total) - transport_total - consignment_gross
+    if sales_revenue < 0:
+        raise ValueError("Sale lines exceed the order total (transport plus consignment share); refusing to post an unbalanced sale")
     lines = [
         {"account_code": payment_code, "account_name": payment_name, "debit": total},
         *([{"account_code": "4000", "account_name": ACCOUNT_NAMES["4000"], "credit": sales_revenue}] if sales_revenue else []),
         *([{"account_code": "4100", "account_name": ACCOUNT_NAMES["4100"], "credit": transport_total}] if transport_total else []),
+        *([{"account_code": "4200", "account_name": ACCOUNT_NAMES["4200"], "credit": consignment_commission}] if consignment_commission else []),
+        *([{"account_code": "2100", "account_name": ACCOUNT_NAMES["2100"], "credit": consignment_partner}] if consignment_partner else []),
     ]
     if cogs:
         lines.extend([
@@ -1352,6 +1475,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     try:
                         base = body.get("base_price", prod.base_price or prod.selling_price)
                         transport = body.get("total_transport_cost", prod.total_transport_cost or 0)
+                        if getattr(prod, "is_consignment", False):
+                            # Partner stock never carries Adonai transport.
+                            transport = 0
                         allocation = transport_allocation(base, transport)
                     except (ValueError, TypeError) as exc:
                         return json_response({"ok": False, "error": str(exc)}, status=400)
@@ -1703,9 +1829,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     products[pid] = prod
                     active_locks[pid] = own_lock
 
+                # Consignment pieces carry no Adonai transport: they are excluded from the delivery
+                # fee and from the ledger transport line, so a stray transport value cannot unbalance a sale.
+                transport_pids = [pid for pid in requested if not getattr(products[pid], "is_consignment", False)]
                 delivery_fee = 0 if body.get("delivery_type", "boda") == "pickup" else sum(
                     whole_money((products[pid].checkout_transport_portion if products[pid].checkout_transport_portion is not None else (products[pid].total_transport_cost or 0) * 0.5) * requested[pid])
-                    for pid in requested
+                    for pid in transport_pids
                 )
                 # SECURITY: only accept well-formed client order IDs
                 # (alphanumeric/dash/underscore); anything else is replaced
@@ -1713,6 +1842,15 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order_id = safe_identifier(body.get("id")) or f"AT-{int(time.time() * 1000) % 1000000:06d}-{uuid.uuid4().hex[:4].upper()}"
                 if session.query(Order).filter_by(id=order_id).first():
                     return json_response({"ok": False, "error": "Duplicate order ID"}, status=409)
+                # Consignment pieces are one-of-one and must be validated before
+                # any stock is touched (early returns commit the transaction).
+                for pid in requested:
+                    prod = products[pid]
+                    if getattr(prod, "is_consignment", False):
+                        if requested[pid] != 1:
+                            return json_response({"ok": False, "error": f"'{prod.name}' is a one-of-one consignment piece; sell quantity 1"}, status=409)
+                        if not prod.supplier_id:
+                            return json_response({"ok": False, "error": f"'{prod.name}' has no consignment supplier linked"}, status=409)
                 subtotal = 0
                 cogs = 0
                 order_items_objs = []
@@ -1756,7 +1894,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 # the product price but is included in this ledger total.
                 transport_total = sum(
                     whole_money((products[pid].total_transport_cost or 0) * requested[pid])
-                    for pid in requested
+                    for pid in transport_pids
                 )
                 tender = body.get("tender") or {}
                 cashier = body.get("cashier") or staff_info or {}
@@ -1808,6 +1946,30 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 )
                 session.add(order)
                 session.add_all(order_items_objs)
+                # Consignment settlement: each consignment line is split once, here,
+                # for POS and web orders alike. Partner share is owed after fulfilment.
+                consignment_splits = []
+                consignment_commission_total = 0
+                consignment_partner_total = 0
+                for item in order_items_objs:
+                    item_product = products[item.product_id]
+                    if not getattr(item_product, "is_consignment", False):
+                        continue
+                    commission_amount, partner_share = consignment.split_sale_line(item.line_total)
+                    consignment_commission_total += commission_amount
+                    consignment_partner_total += partner_share
+                    consignment_splits.append(ConsignmentSalesSplit(
+                        id=generate_uid("CSP"),
+                        order_id=order_id,
+                        order_item_id=item.id,
+                        supplier_id=item_product.supplier_id,
+                        product_id=item_product.id,
+                        line_total=item.line_total,
+                        commission_amount=commission_amount,
+                        partner_share=partner_share,
+                        commission_rate=consignment.COMMISSION_RATE,
+                        created_at=now,
+                    ))
                 session.add(LedgerEntry(
                     id=generate_uid("LED"),
                     kind="sale",
@@ -1818,15 +1980,25 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     ref_id=order_id,
                     created_at=now,
                 ))
-                create_journal_entry(
+                sale_journal = create_journal_entry(
                     session,
                     reference=order_id,
                     source="pos_sale" if channel == "pos" else f"{channel}_sale",
                     description=f"{channel.upper()} sale {order_id}",
                     occurred_at=now,
                     staff=cashier,
-                    lines=sale_journal_lines(grand_total, cogs, tender_type, transport_total),
+                    lines=sale_journal_lines(
+                        grand_total, cogs, tender_type, transport_total,
+                        consignment_commission=consignment_commission_total,
+                        consignment_partner=consignment_partner_total,
+                    ),
                 )
+                for split_row in consignment_splits:
+                    split_row.journal_entry_id = sale_journal.id
+                # Persist the order before its split rows: PostgreSQL enforces the
+                # orders foreign key, and no ORM relationship orders these inserts.
+                session.flush()
+                session.add_all(consignment_splits)
                 session.flush()
 
                 # Record alerts atomically with the successful checkout.
@@ -2361,6 +2533,334 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     {"lot_id": lot_id, "lot_code": lot_code, "item_count": item_count}, session=session)
                 return json_response({"ok": True, "status": "registered", "stock_lot": lot.to_dict(include_grades=True)}, status=201)
 
+        # ================================================================
+        # Partner consignment (internal Financial Ledgers only)
+        # ================================================================
+        if clean_path == "/api/finance/consignment/suppliers" and method in ("GET", "POST"):
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            if method == "GET":
+                with get_db() as session:
+                    rows = session.query(ConsignmentSupplier).order_by(ConsignmentSupplier.created_at.desc()).limit(300).all()
+                    return json_response({"ok": True, "suppliers": [row.to_dict() for row in rows]})
+            try:
+                problems = consignment.required_kyc_problems(body)
+                if problems:
+                    raise ValueError("; ".join(problems))
+                channel = consignment.normalise_payout_channel(body.get("payout_channel"))
+                account = consignment.validate_payout_account(channel, body.get("payout_account"))
+                partner_name = clean_text(body.get("partner_name"), 150)
+                business_name = clean_text(body.get("business_name"), 150)
+                phone = clean_text(body.get("phone_whatsapp"), 30)
+                identity = clean_text(body.get("identity_reference"), 120)
+            except ValueError as exc:
+                return json_response({"ok": False, "error": str(exc)}, status=400)
+            with get_db() as session:
+                supplier = ConsignmentSupplier(
+                    id=generate_uid("SUP"),
+                    partner_name=partner_name,
+                    business_name=business_name or None,
+                    phone_whatsapp=phone,
+                    identity_reference=identity,
+                    payout_channel=channel,
+                    payout_account=account or None,
+                    kyc_status="PENDING_KYC",
+                    created_by_id=staff_info.get("id"),
+                    created_by_name=staff_info.get("name"),
+                    default_commission_rate=consignment.COMMISSION_RATE,
+                    is_active=True,
+                )
+                session.add(supplier)
+                session.flush()
+                return json_response({"ok": True, "status": "created", "supplier": supplier.to_dict()}, status=201)
+
+        if clean_path.startswith("/api/finance/consignment/suppliers/") and clean_path.endswith("/verify") and method == "POST":
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            supplier_id = clean_path[len("/api/finance/consignment/suppliers/"):-len("/verify")]
+            with get_db() as session:
+                supplier = session.query(ConsignmentSupplier).filter_by(id=supplier_id).with_for_update().first()
+                if not supplier:
+                    return json_response({"ok": False, "error": "Supplier not found"}, status=404)
+                if supplier.kyc_status == "VERIFIED":
+                    return json_response({"ok": True, "status": "already_verified", "supplier": supplier.to_dict()})
+                if supplier.created_by_id and supplier.created_by_id == staff_info.get("id"):
+                    return json_response({"ok": False, "error": "A different manager must verify this supplier's KYC"}, status=403)
+                supplier.kyc_status = "VERIFIED"
+                supplier.kyc_verified_by_id = staff_info.get("id")
+                supplier.kyc_verified_at = datetime.utcnow()
+                session.flush()
+                return json_response({"ok": True, "status": "verified", "supplier": supplier.to_dict()})
+
+        if clean_path == "/api/finance/consignment/lots" and method == "POST":
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            items_data = body.get("items")
+            try:
+                if not isinstance(items_data, list) or not items_data:
+                    raise ValueError("Add at least one garment to the consignment intake")
+                if len(items_data) > 50:
+                    raise ValueError("Register at most 50 garments per consignment lot")
+                supplier_id = str(body.get("supplier_id") or "").strip()
+                if not supplier_id:
+                    raise ValueError("Choose a consignment partner before intake")
+                description = clean_text(body.get("description"), 500)
+                if not description:
+                    raise ValueError("Lot description is required")
+                agreement_ref = clean_text(body.get("agreement_ref"), 80)
+                if not agreement_ref:
+                    raise ValueError("The signed consignment agreement reference is required")
+                return_by = None
+                if body.get("return_by_date"):
+                    return_by = parse_operator_datetime(body.get("return_by_date"))
+                acquired_at = parse_operator_datetime(body.get("acquired_at")) if body.get("acquired_at") else datetime.utcnow()
+                prepared = []
+                for index, item in enumerate(items_data, start=1):
+                    if not isinstance(item, dict):
+                        raise ValueError(f"Garment {index} is malformed")
+                    name = clean_text(item.get("name"), 255)
+                    if not name:
+                        raise ValueError(f"Garment {index} needs a description")
+                    selling = parse_positive_int(item.get("selling_price"), f"Garment {index} selling price")
+                    reference_value = parse_positive_int(item.get("reference_value"), f"Garment {index} partner reference value", allow_zero=True)
+                    photos = item.get("images") if isinstance(item.get("images"), list) else []
+                    photos = [str(url) for url in photos if str(url).strip()]
+                    video_id = str(item.get("video_id") or "").strip() or None
+                    prepared.append((item, name, selling, reference_value, photos, video_id, index))
+            except ValueError as exc:
+                return json_response({"ok": False, "error": str(exc)}, status=400)
+
+            with get_db() as session:
+                supplier = session.query(ConsignmentSupplier).filter_by(id=supplier_id).first()
+                if not supplier:
+                    return json_response({"ok": False, "error": "Consignment partner not found"}, status=404)
+                if supplier.kyc_status != "VERIFIED" or not supplier.is_active:
+                    return json_response({"ok": False, "error": "This partner must complete a second-manager KYC verification before consignment intake"}, status=409)
+                lot_code = str(body.get("lot_code") or f"CON-{datetime.now(KAMPALA_TZ):%Y%m%d}-{uuid.uuid4().hex[:4].upper()}")[:50]
+                if session.query(StockLot).filter_by(lot_code=lot_code).first():
+                    return json_response({"ok": False, "error": "Lot code already exists"}, status=409)
+                lot = StockLot(
+                    id=generate_uid("LOT"),
+                    lot_code=lot_code,
+                    supplier=(supplier.business_name or supplier.partner_name)[:150],
+                    description=description,
+                    acquisition_cost=0,
+                    shipping_cost=0,
+                    total_landed_cost=0,
+                    item_count=len(prepared),
+                    unit_cost=0,
+                    payment_method="consignment_payable",
+                    status="ALLOCATED",
+                    allocated_count=len(prepared),
+                    acquired_at=acquired_at,
+                    journal_entry_id=None,
+                    created_by_id=staff_info.get("id"),
+                    created_by_name=staff_info.get("name"),
+                    lot_type="PARTNER_CONSIGNMENT",
+                    supplier_id=supplier.id,
+                    agreement_ref=agreement_ref,
+                    return_by_date=return_by,
+                )
+                session.add(lot)
+                session.flush()
+                created_products = []
+                for item, name, selling, reference_value, photos, video_id, index in prepared:
+                    pid = generate_uid("PRD")
+                    sku = clean_text(item.get("sku"), 50) or generate_uid("ADN-CON")
+                    barcode_id = clean_text(item.get("barcode_id"), 50) or generate_uid("ADT")
+                    prod = Product(
+                        id=pid,
+                        sku=sku,
+                        barcode_id=barcode_id,
+                        name=name,
+                        brand=clean_text(item.get("brand", "Curated"), 100),
+                        color=clean_text(item.get("color", ""), 50),
+                        demographic=clean_text(item.get("demographic", "Men"), 50),
+                        category=clean_text(item.get("category", "Outerwear & Jackets"), 100),
+                        size=clean_text(item.get("size", "-"), 20),
+                        item_condition=ItemCondition.PRE_LOVED.value,
+                        quantity_type=QuantityType.PRE_LOVED.value,
+                        condition=clean_text(item.get("condition", "Grade A — Excellent"), 100),
+                        size_variants_json="[]",
+                        color_variants_json="[]",
+                        measurements_json=json.dumps({str(k)[:40]: clean_text(v, 80) for k, v in (item.get("measurements") or {}).items()} if isinstance(item.get("measurements"), dict) else {}),
+                        cost_price=0,
+                        # Consignment pieces are sold at their agreed price with no
+                        # transport allocation, so the split reconciles exactly.
+                        base_price=selling,
+                        total_transport_cost=0,
+                        selling_price=selling,
+                        compare_price=0,
+                        in_stock_count=1,
+                        desc=clean_multiline_text(item.get("desc", ""), 4000),
+                        image_url=photos[0] if photos else None,
+                        images=photos[:12],
+                        rack_location=clean_text(item.get("rack_location", "Consignment Rail"), 50),
+                        stock_lot_id=lot.id,
+                        inventory_status="AVAILABLE",
+                        is_consignment=True,
+                        supplier_id=supplier.id,
+                        consignment_reference_value=reference_value,
+                    )
+                    prod.slug = unique_product_slug(session, prod.name, sku, pid, clean_text(item.get("slug", ""), 200))
+                    apply_pdp_fields(prod, item)
+                    session.add(prod)
+                    session.flush()
+                    try:
+                        media.attach_to_product(session, prod, {"images": photos, "video_id": video_id or ""}, staff_info or {})
+                    except ValueError as exc:
+                        session.rollback()
+                        return json_response({"ok": False, "error": f"Garment {index}: {exc}"}, status=400)
+                    session.flush()
+                    attached_images = session.query(ProductMedia).filter_by(product_id=pid, kind="image").count()
+                    video_asset = session.query(ProductMedia).filter_by(product_id=pid, kind="video").first()
+                    problems = consignment.validate_media(attached_images, video_asset.duration if video_asset else None)
+                    if problems:
+                        session.rollback()
+                        return json_response({"ok": False, "error": f"Garment {index} ({name}) does not meet the media standard: " + " ".join(problems)}, status=400)
+                    session.add(Inventory(
+                        id=generate_uid("INV"),
+                        product_id=pid,
+                        sku=sku,
+                        rack_location=prod.rack_location,
+                        quantity=1,
+                        batch_reference=lot.lot_code,
+                        intake_staff_id=(staff_info or {}).get("id", "STF-01"),
+                        notes="Partner consignment intake",
+                    ))
+                    created_products.append(pid)
+                session.flush()
+                broadcast_event("STOCK_LOT_RECEIVED", "Consignment intake saved",
+                    f"{lot_code} · {len(created_products)} piece(s) · {supplier.partner_name}",
+                    {"lot_id": lot.id, "lot_code": lot_code, "item_count": len(created_products)}, session=session)
+                return json_response({"ok": True, "status": "registered", "lot": lot.to_dict(), "product_ids": created_products}, status=201)
+
+        if clean_path == "/api/finance/consignment/overview" and method == "GET":
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            with get_db() as session:
+                payload = consignment_overview(session)
+                return json_response({"ok": True, **payload})
+
+        if clean_path == "/api/finance/consignment/payouts" and method in ("GET", "POST"):
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            if method == "GET":
+                with get_db() as session:
+                    rows = session.query(ConsignmentPayout).order_by(ConsignmentPayout.created_at.desc()).limit(200).all()
+                    return json_response({"ok": True, "payouts": [row.to_dict() for row in rows]})
+            key = clean_text(body.get("idempotency_key"), 80)
+            try:
+                if not key:
+                    raise ValueError("A payout request key is required, so a double-click cannot pay twice")
+                amount = parse_positive_int(body.get("amount"), "Payout amount")
+                supplier_id = str(body.get("supplier_id") or "").strip()
+                if not supplier_id:
+                    raise ValueError("Choose a partner for this payout")
+            except ValueError as exc:
+                return json_response({"ok": False, "error": str(exc)}, status=400)
+            with get_db() as session:
+                existing = session.query(ConsignmentPayout).filter_by(idempotency_key=key).first()
+                if existing:
+                    return json_response({"ok": True, "status": "existing", "payout": existing.to_dict()})
+                supplier = session.query(ConsignmentSupplier).filter_by(id=supplier_id).with_for_update().first()
+                if not supplier:
+                    return json_response({"ok": False, "error": "Partner not found"}, status=404)
+                if supplier.kyc_status != "VERIFIED":
+                    return json_response({"ok": False, "error": "Partner KYC must be verified before any payout"}, status=409)
+                position = consignment_position(session, supplier.id)
+                if amount > position["payable_now"]:
+                    return json_response({"ok": False, "error": f"Only UGX {position['payable_now']:,} is payable now (fulfilled sales less payouts already made or pending)"}, status=409)
+                payout = ConsignmentPayout(
+                    id=generate_uid("PAY"),
+                    supplier_id=supplier.id,
+                    amount=amount,
+                    channel=supplier.payout_channel,
+                    account_snapshot=supplier.payout_account,
+                    status="REQUESTED",
+                    idempotency_key=key,
+                    requested_by_id=staff_info.get("id"),
+                    requested_by_name=staff_info.get("name"),
+                    note=clean_multiline_text(body.get("note", ""), 500) or None,
+                    created_at=datetime.utcnow(),
+                )
+                session.add(payout)
+                session.flush()
+                return json_response({"ok": True, "status": "requested", "payout": payout.to_dict()}, status=201)
+
+        if clean_path.startswith("/api/finance/consignment/payouts/") and method == "POST" and clean_path.rsplit("/", 1)[-1] in ("approve", "reject", "pay"):
+            action = clean_path.rsplit("/", 1)[-1]
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            payout_id = clean_path[len("/api/finance/consignment/payouts/"):-len("/" + action)]
+            with get_db() as session:
+                payout = session.query(ConsignmentPayout).filter_by(id=payout_id).with_for_update().first()
+                if not payout:
+                    return json_response({"ok": False, "error": "Payout not found"}, status=404)
+                actor_id = staff_info.get("id")
+                if action == "reject":
+                    if payout.status not in consignment.OPEN_PAYOUT_STATUSES:
+                        return json_response({"ok": False, "error": f"A {payout.status} payout cannot be rejected"}, status=409)
+                    payout.status = "REJECTED"
+                    payout.note = clean_multiline_text(body.get("reason", payout.note or ""), 500) or payout.note
+                    session.flush()
+                    return json_response({"ok": True, "status": "rejected", "payout": payout.to_dict()})
+                if action == "approve":
+                    if payout.status != "REQUESTED":
+                        return json_response({"ok": False, "error": f"Only a requested payout can be approved (this one is {payout.status})"}, status=409)
+                    # Dual control: at or above the threshold the approver must be a
+                    # different manager from the requester.
+                    if payout.amount >= consignment.DUAL_APPROVAL_THRESHOLD and actor_id == payout.requested_by_id:
+                        return json_response({"ok": False, "error": f"Payouts of UGX {consignment.DUAL_APPROVAL_THRESHOLD:,} or more need a second manager's approval"}, status=403)
+                    position = consignment_position(session, payout.supplier_id)
+                    if position["payable_now"] < 0:
+                        return json_response({"ok": False, "error": "This payout now exceeds what is payable to the partner"}, status=409)
+                    payout.status = "APPROVED"
+                    payout.approved_by_id = actor_id
+                    payout.approved_by_name = staff_info.get("name")
+                    session.flush()
+                    return json_response({"ok": True, "status": "approved", "payout": payout.to_dict()})
+                # action == "pay"
+                if payout.status != "APPROVED":
+                    return json_response({"ok": False, "error": "Approve the payout before recording payment"}, status=409)
+                reference = clean_text(body.get("payment_reference"), 120)
+                if len(reference) < 4:
+                    return json_response({"ok": False, "error": "Enter the Mobile Money / bank transaction reference or the cash receipt number"}, status=400)
+                if session.query(ConsignmentPayout).filter(ConsignmentPayout.payment_reference == reference).first():
+                    return json_response({"ok": False, "error": "This payment reference was already used"}, status=409)
+                position = consignment_position(session, payout.supplier_id)
+                # The payout is still open, so its amount is part of "open" already.
+                if position["eligible"] - position["paid"] - payout.amount < 0:
+                    return json_response({"ok": False, "error": "Fulfilled sales no longer cover this payout"}, status=409)
+                method_value = consignment.PAYOUT_CHANNELS.get(payout.channel, "cash")
+                pay_code, pay_name = payment_account(method_value)
+                journal = create_journal_entry(
+                    session,
+                    reference=payout.id,
+                    source="consignment_payout",
+                    description=f"Partner payout {payout.id} · ref {reference}",
+                    occurred_at=datetime.utcnow(),
+                    staff=staff_info,
+                    lines=[
+                        {"account_code": "2100", "account_name": ACCOUNT_NAMES["2100"], "debit": payout.amount},
+                        {"account_code": pay_code, "account_name": pay_name, "credit": payout.amount},
+                    ],
+                )
+                payout.status = "PAID"
+                payout.paid_by_id = actor_id
+                payout.paid_by_name = staff_info.get("name")
+                payout.payment_reference = reference
+                payout.journal_entry_id = journal.id
+                payout.paid_at = datetime.utcnow()
+                session.flush()
+                return json_response({"ok": True, "status": "paid", "payout": payout.to_dict()})
+
         if clean_path == "/api/finance/dashboard" and method == "GET":
             staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
             if auth_error:
@@ -2379,6 +2879,14 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 cogs = 0
                 channels = {"POS": 0, "WhatsApp / TikTok": 0, "Web": 0}
                 categories = {}
+                # Consignment lines: customers pay the full price, but only the commission is Adonai revenue.
+                # The partner share is owed to the partner, so it is excluded from profit.
+                order_ids = [order.id for order in orders]
+                split_by_item = {}
+                if order_ids:
+                    for split_row in session.query(ConsignmentSalesSplit).filter(ConsignmentSalesSplit.order_id.in_(order_ids)).all():
+                        split_by_item[split_row.order_item_id] = split_row
+                partner_share_total = sum(int(s.partner_share or 0) for s in split_by_item.values())
                 for order in orders:
                     if order.channel == "pos":
                         channel_name = "POS"
@@ -2392,15 +2900,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         if not item_cost and item.product_id:
                             product = session.query(Product).filter_by(id=item.product_id).first()
                             item_cost = int(product.cost_price or 0) * int(item.qty or 0) if product else 0
-                        item_revenue = int(item.line_total or 0)
+                        split_row = split_by_item.get(item.id)
+                        item_revenue = int(split_row.commission_amount or 0) if split_row else int(item.line_total or 0)
                         cogs += item_cost
                         name = item.category or "Uncategorised"
                         bucket = categories.setdefault(name, {"category": name, "sales": 0, "cogs": 0, "profit": 0})
                         bucket["sales"] += item_revenue
                         bucket["cogs"] += item_cost
                         bucket["profit"] += item_revenue - item_cost
-                gross_profit = gross_sales - cogs
-                gross_margin = round((gross_profit / gross_sales * 100), 1) if gross_sales else 0
+                adonai_revenue = gross_sales - partner_share_total
+                gross_profit = adonai_revenue - cogs
+                gross_margin = round((gross_profit / adonai_revenue * 100), 1) if adonai_revenue else 0
                 # Journal-derived expense totals include new records, imported
                 # legacy cash-book expenses, reversals, and inventory losses.
                 expense_debit, expense_credit = session.query(
@@ -2427,6 +2937,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "date": selected_date,
                     "metrics": {
                         "gross_sales": gross_sales,
+                        "partner_share": partner_share_total,
+                        "adonai_revenue": adonai_revenue,
                         "cogs": cogs,
                         "gross_profit": gross_profit,
                         "gross_margin": gross_margin,
@@ -3108,6 +3620,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         fee_value = None
                     if fee_value is not None:
                         for product in session.query(Product).all():
+                            if getattr(product, "is_consignment", False):
+                                continue  # partner stock keeps zero transport
                             if product.total_transport_cost != fee_value:
                                 catalog_changed = True
                             product.total_transport_cost = fee_value

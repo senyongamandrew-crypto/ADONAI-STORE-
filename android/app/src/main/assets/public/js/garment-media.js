@@ -136,7 +136,8 @@
       try {
         const duration = await readVideoDuration(file);
         if (disposed || controller.signal.aborted) return;
-        if (duration && duration > MAX_SECONDS + 0.5) throw new Error("This video is longer than 30 seconds. Trim it on your phone and try again.");
+        const limit = Number(options.maxVideoSeconds) > 0 ? Number(options.maxVideoSeconds) : MAX_SECONDS;
+        if (duration && duration > limit + 0.5) throw new Error(`This video is longer than ${limit} seconds. Trim it on your phone and try again.`);
         setBusy(true, "Uploading & optimizing your video… please keep this page open.");
         const asset = await DB.uploadMedia(file, "video", controller.signal);
         if (disposed) { DB.discardMedia(asset.id).catch(() => {}); return; }

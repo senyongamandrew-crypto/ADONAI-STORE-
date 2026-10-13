@@ -15,6 +15,7 @@
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
 <link rel="stylesheet" href="css/garment-media.css?v=1.0" />
+<link rel="stylesheet" href="css/bale-costs.css?v=1.0" />
 <link rel="stylesheet" href="css/adaptive-display.css?v=1.0" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -535,7 +536,27 @@
       </div>
 
       <div class="finance-panel" id="finance-lots" role="tabpanel" hidden>
+        <div class="finance-toolbar bc-toolbar">
+          <div><p class="kicker">BALE COSTS · CASH SHARE</p><h3>Stock intake, partner cash share &amp; registered lots</h3></div>
+          <button class="btn sm ghost" type="button" id="bcRefresh">↻ Refresh</button>
+        </div>
+
+        <section class="bc-kpis" id="bcKpis" aria-label="Cash share summary" aria-live="polite"><div class="finance-empty">Loading cash share…</div></section>
+        <p class="bc-policy" id="bcPolicy"></p>
+
+        <div class="bc-mode" role="tablist" aria-label="Intake mode">
+          <button type="button" role="tab" class="bc-mode-btn active" id="bcModeOwned" aria-selected="true" data-bc-mode="owned">
+            <span class="bc-mode-ico" aria-hidden="true">📦</span>
+            <span><strong>Owned In-House Bale Intake</strong><small>Adonai pays the cost upfront · weighted tier COGS</small></span>
+          </button>
+          <button type="button" role="tab" class="bc-mode-btn" id="bcModeConsign" aria-selected="false" data-bc-mode="consignment">
+            <span class="bc-mode-ico" aria-hidden="true">🤝</span>
+            <span><strong>Partner Consignment Intake</strong><small>UGX 0 upfront · partner paid only after a fulfilled sale</small></span>
+          </button>
+        </div>
+
         <div class="finance-split">
+          <div id="bcOwnedIntake">
           <form class="card finance-form" id="stockLotForm" novalidate>
             <div class="finance-card-head"><div><p class="kicker">INVENTORY LANDED COST</p><h3>Register a stock lot / bale</h3></div><span class="finance-icon">▦</span></div>
             <p class="muted small">Apportion the landed investment across grade tiers — every tagged piece then receives an accurate, locked unit COGS from its tier.</p>
@@ -570,11 +591,102 @@
             </div>
             <button class="btn primary big finance-submit" type="submit" id="lotSubmit">Register lot &amp; lock grading</button>
           </form>
+          </div>
+
+          <div id="bcConsignIntake" hidden>
+            <form class="card finance-form bc-consign-form" id="bcConsignForm" novalidate>
+              <div class="finance-card-head"><div><p class="kicker">PARTNER CONSIGNMENT</p><h3>Register consignment stock</h3></div><span class="finance-icon" aria-hidden="true">🤝</span></div>
+              <p class="muted small">The partner keeps ownership. Each garment is recorded at its agreed price and paid out after the sale is fulfilled.</p>
+
+              <fieldset class="bc-fieldset">
+                <legend>1 · Partner</legend>
+                <div class="bc-row">
+                  <div class="field grow"><label for="bcSupplier">Consignment partner</label><select class="sel-full" id="bcSupplier"><option value="">Choose a partner…</option></select></div>
+                  <button class="btn ghost sm" type="button" id="bcToggleNewPartner">+ New partner</button>
+                </div>
+                <div class="bc-partner-status" id="bcPartnerStatus" aria-live="polite"></div>
+                <div class="bc-new-partner" id="bcNewPartner" hidden>
+                  <div class="finance-form-grid">
+                    <div class="field"><label for="bcpName">Partner name</label><input class="sel-full" id="bcpName" maxlength="150" placeholder="e.g. Derek Corrections" /></div>
+                    <div class="field"><label for="bcpBusiness">Business name <span class="fhint">optional</span></label><input class="sel-full" id="bcpBusiness" maxlength="150" /></div>
+                    <div class="field"><label for="bcpPhone">WhatsApp number</label><input class="sel-full" id="bcpPhone" maxlength="30" placeholder="+2567…" /></div>
+                    <div class="field"><label for="bcpIdentity">NIN or business registration</label><input class="sel-full" id="bcpIdentity" maxlength="120" autocomplete="off" /></div>
+                    <div class="field"><label for="bcpChannel">Payout channel</label><select class="sel-full" id="bcpChannel"><option value="MOBILE_MONEY">Mobile Money</option><option value="MERCHANT_CODE">Merchant Code</option><option value="BANK_ACCOUNT">Bank Account</option><option value="CASH">Cash</option></select></div>
+                    <div class="field" id="bcpAccountField"><label for="bcpAccount">Payout number / account</label><input class="sel-full" id="bcpAccount" maxlength="120" placeholder="0770 123 456" /></div>
+                  </div>
+                  <p class="muted small">New partners stay <strong>pending KYC</strong>. A different manager must verify the file before any stock or payout.</p>
+                  <button class="btn primary sm" type="button" id="bcSavePartner">Save partner (pending KYC)</button>
+                </div>
+              </fieldset>
+
+              <fieldset class="bc-fieldset">
+                <legend>2 · Agreement &amp; funding</legend>
+                <div class="finance-form-grid">
+                  <div class="field"><label for="bcAgreement">Signed agreement reference</label><input class="sel-full" id="bcAgreement" maxlength="80" placeholder="AGR-2026-001" /></div>
+                  <div class="field"><label for="bcLotDescription">Lot description</label><input class="sel-full" id="bcLotDescription" maxlength="500" placeholder="e.g. Denim and outerwear drop" /></div>
+                  <div class="field"><label for="bcReturnBy">Return-by date <span class="fhint">unsold stock review</span></label><input class="sel-full" id="bcReturnBy" type="date" /></div>
+                  <div class="field"><label for="bcLotCode">Lot code <span class="fhint">optional</span></label><input class="sel-full" id="bcLotCode" maxlength="50" placeholder="Auto-generated" /></div>
+                </div>
+                <div class="bc-locked-strip" role="note">
+                  <div><span>Acquisition cost</span><strong>UGX 0</strong><em>🔒 locked</em></div>
+                  <div><span>Shipping / handling</span><strong>UGX 0</strong><em>🔒 locked</em></div>
+                  <div><span>Funded from</span><strong>Consignment payable</strong><em>🔒 no cash leaves the till</em></div>
+                </div>
+              </fieldset>
+
+              <fieldset class="bc-fieldset">
+                <legend>3 · Garment</legend>
+                <div class="finance-form-grid">
+                  <div class="field"><label for="bcItemName">Garment description</label><input class="sel-full" id="bcItemName" maxlength="255" placeholder="e.g. Indigo type III trucker jacket" /></div>
+                  <div class="field"><label for="bcItemSize">Size</label><input class="sel-full" id="bcItemSize" maxlength="20" placeholder="M" /></div>
+                  <div class="field"><label for="bcItemPrice">Selling price (UGX)</label><input class="sel-full" id="bcItemPrice" type="number" min="1" step="1" /></div>
+                  <div class="field"><label for="bcItemReference">Partner's agreed wholesale value (UGX)</label><input class="sel-full" id="bcItemReference" type="number" min="0" step="1" /></div>
+                </div>
+                <div class="bc-media-check" id="bcMediaChecklist" aria-live="polite"></div>
+                <div id="bcMedia" class="bc-media-host"></div>
+                <div class="bc-row">
+                  <button class="btn primary" type="button" id="bcAddGarment">Add garment to this intake</button>
+                  <span class="muted small" id="bcAddHint"></span>
+                </div>
+              </fieldset>
+
+              <fieldset class="bc-fieldset">
+                <legend>4 · Garments in this intake</legend>
+                <div id="bcQueue" class="bc-queue" aria-live="polite"><div class="finance-empty">No garments added yet.</div></div>
+              </fieldset>
+
+              <p class="bc-form-error" id="bcFormError" role="alert" hidden></p>
+              <button class="btn primary big finance-submit" type="submit" id="bcSubmitLot" disabled>Register consignment lot</button>
+            </form>
+          </div>
+
           <div class="card finance-table-card">
-            <div class="finance-card-head"><div><p class="kicker">COST ALLOCATION</p><h3>Registered lots</h3></div><span class="muted small">Newest first</span></div>
+            <div class="finance-card-head"><div><p class="kicker">REGISTERED LOTS</p><h3>Owned bales &amp; consignment</h3></div>
+              <label class="bc-filter"><span class="muted small">Show</span>
+                <select class="sel-full" id="bcLotFilter"><option value="ALL">All lots</option><option value="OWNED_BALE">Owned bales</option><option value="PARTNER_CONSIGNMENT">Consignment</option></select>
+              </label>
+            </div>
             <div id="stockLotList" class="finance-list-state" aria-live="polite">Loading stock lots…</div>
           </div>
         </div>
+
+        <section class="card finance-table-card bc-section" aria-labelledby="bcCashShareTitle">
+          <div class="finance-card-head"><div><p class="kicker">CASH SHARE</p><h3 id="bcCashShareTitle">Partner balances</h3></div><span class="muted small">Only fulfilled sales count as payable</span></div>
+          <div id="bcCashShare" class="finance-list-state">Loading partner balances…</div>
+          <div class="bc-recon" id="bcRecon" aria-live="polite"></div>
+        </section>
+
+        <section class="card finance-table-card bc-section" aria-labelledby="bcPayoutTitle">
+          <div class="finance-card-head"><div><p class="kicker">PAYOUT QUEUE</p><h3 id="bcPayoutTitle">Request, approve and record payments</h3></div><span class="muted small">Dual approval at UGX 300,000 or more</span></div>
+          <form class="bc-payout-form" id="bcPayoutForm" novalidate>
+            <div class="field"><label for="bcPayPartner">Partner</label><select class="sel-full" id="bcPayPartner"><option value="">Choose…</option></select></div>
+            <div class="field"><label for="bcPayAmount">Amount (UGX)</label><input class="sel-full" id="bcPayAmount" type="number" min="1" step="1" /></div>
+            <div class="field grow"><label for="bcPayNote">Note <span class="fhint">optional</span></label><input class="sel-full" id="bcPayNote" maxlength="500" /></div>
+            <button class="btn primary" type="submit" id="bcPaySubmit">Request payout</button>
+          </form>
+          <p class="bc-form-error" id="bcPayError" role="alert" hidden></p>
+          <div id="bcPayouts" class="finance-list-state">Loading payouts…</div>
+        </section>
       </div>
 
       <div class="finance-panel" id="finance-dashboard" role="tabpanel" hidden>
@@ -788,6 +900,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
+<script src="js/bale-costs.js?v=1.0"></script>
 <script src="app.js?v=7.5"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
