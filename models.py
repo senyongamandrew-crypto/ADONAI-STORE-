@@ -849,7 +849,9 @@ class AccountingJournalLine(Base):
 
 class ConsignmentPayout(Base):
     """Immutable partner settlement; every payout also has a journal entry."""
-    __tablename__ = "consignment_payouts"
+    # Use a distinct table from the superseded Bale Costs payout workflow so
+    # deployments that previously booted its schema can safely adopt Source B.
+    __tablename__ = "consignment_partner_payouts"
 
     id = Column(String(64), primary_key=True)
     partner_id = Column(String(50), ForeignKey("consignment_partners.id", ondelete="RESTRICT"), nullable=False, index=True)

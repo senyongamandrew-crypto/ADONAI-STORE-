@@ -60,7 +60,9 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-CREATE TABLE IF NOT EXISTS consignment_payouts (
+-- Keep Source B settlements distinct from the legacy Bale Costs
+-- `consignment_payouts` table, whose columns and status machine differ.
+CREATE TABLE IF NOT EXISTS consignment_partner_payouts (
   id VARCHAR(64) PRIMARY KEY,
   partner_id VARCHAR(50) NOT NULL REFERENCES consignment_partners(id) ON DELETE RESTRICT,
   amount INTEGER NOT NULL,
@@ -82,7 +84,7 @@ CREATE INDEX IF NOT EXISTS ix_consignment_partners_supply_source ON consignment_
 CREATE INDEX IF NOT EXISTS ix_consignment_partners_active ON consignment_partners(active);
 CREATE INDEX IF NOT EXISTS ix_products_consignment_partner_id ON products(consignment_partner_id);
 CREATE INDEX IF NOT EXISTS ix_order_items_consignment_partner_id ON order_items(consignment_partner_id);
-CREATE INDEX IF NOT EXISTS ix_consignment_payouts_partner_id ON consignment_payouts(partner_id);
-CREATE INDEX IF NOT EXISTS ix_consignment_payouts_created_at ON consignment_payouts(created_at);
+CREATE INDEX IF NOT EXISTS ix_consignment_partner_payouts_partner_id ON consignment_partner_payouts(partner_id);
+CREATE INDEX IF NOT EXISTS ix_consignment_partner_payouts_created_at ON consignment_partner_payouts(created_at);
 
 COMMIT;
