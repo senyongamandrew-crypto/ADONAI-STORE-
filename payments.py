@@ -61,9 +61,13 @@ PROVIDER = "flutterwave"
 #               Books: 1010 Mobile Money.
 #   cod       — pay on delivery / pickup. Untouched legacy behaviour.
 #
-# Only `card` talks to the gateway. The offline channels are honest about what
-# they are: instructions + a reference trail + a staff confirmation step. The
-# browser can submit a *claim*, never a settlement.
+# `card` and `momo` can both be collected by the gateway. For mobile money that
+# is the *instant* path: the shopper types the paying number, the network pushes
+# the approval prompt to their phone, they confirm it with their own MoMo PIN,
+# and the gateway tells this server the money landed — no staff step. The bank
+# and merchant channels are honest about what they are: instructions + a
+# reference trail + a staff confirmation step. The browser can submit a *claim*,
+# never a settlement.
 CHANNEL_CATALOG = {
     "card": {
         "id": "card", "label": "Card & wallet", "short": "Card",
@@ -73,7 +77,7 @@ CHANNEL_CATALOG = {
     },
     "momo": {
         "id": "momo", "label": "Mobile Money (MTN / Airtel)", "short": "Mobile Money",
-        "blurb": "Send the total to our merchant line, then confirm the transaction.",
+        "blurb": "Approve the prompt on your phone with your MoMo PIN, or send the total to our merchant line.",
         "tender_type": "mobile_money", "needs_gateway": False,
         "pay_prompt": True, "issues_code": False,
     },
@@ -96,6 +100,25 @@ CHANNEL_CATALOG = {
         "pay_prompt": False, "issues_code": False,
     },
 }
+
+# Channels a gateway collection can settle. `card` is charged on the card rail;
+# `momo` is collected on the mobile-money rail (push prompt + PIN on the phone).
+GATEWAY_CHANNELS = {
+    "card": {"payment_options": "mobilemoneyuganda,card", "label": "Card / wallet"},
+    "momo": {"payment_options": "mobilemoneyuganda", "label": "Mobile money"},
+}
+
+
+def gateway_payment_options(channel) -> str:
+    """Popup payment options for a gateway-collected channel ('' when it cannot)."""
+    info = GATEWAY_CHANNELS.get(str(channel or "").strip().lower())
+    return info["payment_options"] if info else ""
+
+
+def is_gateway_collectable(channel) -> bool:
+    """True when the gateway can take this channel's money and confirm it."""
+    return str(channel or "").strip().lower() in GATEWAY_CHANNELS
+
 
 # What a shopper may pick at checkout. `cod` is always offered.
 ONLINE_CHANNELS = ("card", "momo", "bank", "merchant")

@@ -4,8 +4,11 @@ Adonai Store accepts **payment the moment an order is confirmed**. A shopper who
 is not paying on delivery picks how they want to pay and goes straight to the
 money:
 
-* **Mobile money** — send the exact amount to the store's merchant line, then
-  submit the transaction ID from the MoMo message.
+* **Mobile money** — with the gateway configured the shopper types the paying
+  number, the network pushes the approval prompt to that phone, they confirm it
+  with their own MoMo PIN, and the order is paid within seconds. Without a
+  gateway (or by choice) the shopper can instead send the exact amount to the
+  store's merchant line and submit the transaction ID.
 * **Bank transfer** — send to the store account, then submit the reference.
 * **Merchant pay code** — the system issues a code (`ADN-XXXXXX`) locked to that
   order and that exact amount, usable at any merchant point or by whoever is
@@ -29,7 +32,8 @@ Shopper cart → [How would you like to pay?]
                         issued to that browser, and the pay window starts
 2. Pay step shows what to pay:
      Card      → secure Flutterwave popup (approve with PIN / one-time code there)
-     Mobile    → merchant number, exact amount, order reference
+     Mobile    → "send the prompt to this number", the number, and (if the
+                 merchant line is published) the manual route underneath
      Bank      → bank, account name/number, branch, reference
      Merchant  → system-issued ADN- pay code + step-by-step instructions
 3. Shopper pays from their own phone/app, then submits the transaction ID
@@ -97,12 +101,19 @@ that would leave their money in limbo:
 | Channel | Appears once you publish… |
 |---|---|
 | Card | `FLW_PUBLIC_KEY` + `FLW_SECRET_KEY` (or `FLW_MOCK_MODE=1` while testing) |
-| Mobile money | Admin → Store Settings → **Mobile money merchant line** (name + number) |
+| Mobile money | gateway keys **or** Admin → Store Settings → **Mobile money merchant line** (name + number) |
 | Bank transfer | Admin → Store Settings → **Bank account for transfers** (number required) |
 | Merchant pay code | nothing to publish — always available |
 | Pay on delivery | always available |
 
-Cards and pay codes need no published details, so they are always offered.
+With the gateway configured, mobile money is collected instantly on the MoMo rail
+— you do **not** need to publish a merchant line for that. Publish one anyway if
+you also want shoppers to be able to send money to the line directly; the manual
+route then appears under the instant button as the alternative.
+
+A payment session may only ever be opened on the rail the order was placed
+against: a bank or merchant order can never be moved onto the gateway by the
+browser.
 
 > ⚠️ Never commit `FLW_SECRET_KEY` or `FLW_SECRET_HASH` into git — set them
 > only in the Render dashboard.
@@ -132,7 +143,14 @@ API anyway.
    notification.
 4. Try the MTN MoMo option with Flutterwave's test MSISDNs from their docs.
 
-**Mobile money / bank / merchant pay code (no gateway needed):**
+**Instant mobile money (gateway in simulated mode):**
+1. Run the server with `FLW_MOCK_MODE=1` and no secret key.
+2. Add a product, choose **Mobile Money**, give the paying number, confirm the
+   order, then press **Send the prompt**. The simulated gateway settles the order
+   through the same verification path the real one uses, so the cart ends on
+   **Status: Paid** and the order shows paid in the console.
+
+**Bank transfer / merchant pay code / manual MoMo (no gateway needed):**
 1. Publish the merchant line and/or bank account in Store Settings.
 2. Add a product, choose the channel, confirm the order and note the pay-to
    details (or the `ADN-` code) shown on the pay step.
@@ -168,6 +186,8 @@ set this on Render.
 - [ ] `FLW_SECRET_HASH` set in Render **and** in the dashboard webhook settings
 - [ ] Webhook URL points at your production domain
 - [ ] One real-money test (your own MTN number, smallest priced item)
+- [ ] Confirm the instant MoMo prompt arrives and that the order turns paid on
+      its own (no staff step)
 - [ ] Refund flow noted: refunds are issued from the Flutterwave dashboard → Transactions
 
 ## 7. Troubleshooting
@@ -177,6 +197,8 @@ set this on Render.
 | No Card option at checkout | `FLW_PUBLIC_KEY`/`FLW_SECRET_KEY` not set, or site not redeployed |
 | No Mobile money / Bank option | The pay-to details are not published — Admin → Store Settings → Mobile money merchant line / Bank account for transfers |
 | Customer says they paid but the order is not paid | Check Fulfillment & Orders: the order reads **AWAITING CONFIRMATION** until staff confirm the reference against the statement |
+| No "send the prompt" button on the mobile-money step | The gateway keys are not set — the shopper gets the merchant-line instructions instead |
+| Prompt never arrives on the shopper's phone | Wrong number typed, or the network rejected it; the shopper can retry, or use the merchant line under the instant button |
 | Popup opens, card payment succeeds, order stays unpaid | Webhook not configured — but the browser verify should still settle it. Check Render logs for `Payment settle refused` (amount/currency mismatch) |
 | Webhook returns 401 | `FLW_SECRET_HASH` in Render ≠ secret hash in the Flutterwave dashboard |
 | Order cancelled & item back on sale | Shopper didn't pay within `FLW_PAYMENT_TTL_MINUTES` — normal behavior |

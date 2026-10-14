@@ -4474,7 +4474,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (currentView === "partners") renderPartners();
     if (currentView === "staff") renderStaff();
     if (currentView === "settings") renderSettings();
-    const webPend = allSales().filter(s => s.channel === "web" && s.status === "pending").length;
+    // Same predicate the dashboard uses: a web order stays "open" until it is
+    // completed or cancelled — awaiting-payment orders are exactly the ones
+    // staff need to see in the badge.
+    const webPend = allSales().filter(isOpenWebOrder).length;
     $("#navWebBadge").textContent = webPend || "";
     $("#navStockBadge").textContent = DB.listProducts().filter(p => p.in_stock_count <= 0).length || "";
   }

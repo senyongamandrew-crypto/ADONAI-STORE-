@@ -928,7 +928,9 @@ def checkout_payment_options(settings: dict) -> dict:
     }
     available = {
         "card": bool(config["enabled"]),
-        "momo": bool(pay_to["momo_number"]),
+        # Instantly collectable through the gateway (push prompt + PIN on the
+        # shopper's phone) even when no merchant line has been published.
+        "momo": bool(pay_to["momo_number"]) or bool(config["enabled"]),
         "bank": bool(pay_to["bank_account_number"] and pay_to["bank_name"]),
         # A pay code is issued by the system and settled at the shop or
         # through staff confirmation; there is nothing to configure, so it is
@@ -3110,8 +3112,26 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
                 if not order:
                     return json_response({"ok": False, "error": error}, status=404)
-                if order.payment_provider != payments.PROVIDER:
-                    return json_response({"ok": False, "error": "This order was not placed for online payment"}, status=409)
+                # Which channel this attempt collects. A mobile-money order can
+                # be collected on the momo rail (push prompt + PIN on the
+                # shopper's phone) just as a card order is charged on the card
+                # rail; bank and merchant orders have no gateway rail at all and
+                # must go back through their own instructions.
+                order_channel = payments.normalize_channel(order.payment_channel or "", default="")
+                requested_channel = payments.normalize_channel(body.get("channel") or "", default="")
+                gateway_channel = order_channel
+                # The browser may only ever *confirm* the rail this order was
+                # placed on. It can never move a bank or merchant order onto a
+                # gateway rail — that would take money twice or book it against
+                # the wrong account.
+                if not payments.is_gateway_collectable(gateway_channel) or (
+                    requested_channel and requested_channel != gateway_channel
+                ):
+                    return json_response({
+                        "ok": False,
+                        "error": "This order is not paid through the gateway — follow its payment instructions.",
+                        "payment_channel": order_channel or "cod",
+                    }, status=409)
                 expire_stale_flutterwave_orders(session, now)
                 if order.payment_status == "paid":
                     return json_response({"ok": False, "error": "This order is already paid", "payment_status": "paid"}, status=409)
@@ -3138,6 +3158,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order.updated_at = now
                 session.flush()
                 logger.info("Payment attempt %s opened for order %s (UGX %s)", attempt.tx_ref, order.id, order.total)
+                # The push prompt only works with the number that actually pays,
+                # so prefer the number captured at checkout over the contact
+                # number, and never invent one.
+                paying_number = (order.payer_account or "").strip() or (order.customer_phone or "").strip()
                 return json_response({
                     "ok": True,
                     "provider": payments.PROVIDER,
@@ -3147,9 +3171,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "amount": attempt.amount,
                     "currency": attempt.currency,
                     "order_id": order.id,
+                    "channel": gateway_channel,
+                    "payment_options": payments.gateway_payment_options(gateway_channel),
                     "customer": {
                         "name": order.customer_name or "Online Shopper",
-                        "phone": order.customer_phone or "",
+                        "phone": paying_number,
                         "email": "",
                     },
                     "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
@@ -3176,8 +3202,26 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
                 if not order:
                     return json_response({"ok": False, "error": error}, status=404)
-                if order.payment_provider != payments.PROVIDER:
-                    return json_response({"ok": False, "error": "This order was not placed for online payment"}, status=409)
+                # Which channel this attempt collects. A mobile-money order can
+                # be collected on the momo rail (push prompt + PIN on the
+                # shopper's phone) just as a card order is charged on the card
+                # rail; bank and merchant orders have no gateway rail at all and
+                # must go back through their own instructions.
+                order_channel = payments.normalize_channel(order.payment_channel or "", default="")
+                requested_channel = payments.normalize_channel(body.get("channel") or "", default="")
+                gateway_channel = order_channel
+                # The browser may only ever *confirm* the rail this order was
+                # placed on. It can never move a bank or merchant order onto a
+                # gateway rail — that would take money twice or book it against
+                # the wrong account.
+                if not payments.is_gateway_collectable(gateway_channel) or (
+                    requested_channel and requested_channel != gateway_channel
+                ):
+                    return json_response({
+                        "ok": False,
+                        "error": "This order is not paid through the gateway — follow its payment instructions.",
+                        "payment_channel": order_channel or "cod",
+                    }, status=409)
                 expire_stale_flutterwave_orders(session, now)
                 if order.payment_status == "paid":
                     return json_response({"ok": True, "payment_status": "paid", "order_id": order.id})

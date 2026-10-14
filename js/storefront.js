@@ -1147,9 +1147,35 @@
     if (channel === "card") {
       body = `<p class="wa-instruct">Your pieces are reserved. Pay with Visa, Mastercard, MTN MoMo or Airtel Money in the secure window — you will approve with your PIN or one-time code there.</p>`;
     } else if (channel === "momo") {
-      body = `${payToCardHTML("momo")}
-        <p class="pay-hint">Send the exact amount to the merchant number above, using order ${esc(orderResult.id)} as the reason. Your MoMo app asks for your PIN — we never see it. Then paste the transaction ID from your MoMo confirmation message below.</p>
-        ${payReferenceFormHTML("momo", "MoMo transaction ID", "I have paid — submit transaction ID")}`;
+      const payTo = paymentConfig.pay_to || {};
+      const manual = !!payTo.momo_number;
+      const number = orderResult.payerAccount || paymentDrafts.account || "";
+      if (gatewayCollects("momo")) {
+        // Instant rail: type the paying number, the network pushes the approval
+        // prompt to that phone, the shopper confirms with their own MoMo PIN and
+        // the gateway tells this server the money landed — no waiting on staff.
+        body = `
+          <div class="pay-instant">
+            <label class="claim-field-label" for="instantPayerPhone">Number to send the payment prompt to</label>
+            <input class="claim-input" id="instantPayerPhone" inputmode="tel" autocomplete="tel"
+              placeholder="e.g. 0758873398" value="${esc(number)}" />
+            <button type="button" class="claim-confirm-btn" id="sendPaymentPrompt" ${paymentBusy ? "disabled" : ""}>
+              ${paymentBusy ? "Sending the prompt…" : `Send the prompt — pay ${DB.ugx(orderResult.total)}`}
+            </button>
+            <p class="pay-hint">Approve the prompt that arrives on that phone and confirm it with your MoMo PIN. Your PIN is only ever entered on your own phone.</p>
+          </div>
+          ${manual ? `
+            <details class="pay-manual">
+              <summary>Or send it yourself to our merchant line</summary>
+              ${payToCardHTML("momo")}
+              <p class="pay-hint">Send the exact amount using order ${esc(orderResult.id)} as the reason, then paste the transaction ID from your MoMo confirmation message.</p>
+              ${payReferenceFormHTML("momo", "MoMo transaction ID", "I have paid — submit transaction ID")}
+            </details>` : ""}`;
+      } else {
+        body = `${payToCardHTML("momo")}
+          <p class="pay-hint">Send the exact amount to the merchant number above, using order ${esc(orderResult.id)} as the reason. Your MoMo app asks for your PIN — we never see it. Then paste the transaction ID from your MoMo confirmation message below.</p>
+          ${payReferenceFormHTML("momo", "MoMo transaction ID", "I have paid — submit transaction ID")}`;
+      }
     } else if (channel === "bank") {
       body = `${payToCardHTML("bank")}
         <p class="pay-hint">Transfer the exact amount from your bank app or branch and keep the reference. Your bank confirms the transfer with your PIN or token — we never see it. Then paste the reference or transaction ID below so we can confirm it against the statement.</p>
@@ -1209,6 +1235,46 @@
     if (refInput) refInput.addEventListener("input", e => { paymentDrafts.reference = e.target.value; });
     const submitBtn = $("#submitPaymentClaim");
     if (submitBtn) submitBtn.addEventListener("click", () => { submitPaymentClaim(submitBtn.dataset.channel); });
+    const promptBtn = $("#sendPaymentPrompt");
+    if (promptBtn) promptBtn.addEventListener("click", () => { sendInstantMomoPrompt(); });
+    const promptPhone = $("#instantPayerPhone");
+    if (promptPhone) promptPhone.addEventListener("input", e => {
+      paymentDrafts.account = e.target.value;
+      payerAccount = e.target.value.trim();
+    });
+  }
+
+  /* Instant mobile money: the shopper's own phone does the confirming, so the
+     only thing we must get right is the number the prompt goes to. */
+  async function sendInstantMomoPrompt() {
+    if (!orderResult || !orderResult.paymentToken || paymentBusy) return;
+    const input = $("#instantPayerPhone");
+    const number = String((input && input.value) || paymentDrafts.account || payerAccount || "").replace(/[^0-9+]/g, "");
+    if (number.replace(/\D/g, "").length < 9) {
+      paymentFlash = "Enter the mobile money number that should receive the payment prompt.";
+      renderCart();
+      const again = $("#instantPayerPhone");
+      if (again) again.focus();
+      return;
+    }
+    paymentBusy = true; paymentFlash = ""; renderCart();
+    try {
+      // Keep the order's paying number in step so the prompt, the receipt and
+      // the console all name the same line.
+      if (number !== String(orderResult.payerAccount || "")) {
+        const saved = await DB.setPaymentChannel(orderResult.id, orderResult.paymentToken, "momo", number);
+        orderResult.payerAccount = saved.payer_account || number;
+        paymentDrafts.account = orderResult.payerAccount;
+        rememberPendingPayment(orderResult);
+      }
+    } catch (err) {
+      paymentBusy = false;
+      paymentFlash = err.message || "Could not save that number — please try again.";
+      renderCart();
+      return;
+    }
+    paymentBusy = false;
+    await startFlutterwavePayment("momo");
   }
 
   async function requestPayCode() {
@@ -1312,17 +1378,29 @@
   }
 
   /* ---------- Flutterwave Inline popup orchestration ---------- */
-  async function startFlutterwavePayment() {
+  /* True when the gateway can collect this channel right now: card always (the
+     channel only exists when the gateway does), mobile money when the store has
+     gateway keys — the shopper then approves a prompt on their own phone. */
+  function gatewayCollects(channel) {
+    const target = String(channel || (orderResult && orderResult.method) || "");
+    if (target === "card") return true;
+    if (target === "momo") return !!paymentConfig.enabled;
+    return false;
+  }
+
+  async function startFlutterwavePayment(channel) {
     if (!orderResult || !orderResult.paymentToken) return;
-    // The gateway only settles the card channel. Anything else is confirmed by
-    // staff against the bank / merchant statement, and must never be parked in
-    // the popup where a shopper would pay twice.
-    if (orderResult.method !== "card") return;
+    const target = String(channel || orderResult.method || "");
+    // Card is charged on the card rail and mobile money on the MoMo rail (the
+    // shopper confirms on their phone with their own PIN). Bank and merchant
+    // orders are confirmed by staff against the statement and must never be
+    // parked in the popup where a shopper would pay twice.
+    if (!gatewayCollects(target)) return;
     if (paymentBusy) return;
     paymentBusy = true;
     renderCart();
     try {
-      const sessionData = await DB.createFlutterwaveSession(orderResult.id, orderResult.paymentToken);
+      const sessionData = await DB.createFlutterwaveSession(orderResult.id, orderResult.paymentToken, target);
 
       if (sessionData.mock) {
         // Local development mock (no real keys configured): approve through
@@ -1330,6 +1408,9 @@
         const simulated = await DB.verifyFlutterwavePayment(orderResult.id, orderResult.paymentToken, `MOCK${Date.now()}`, sessionData.tx_ref);
         if (simulated && simulated.payment_status === "paid") {
           orderResult.paymentStatus = "paid";
+          // Settled: nothing is pending any more, so a later visit must not
+          // reopen a payment step for an order that is already paid.
+          forgetPendingPayment();
         } else {
           toast((simulated && simulated.error) || "Mock payment did not confirm");
         }
@@ -1347,7 +1428,7 @@
         tx_ref: sessionData.tx_ref,
         amount: sessionData.amount,
         currency: sessionData.currency || "UGX",
-        payment_options: "mobilemoneyuganda,card",
+        payment_options: sessionData.payment_options || "mobilemoneyuganda,card",
         meta: { order_id: sessionData.order_id },
         customer: {
           name: (sessionData.customer && sessionData.customer.name) || undefined,

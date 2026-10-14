@@ -1051,10 +1051,16 @@
       }
       return this._paymentConfigCache;
     },
-    async createFlutterwaveSession(orderId, paymentToken) {
+    async createFlutterwaveSession(orderId, paymentToken, channel) {
       const data = await apiRequest("/api/payments/flutterwave/session", {
         method: "POST",
-        body: JSON.stringify({ order_id: String(orderId || ""), payment_token: String(paymentToken || "") })
+        body: JSON.stringify({
+          order_id: String(orderId || ""),
+          payment_token: String(paymentToken || ""),
+          // Which rail to collect on: card, or momo (push prompt + PIN on the
+          // shopper's phone). Bank / merchant orders are refused by the server.
+          channel: String(channel || "")
+        })
       }, false);
       if (!data || !data.tx_ref) throw new Error((data && data.error) || "Could not start the payment session");
       return data;
