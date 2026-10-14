@@ -744,7 +744,7 @@ def seed_settings(session):
         "whatsapp_display": "+256 758 873 398",
         "phone": "+256 758 873 398",
         "hotline": "+256 765 652 403",
-        "email": "adonaithriftstore@gmail.com",
+        "email": "info@adonaithrift-store.online",
         "tiktok": "@adonai.thrift256",
         "instagram": "@adonaithrift256",
         "address": "Plot 45 Salama Road / Kibuli, Kampala, Uganda",
@@ -762,6 +762,8 @@ def seed_settings(session):
         existing = session.query(StoreSetting).filter_by(key=k).first()
         if not existing:
             session.add(StoreSetting(key=k, value=v))
+        elif k == "email" and str(existing.value or "").strip().lower() == "adonaithriftstore@gmail.com":
+            existing.value = v
         elif k == "delivery_scope" and str(existing.value or "").strip().lower() in {
             "uganda (central, eastern, and western regions)",
             "delivery available across uganda",

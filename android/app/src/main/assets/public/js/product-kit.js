@@ -17,6 +17,22 @@
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[c]));
 
+  const OFFICIAL_STORE_EMAIL = "info@adonaithrift-store.online";
+  const LEGACY_STORE_EMAIL = "adonaithriftstore@gmail.com";
+
+  /** @typedef {{ email?: string | null }} StoreSettings */
+  /**
+   * Resolve the public contact email while replacing the retired Gmail address.
+   * @param {StoreSettings | null | undefined} settings
+   * @returns {string}
+   */
+  function storeEmail(settings) {
+    const configured = String((settings && settings.email) || "").trim();
+    return !configured || configured.toLowerCase() === LEGACY_STORE_EMAIL
+      ? OFFICIAL_STORE_EMAIL
+      : configured;
+  }
+
   /* ----------------------------------------------------------
      1. CONDITION & GRADE IDENTIFICATION SYSTEM
      Every piece renders a colour-coded badge. Colours are fixed
@@ -261,7 +277,7 @@
       id: "kampala",
       name: "Kampala Metro (Central)",
       hubs: "Kampala · Wakiso · Entebbe · Mukono",
-      eta: "Same-day or next-day",
+      eta: "Same-day by 4 PM; otherwise next available day",
       mode: "Door delivery by boda courier",
       feeKind: "standard"
     },
@@ -269,16 +285,16 @@
       id: "upcountry",
       name: "Up-country Hubs",
       hubs: "Mbarara · Jinja · Gulu · Arua · Masaka · Mbale",
-      eta: "24–48 hours",
+      eta: "1–3 business days after dispatch",
       mode: "Regional bus terminal or express courier",
       feeKind: "quoted"
     },
     {
       id: "pickup",
       name: "Self-Pickup in Kampala",
-      hubs: "Collect at our store counter",
-      eta: "Ready in 1 hour",
-      mode: "Free pickup — try it on before you pay",
+      hubs: "Plot 45 Salama Road / Kibuli, Kampala",
+      eta: "Ready after store confirmation",
+      mode: "Free in-store pickup",
       feeKind: "free"
     }
   ];
@@ -433,6 +449,7 @@
 
   global.AdonaiPDP = {
     esc,
+    storeEmail,
     GRADES,
     gradeFor,
     MEASUREMENT_FIELDS,

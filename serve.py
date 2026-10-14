@@ -46,6 +46,7 @@ ROUTES = {
     "/admin": "admin.html",
     "/login": "login.html",
     "/privacy-policy": "privacy-policy.html",
+    "/return-policy": "return-policy.html",
     "/terms-and-conditions": "terms-and-conditions.html",
     "/sitemap.xml": "sitemap.xml",
     "/robots.txt": "robots.txt",
@@ -394,7 +395,7 @@ def product_slug_from_path(clean_path: str) -> str | None:
 
 def build_sitemap(origin: str) -> bytes:
     """Sitemap including every in-stock /product/<slug> permalink."""
-    static_paths = ["/", "/store", "/privacy-policy", "/terms-and-conditions"]
+    static_paths = ["/", "/store", "/privacy-policy", "/return-policy", "/terms-and-conditions"]
     entries = [
         f"  <url><loc>{html_escape(origin + path)}</loc><changefreq>daily</changefreq>"
         f"<priority>{'1.0' if path == '/' else '0.5'}</priority></url>"

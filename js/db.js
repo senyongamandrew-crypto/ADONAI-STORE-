@@ -15,6 +15,8 @@
 
   const LS_KEY   = "adonai-db-v7";   // v7: FACTORY DEFAULT — clean Day-1 seed (no demo data)
   const CHANNEL  = "adonai-db-v7-sync";
+  const OFFICIAL_STORE_EMAIL = "info@adonaithrift-store.online";
+  const LEGACY_STORE_EMAIL = "adonaithriftstore@gmail.com";
   const LOCK     = "adonai-store-db-tx";
   const PURGE_FLAG = "adonai-db-v7-factory-purged";   // one-time cache-wipe marker
 
@@ -165,7 +167,7 @@
         whatsapp: "256758893398",
         whatsapp_display: "+256 7588 73398",
         hotline: "+256 7656 52403",
-        email: "adonaithriftstore@gmail.com",
+        email: OFFICIAL_STORE_EMAIL,
         tiktok: "@adonai.thrift256",
         instagram: "@adonaithrift256",
         hours: "Mon - Sat: 8:30 AM - 7:30 PM | Sun: 10:00 AM - 6:00 PM",
@@ -217,6 +219,9 @@
       state.products.forEach(normalizeProductPolicy);
       if (Array.isArray(state.sales)) state.sales = state.sales.map(normalizeSaleRecord);
       if (state.settings) {
+        if (String(state.settings.email || "").trim().toLowerCase() === LEGACY_STORE_EMAIL) {
+          state.settings.email = OFFICIAL_STORE_EMAIL;
+        }
         if (/Adonai Thrift Store/i.test(String(state.settings.store_name || ""))) state.settings.store_name = "Adonai Store";
         if (!state.settings.tagline || /only|curated pre-loved vintage/i.test(String(state.settings.tagline))) {
           state.settings.tagline = "Brand-new apparel + curated vintage pieces · Kampala, Uganda";

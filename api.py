@@ -127,6 +127,9 @@ def staff_auth_required() -> bool:
     }
 
 
+OFFICIAL_STORE_EMAIL = "info@adonaithrift-store.online"
+LEGACY_STORE_EMAILS = {"adonaithriftstore@gmail.com"}
+
 # Settings that may be read by the public storefront. Authentication keys and
 # operational flags are intentionally excluded from public API responses.
 PUBLIC_STORE_SETTING_KEYS = {
@@ -209,7 +212,11 @@ def normalize_fulfillment_stage(value):
 
 def public_store_settings(rows) -> dict:
     """Serialize only settings that are safe and useful on the storefront."""
-    return {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+    settings = {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+    email = str(settings.get("email") or "").strip()
+    if not email or email.lower() in LEGACY_STORE_EMAILS:
+        settings["email"] = OFFICIAL_STORE_EMAIL
+    return settings
 
 
 # ============================================================================
@@ -4463,6 +4470,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         "error": f"Store setting '{key}' must be a scalar value"
                     }, status=400)
                 text_value = clean_text(value, 2000)
+                if key == "email" and text_value.strip().lower() in LEGACY_STORE_EMAILS:
+                    text_value = OFFICIAL_STORE_EMAIL
                 if key in ("master_key", "admin_key"):
                     if len(text_value) < 6:
                         return json_response({

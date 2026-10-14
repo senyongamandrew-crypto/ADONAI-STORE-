@@ -57,7 +57,7 @@
     const whatsapp = String(S.whatsapp || "256758873398").replace(/\D/g, "");
     const whatsappDisplay = S.whatsapp_display || (whatsapp ? "+" + whatsapp : "");
     const hotline = S.hotline || S.phone || "";
-    const email = S.email || "";
+    const email = PK.storeEmail(S);
     const tiktok = S.tiktok || "";
     const instagram = S.instagram || "";
 
@@ -86,7 +86,6 @@
 
   renderStoreProfile();
   $("#installBtn").addEventListener("click", () => toast("Tip: use your browser's \"Add to Home Screen\" to install Adonai Store app"));
-  $$("[data-policy]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); toast("Full store policies publish with the live site"); }));
 
   /* ---------- consent banner (disappears immediately upon choice) ---------- */
   function hideConsent(choice) {
@@ -823,7 +822,12 @@
             ? `Pay ${DB.ugx(grandTotal)} — Card`
             : `Confirm order & pay ${DB.ugx(grandTotal)}`
       }</button>
-      <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
+      <p class="checkout-policy-note">
+        <strong>Returns:</strong> request within 48 hours of receipt for defective or incorrectly graded items.
+        Review the <a href="/return-policy">return policy</a>,
+        <a href="/terms-and-conditions">Terms &amp; Conditions</a>, and
+        <a href="/privacy-policy">Privacy Policy</a> before confirming.
+      </p>
     `;
 
     // Bind form inputs
