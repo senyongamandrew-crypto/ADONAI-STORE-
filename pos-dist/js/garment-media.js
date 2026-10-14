@@ -51,9 +51,9 @@
         <input type="file" accept="image/*" multiple hidden data-media-photo-input aria-label="Choose multiple garment photos" />
       </div>
       <div class="gme-video-panel">
-        <div class="gme-heading"><div class="gme-video-title"><span class="gme-video-icon">${icon("video")}</span><div><h4>See it in motion</h4><p>A short garment video <span class="gme-optional">Optional</span></p></div></div><span class="gme-duration-pill">Up to 30 sec</span></div>
+        <div class="gme-heading"><div class="gme-video-title"><span class="gme-video-icon">${icon("video")}</span><div><h4>See it in motion</h4><p><span data-media-video-subtitle>A short garment video</span> <span class="gme-optional" data-media-video-optional>Optional</span></p></div></div><span class="gme-duration-pill" data-media-video-duration>Up to 30 sec</span></div>
         <div data-media-video></div>
-        <p class="gme-video-tip">Show the front, back, fabric and how it moves. Aim for 20–30 seconds in good light.</p>
+        <p class="gme-video-tip" data-media-video-tip>Show the front, back, fabric and how it moves. Aim for 20–30 seconds in good light.</p>
         <div class="gme-upload-row"><button class="btn" type="button" data-media-add-video>${icon("video")} Add garment video</button><span>1 video · MP4 or MOV · max 50 MB</span></div>
         <input type="file" accept="video/mp4,video/quicktime,.mp4,.mov" hidden data-media-video-input aria-label="Choose a short garment video" />
       </div>
@@ -179,7 +179,16 @@
       snapshot() {
         if (busy) throw new Error("Please wait for your photos and video to finish uploading.");
         if (failure) throw new Error("A file did not upload. Retry it or dismiss the failed upload before saving.");
-        return { images: photos.map(photo => photo.url), image_url: photos[0] ? photos[0].url : "", video_id: video ? video.id : "" };
+        return { images: photos.map(photo => photo.url), image_url: photos[0] ? photos[0].url : "", video_id: video ? video.id : "", video_duration: video ? Number(video.duration || 0) : 0 };
+      },
+      setConsignmentMode(value) {
+        const partner = !!value;
+        const subtitle = $("[data-media-video-subtitle]"), optional = $("[data-media-video-optional]"), duration = $("[data-media-video-duration]"), tip = $("[data-media-video-tip]");
+        if (subtitle) subtitle.textContent = partner ? "Required · upload a 15–20 second clip" : "A short garment video";
+        if (optional) optional.hidden = partner;
+        if (duration) duration.textContent = partner ? "15–20 sec" : "Up to 30 sec";
+        if (tip) tip.textContent = partner ? "Capture the front, back, fabric, label and how this unique item moves. Keep the clip between 15 and 20 seconds." : "Show the front, back, fabric and how it moves. Aim for 20–30 seconds in good light.";
+        root.classList.toggle("gme-consignment-required", partner);
       },
       setLocked(value) { locked = !!value; renderControls(); },
       markSaved() { photos.forEach(photo => { photo.draft = false; }); if (video) video.draft = false; },

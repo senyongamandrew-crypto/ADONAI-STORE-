@@ -104,7 +104,7 @@
 /* ---- slide-over notification drawer ---- */
 .notif-drawer {
   position: fixed; top: 0; right: 0; bottom: 0;
-  width: min(92vw, 400px);
+  width: min(94vw, 420px);
   background: #FFFFFF;
   border-left: 1px solid #E5E7EB;
   z-index: 10000;
@@ -148,28 +148,50 @@
 }
 .nd-close:hover { background: rgba(255, 255, 255, .12); color: #FFFFFF; }
 
-.nd-list { flex: 1; overflow-y: auto; padding: 8px 0; background: #F9FAFB; }
+.nd-list {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 12px; background: #F4F6F5;
+}
 .nd-empty {
   margin: 0; padding: 48px 24px; text-align: center;
   color: #6B7280; font-size: 13px; line-height: 1.7;
 }
-.nd-item {
-  display: flex; gap: 10px; align-items: flex-start;
-  padding: 11px 16px; border-bottom: 1px solid #E5E7EB;
-  background: #FFFFFF;
+.nd-row {
+  position: relative; display: flex; align-items: stretch; gap: 2px;
+  background: #FFFFFF; border: 1px solid #E3E8E5; border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, .035);
+  transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
 }
-.nd-item.nd-unread { background: #ECFDF5; }
-.nd-item .nd-ico { flex: 0 0 auto; font-size: 16px; line-height: 1.3; }
-.nd-item .nd-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.nd-row:hover { border-color: #CBD5CE; box-shadow: 0 4px 12px rgba(17, 24, 39, .07); }
+.nd-row.nd-unread { background: #F0FAF4; border-color: #CDE8D6; }
+.nd-row.nd-unread::before {
+  content: ""; position: absolute; z-index: 1; left: 9px; top: 17px;
+  width: 7px; height: 7px; border-radius: 50%; background: #15803D;
+}
+.nd-item {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 8px 12px 20px; border: 0; border-radius: 11px;
+  background: transparent; color: inherit; text-align: left; text-decoration: none;
+}
+button.nd-item { width: 100%; font: inherit; cursor: pointer; }
+.nd-item.nd-unread { background: transparent; }
+.nd-item .nd-ico { flex: 0 0 auto; font-size: 16px; line-height: 1.35; }
+.nd-item .nd-body { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
 .nd-item strong { font-size: 13px; font-weight: 800; color: #111827; overflow-wrap: anywhere; }
-.nd-item .nd-msg { font-size: 12.5px; color: #6B7280; line-height: 1.45; overflow-wrap: anywhere; }
-.nd-item .nd-time { font-size: 10.5px; font-weight: 700; color: #9CA3AF; text-transform: uppercase; letter-spacing: .06em; margin-top: 2px; }
+.nd-item .nd-msg { font-size: 12.5px; color: #5F6B66; line-height: 1.45; overflow-wrap: anywhere; }
+.nd-item .nd-time { font-size: 10px; font-weight: 700; color: #8A9690; text-transform: uppercase; letter-spacing: .055em; margin-top: 3px; }
 
-/* subtle left accent per type inside the drawer */
-.nd-item.nd-new_order   { box-shadow: inset 3px 0 0 #16A34A; }
-.nd-item.nd-new_message { box-shadow: inset 3px 0 0 #2563EB; }
-.nd-item.nd-low_stock   { box-shadow: inset 3px 0 0 #D97706; }
-.nd-item.nd-new_expense { box-shadow: inset 3px 0 0 #111827; }
+/* Slim type accents; the unread green dot remains the primary status cue. */
+.nd-row.nd-new_order, .nd-row.nd-order_paid, .nd-row.nd-order_updated { border-left: 3px solid #16A34A; }
+.nd-row.nd-delivery_assigned, .nd-row.nd-delivery_progress, .nd-row.nd-rider_added,
+.nd-row.nd-rider_updated, .nd-row.nd-rider_status_updated, .nd-row.nd-rider_archived,
+.nd-row.nd-rider_pairing_code_issued, .nd-row.nd-rider_phone_paired, .nd-row.nd-rider_phone_revoked,
+.nd-row.nd-rider_duty_started, .nd-row.nd-rider_duty_stopped { border-left: 3px solid #7C3AED; }
+.nd-row.nd-new_message { border-left: 3px solid #2563EB; }
+.nd-row.nd-low_stock, .nd-row.nd-stock_added, .nd-row.nd-stock_updated, .nd-row.nd-stock_removed { border-left: 3px solid #D97706; }
+.nd-row.nd-new_expense, .nd-row.nd-expense_updated, .nd-row.nd-stock_lot_received { border-left: 3px solid #64748B; }
+.nd-row.nd-order_expired, .nd-row.nd-expense_voided, .nd-row.nd-stock_written_off { border-left: 3px solid #DC2626; }
 
 /* ---- small screens: toasts clear the fixed POS chrome ---- */
 @media (max-width: 640px) {
@@ -207,31 +229,43 @@
   cursor: pointer; flex-shrink: 0;
 }
 .nd-refresh:hover { background: #F3F4F6; }
-a.nd-item { text-decoration: none; transition: background-color .15s; }
-a.nd-item:hover { background: #F3F4F6; }
-a.nd-item:focus-visible, .nd-refresh:focus-visible, .notif-bell:focus-visible {
+a.nd-item, button.nd-item { transition: background-color .15s ease, color .15s ease; }
+a.nd-item:hover, button.nd-item:hover { background: rgba(248, 250, 248, .8); }
+.nd-item:focus-visible, .nd-more:focus-visible, .nd-menu-item:focus-visible,
+.nd-refresh:focus-visible, .notif-bell:focus-visible, .nd-readall:focus-visible {
   outline: 2px solid #16A34A; outline-offset: -2px;
 }
-.nd-item .nd-body { flex: 1; }
-.nd-link { color: #9CA3AF; font-size: 22px; align-self: center; flex-shrink: 0; }
-.nd-item.nd-stock_added, .nd-item.nd-stock_updated, .nd-item.nd-stock_removed { box-shadow: inset 3px 0 0 #D97706; }
-.nd-item.nd-order_paid, .nd-item.nd-order_updated { box-shadow: inset 3px 0 0 #16A34A; }
-.nd-item.nd-order_expired { box-shadow: inset 3px 0 0 #DC2626; }
+.nd-link { color: #9CA3AF; font-size: 22px; align-self: center; flex-shrink: 0; margin-left: auto; }
+.nd-more-wrap { position: relative; flex: 0 0 40px; display: flex; justify-content: center; align-items: flex-start; padding: 7px 6px 0 0; }
+.nd-more {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: #64748B; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.nd-more:hover, .nd-more[aria-expanded="true"] { background: #E8EEEA; color: #1F2937; }
+.nd-menu {
+  position: absolute; z-index: 20; top: calc(100% + 2px); right: 5px;
+  display: grid; gap: 2px; width: max-content; min-width: 190px; max-width: 230px;
+  padding: 5px; border: 1px solid #E2E8E4; border-radius: 10px;
+  background: #FFFFFF; box-shadow: 0 12px 28px rgba(17, 24, 39, .16);
+}
+.nd-menu[hidden] { display: none !important; }
+.nd-menu[data-placement="top"] { top: auto; bottom: calc(100% - 5px); }
+.nd-menu-item {
+  display: flex; align-items: center; width: 100%; min-height: 38px; padding: 0 10px;
+  border: 0; border-radius: 7px; background: transparent; color: #27332D;
+  font: 600 12px/1.3 "Plus Jakarta Sans", "Inter", -apple-system, sans-serif;
+  text-align: left; cursor: pointer;
+}
+.nd-menu-item:hover { background: #F2F5F3; }
+.nd-menu-item.nd-menu-danger { color: #B42318; }
+.nd-menu-item.nd-menu-danger:hover { background: #FEF3F2; }
+.nd-readall:disabled { opacity: .58; cursor: not-allowed; }
 @media (max-width: 360px) {
   .nd-head { flex-wrap: wrap; }
   .nd-actions { margin-left: auto; }
+  .nd-list { padding: 9px; gap: 7px; }
+  .nd-item { gap: 8px; padding-left: 17px; }
+  .nd-row.nd-unread::before { left: 7px; }
+  .nd-more-wrap { flex-basis: 36px; padding-right: 4px; }
 }
-
-/* Received / On hold collections, selection and bulk actions */
-.nd-tool:focus-visible, .nd-selall input:focus-visible, .nd-check input:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
-.nd-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; background: #FFFFFF; border-bottom: 1px solid #E5E7EB; }
-.nd-toolbar:empty { display: none; }
-.nd-selall { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #374151; min-height: 36px; }
-.nd-selall input, .nd-check input { width: 18px; height: 18px; accent-color: #111827; cursor: pointer; }
-.nd-tool { min-height: 36px; padding: 0 10px; border: 1px solid #D1D5DB; border-radius: 8px; background: #FFFFFF; font-size: 12.5px; font-weight: 700; color: #111827; cursor: pointer; }
-.nd-tool:disabled { opacity: .45; cursor: not-allowed; }
-.nd-tool.nd-danger { color: #B91C1C; border-color: #FCA5A5; }
-.nd-row { display: flex; align-items: stretch; gap: 0; border-bottom: 1px solid #F3F4F6; }
-.nd-row > .nd-item { flex: 1 1 auto; min-width: 0; }
-.nd-check { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; cursor: pointer; background: #FFFFFF; }
-.nd-note { margin: 10px 14px; font-size: 12px; color: #6B7280; line-height: 1.45; }

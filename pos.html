@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-display-size="standard">
+<html lang="en" data-display-size="compact">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -8,11 +8,11 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="css/pos.css?v=7.4" />
-<link rel="stylesheet" href="css/notifications.css?v=2.2" />
+<link rel="stylesheet" href="css/notifications.css?v=2.4" />
 <link rel="stylesheet" href="css/pos-overhaul.css?v=1.1" />
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
-<link rel="stylesheet" href="css/adaptive-display.css?v=1.0" />
+<link rel="stylesheet" href="css/adaptive-display.css?v=1.1" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
 <link rel="icon" href="assets/favicon.ico" sizes="any" />
@@ -62,16 +62,6 @@
       <button class="nav-item store-nav-item" id="btnSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
       <button class="nav-item" id="btnRefreshSystem" type="button" title="Reload the whole system (keeps saved sales and stock)"><span class="nav-ico"><i data-icon="refresh-cw"></i></span><span>Refresh system</span></button>
     </nav>
-
-    <div class="ds-panel" id="posDisplaySize" role="group" aria-label="Display size">
-      <div class="ds-panel-head"><i data-icon="monitor" data-size="13"></i><span>Display size</span></div>
-      <div class="ds-options">
-        <button class="ds-opt" type="button" data-display-size-option="compact" aria-pressed="false">Compact</button>
-        <button class="ds-opt is-active" type="button" data-display-size-option="standard" aria-pressed="true">Standard</button>
-        <button class="ds-opt" type="button" data-display-size-option="large" aria-pressed="false">Large</button>
-      </div>
-      <p class="ds-hint">Fits words to this screen. Saved on this device.</p>
-    </div>
 
     <div class="sidebar-foot">
       <div class="me-card">
@@ -153,6 +143,20 @@
         <button class="ctab" data-cat="Shoes">Shoes</button>
         <button class="ctab" data-cat="Accessories">Accessories</button>
         <button class="ctab" data-cat="Children Wear">Children Wear</button>
+        <button class="ctab" data-cat="Boots">Boots</button>
+        <button class="ctab" data-cat="Sandals">Sandals</button>
+        <button class="ctab" data-cat="Activewear &amp; Sportswear">Activewear &amp; Sportswear</button>
+        <button class="ctab" data-cat="Suits &amp; Formalwear">Suits &amp; Formalwear</button>
+        <button class="ctab" data-cat="Underwear &amp; Sleepwear">Underwear &amp; Sleepwear</button>
+        <button class="ctab" data-cat="Bags &amp; Handbags">Bags &amp; Handbags</button>
+        <button class="ctab" data-cat="Necklaces &amp; Chains">Necklaces &amp; Chains</button>
+        <button class="ctab" data-cat="Bracelets &amp; Bangles">Bracelets &amp; Bangles</button>
+        <button class="ctab" data-cat="Rings &amp; Earrings">Rings &amp; Earrings</button>
+        <button class="ctab" data-cat="Watches">Watches</button>
+        <button class="ctab" data-cat="Eyewear &amp; Sunglasses">Eyewear &amp; Sunglasses</button>
+        <button class="ctab" data-cat="Hats, Scarves &amp; Belts">Hats, Scarves &amp; Belts</button>
+        <button class="ctab" data-cat="Traditional &amp; Occasionwear">Traditional &amp; Occasionwear</button>
+        <button class="ctab" data-cat="Swimwear &amp; Beachwear">Swimwear &amp; Beachwear</button>
       </div>
       <div class="cat-tabs category-pill-row" id="posInventoryTypes">
         <span class="cat-lab">Inventory:</span>
@@ -314,15 +318,15 @@
 <div id="receiptSheet"></div>
 
 <script src="js/analytics.js"></script>
-<script src="js/adaptive.js?v=1.0"></script>
-<script src="js/notifications.js?v=2.2"></script>
+<script src="js/adaptive.js?v=1.1"></script>
+<script src="js/notifications.js?v=2.4"></script>
 <script src="js/icons.js?v=1.0"></script>
-<script src="js/db.js?v=4.9"></script>
+<script src="js/db.js?v=5.0"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/garment-tools.js?v=1.1"></script>
 <script src="js/pos-camera.js?v=1.0"></script>
-<script src="js/pos.js?v=6.9"></script>
+<script src="js/pos.js?v=6.10"></script>
 <script src="js/pos-ui.js?v=1.0"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser

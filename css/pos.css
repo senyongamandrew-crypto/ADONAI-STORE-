@@ -220,6 +220,7 @@ h3 { font: 700 19px var(--font-display); color: var(--ink); }
 .pos-condition-tag { display: inline-block; padding: 2px 5px; margin-right: 3px; border-radius: 4px; color: #fff; font: 800 9px/1 var(--font-text); letter-spacing: .04em; vertical-align: 2px; }
 .pos-condition-tag.new { background: #B45309; }
 .pos-condition-tag.vintage { background: #047857; }
+.pos-consignment-tag { display: inline-block; padding: 2px 5px; margin: 0 3px 0 0; border: 1px solid #8c5b34; border-radius: 4px; background: #fbf3e8; color: #6a3818; font: 800 8px/1 var(--font-text); letter-spacing: .05em; vertical-align: 2px; }
 .tile .t-meta { font-size: 11.5px; color: var(--muted); }
 .tile .t-row { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
 .tile .t-price { font: 700 17px var(--font-display); color: var(--accent); }

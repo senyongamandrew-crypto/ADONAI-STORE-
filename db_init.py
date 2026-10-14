@@ -192,12 +192,20 @@ def apply_additive_schema_migrations():
             ("flaw_photo_index", "INTEGER DEFAULT -1"),
             ("care_notes", "TEXT"),
             ("staff_notes", "TEXT"),
+            ("consignment_partner_id", "VARCHAR(50)"),
+            ("commission_rate", "NUMERIC(5,2)"),
         ],
         "order_items": [
             ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
             ("quantity_type", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
             ("category", "VARCHAR(100)"),
+            ("consignment_partner_id", "VARCHAR(50)"),
+            ("partner_name_snapshot", "VARCHAR(160)"),
+            ("commission_rate_snapshot", "NUMERIC(5,2)"),
+            ("consignment_gross_amount", "INTEGER NOT NULL DEFAULT 0"),
+            ("consignment_commission_amount", "INTEGER NOT NULL DEFAULT 0"),
+            ("partner_payable_amount", "INTEGER NOT NULL DEFAULT 0"),
         ],
         "orders": [
             # Online payment lifecycle (Flutterwave). Existing orders keep
@@ -340,7 +348,9 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_products_lot_grade_id ON products(lot_grade_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
             "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
+            "CREATE INDEX IF NOT EXISTS ix_products_consignment_partner_id ON products(consignment_partner_id)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
+            "CREATE INDEX IF NOT EXISTS ix_order_items_consignment_partner_id ON order_items(consignment_partner_id)",
             # Payment-columns indexes for databases whose orders table predates
             # the online-checkout feature (create_all only builds indexes for
             # tables it creates in that pass).
@@ -454,8 +464,22 @@ def seed_categories(session):
         ("Dresses & Skirts", "DRS", 3, "Silk slip dresses, Kitenge wraps, and pleated midi skirts."),
         ("Pants & Jeans", "PNT", 4, "High-waist Levi's denim, pleated chinos, and tailored trousers."),
         ("Shoes", "SHO", 5, "Leather Chelsea boots, retro sneakers, and Italian loafers."),
-        ("Accessories", "ACC", 6, "Leather belts, canvas field totes, silk scarves, and caps."),
-        ("Children Wear", "CHD", 7, "Quality vintage denim and jackets for children.")
+        ("Accessories", "ACC", 6, "Bags, belts, hats, scarves, jewelry, sunglasses and other outfit accessories."),
+        ("Children Wear", "CHD", 7, "Quality clothing, footwear and accessories for children."),
+        ("Sandals", "SND", 8, "Leather sandals, slides and crafted warm-weather footwear."),
+        ("Boots", "BTS", 9, "Ankle boots, Chelsea boots, work boots and other styles."),
+        ("Activewear & Sportswear", "ACT", 10, "Training clothes, leggings, sports tops and athleisure."),
+        ("Suits & Formalwear", "SUI", 11, "Suits, formal jackets, business wear and occasion tailoring."),
+        ("Underwear & Sleepwear", "SLP", 12, "Underwear, nightwear, robes and comfortable lounge sets."),
+        ("Bags & Handbags", "BAG", 13, "Handbags, backpacks, totes, clutches and travel bags."),
+        ("Necklaces & Chains", "NCK", 14, "Necklaces, chains, pendants and layered fashion jewelry."),
+        ("Bracelets & Bangles", "BRB", 15, "Bracelets, bangles, cuffs and other wrist jewelry."),
+        ("Rings & Earrings", "JWL", 16, "Rings, earrings, studs and statement jewelry."),
+        ("Watches", "WCH", 17, "Wristwatches and fashion timepieces."),
+        ("Eyewear & Sunglasses", "EYE", 18, "Everyday glasses, fashion frames and sunglasses."),
+        ("Hats, Scarves & Belts", "HSB", 19, "Headwear, scarves, belts and finishing accessories."),
+        ("Traditional & Occasionwear", "TRD", 20, "Kitenge, cultural prints, celebration wear and special-occasion fashion."),
+        ("Swimwear & Beachwear", "SWM", 21, "Swimwear, beach cover-ups and warm-weather resort pieces.")
     ]
     for name, code, order, desc in cats:
         cat_id = f"CAT-{code}"

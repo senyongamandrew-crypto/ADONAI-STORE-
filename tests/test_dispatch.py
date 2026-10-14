@@ -47,6 +47,9 @@ class DispatchTests(unittest.TestCase):
         return api.handle_api_request(method,path,query or {},json.dumps(body).encode() if body is not None else b"",headers or {},"dispatch-test")
     def call(self,method,path,body=None,headers=None,status=200):
         result=self.raw(method,path,body,headers);self.assertEqual(result[0],status,result[2]);return json.loads(result[2])
+    def notification_history(self):
+        with get_db() as s:
+            return [event.to_dict() for event in s.query(NotificationEvent).order_by(NotificationEvent.created_at,NotificationEvent.id).all()]
     def paired(self,rider="R1"):
         code=self.call("POST",f"/api/dispatch/riders/{rider}/pair",{},HEADERS,201)["code"]
         data=self.call("POST","/api/rider/pair",{"code":code,"device_label":"Authorized Android phone"},status=201)
@@ -56,12 +59,19 @@ class DispatchTests(unittest.TestCase):
         return self.raw("POST","/api/rider/location",{"latitude":0.32,"longitude":32.6,"accuracy_m":12,"fix_time_ms":datetime.now(timezone.utc).timestamp()*1000,"sequence":sequence,**extra},headers)
     def test_roster_is_sql_saved_and_survives_sync_without_exposing_locations(self):
         saved=self.call("POST","/api/riders",{"name":"New partner","phone":"+256700000000","vehicle":"Van","zone":"Central","plate":"UBX 123"},status=201)["rider"]
-        self.call("PATCH","/api/riders/"+saved["id"],{"zone":"Makindye"})
+        self.call("PATCH","/api/riders/"+saved["id"],{"zone":"Makindye","phone":"+256700000001"})
+        self.call("PATCH","/api/riders/"+saved["id"],{"zone":"Makindye","phone":"+256700000001"})  # no-op profile edits do not spam the bell
+        self.call("PATCH","/api/riders/"+saved["id"],{"status":"Offline"})
         with get_db() as s:self.assertEqual(s.get(Rider,saved["id"]).zone,"Makindye")
         rows=self.call("POST","/api/sync/pull",{})["riders"];self.assertEqual(len(rows),3);self.assertNotIn("tracking",json.dumps(rows));self.assertNotIn("token_hash",json.dumps(rows))
         board=self.call("GET","/api/dispatch/board");self.assertFalse(board["gps_access"]);self.assertEqual(board["riders"][0]["tracking"]["state"],"protected")
         self.call("DELETE","/api/riders/"+saved["id"])
         with get_db() as s:self.assertTrue(s.get(Rider,saved["id"]).archived)
+        events=self.notification_history()
+        self.assertEqual([event["type"] for event in events],["RIDER_ADDED","RIDER_UPDATED","RIDER_STATUS_UPDATED","RIDER_ARCHIVED"])
+        self.assertEqual(events[1]["payload"]["changed_fields"],["phone","zone"])
+        self.assertNotIn("+256700000000",json.dumps(events),"phone numbers must not be placed in bell payloads")
+        self.assertNotIn("+256700000001",json.dumps(events),"updated phone numbers must not be placed in bell payloads")
     def test_gps_requires_deliberate_private_access_without_gating_register(self):
         self.call("POST","/api/dispatch/riders/R1/pair",{},status=403)
         self.protect();self.call("GET","/api/dispatch/board",status=403)
@@ -82,6 +92,11 @@ class DispatchTests(unittest.TestCase):
         self.call("POST","/api/rider/pair",{"code":code,"device_label":"Phone"},status=403)
         headers,data=self.paired();self.assertEqual(self.raw("GET","/api/rider/me",query={"token":data["session_token"]})[0],401)
         self.call("POST","/api/dispatch/riders/R1/revoke",{},HEADERS);self.call("GET","/api/rider/me",headers=headers,status=401)
+        events=self.notification_history()
+        self.assertEqual([event["type"] for event in events],[
+            "RIDER_PAIRING_CODE_ISSUED","RIDER_PAIRING_CODE_ISSUED","RIDER_PHONE_PAIRED","RIDER_PHONE_REVOKED",
+        ])
+        self.assertNotIn(code,json.dumps(events),"pairing secrets must never be copied into bell history")
     def test_consent_current_gps_freshness_accuracy_replay_and_no_business_mutation(self):
         self.protect();headers,_=self.paired()
         self.assertEqual(self.gps(headers)[0],409);self.call("POST","/api/rider/duty/start",{},headers,status=400);self.start(headers)
@@ -97,6 +112,11 @@ class DispatchTests(unittest.TestCase):
         with get_db() as s:self.assertEqual(s.get(Product,"P1").in_stock_count,7);self.assertEqual(s.query(LedgerEntry).count(),1);self.assertEqual(s.get(Order,"O1").payment_status,"paid")
         self.call("POST","/api/rider/duty/stop",{},headers);self.assertEqual(self.gps(headers,sequence=3)[0],409)
         self.assertEqual(self.call("GET","/api/rider/me",headers=headers)["tracking"]["state"],"paused")
+        events=self.notification_history()
+        self.assertEqual([event["type"] for event in events],[
+            "RIDER_PAIRING_CODE_ISSUED","RIDER_PHONE_PAIRED","RIDER_DUTY_STARTED","RIDER_DUTY_STOPPED",
+        ])
+        self.assertNotIn("latitude",json.dumps(events));self.assertNotIn("longitude",json.dumps(events))
     def test_duty_timeout_simulated_fix_and_bounded_latest_point_retention(self):
         self.protect();headers,_=self.paired();self.start(headers);self.assertEqual(self.gps(headers,mock=True)[0],200)
         self.assertEqual(self.call("GET","/api/rider/me",headers=headers)["tracking"]["state"],"simulated")
@@ -135,6 +155,17 @@ class DispatchTests(unittest.TestCase):
             self.assertEqual(s.query(DeliveryEvent).filter_by(order_id="O1",stage="delivered").count(),1)
         self.call("POST","/api/dispatch/orders/O2/assign",{"rider_id":"R1"},HEADERS)
         self.call("POST","/api/rider/orders/O2/progress",{"stage":"accepted"},second,404)
+        events=self.notification_history()
+        self.assertEqual([event["type"] for event in events],[
+            "RIDER_PAIRING_CODE_ISSUED","RIDER_PHONE_PAIRED","RIDER_PAIRING_CODE_ISSUED","RIDER_PHONE_PAIRED",
+            "DELIVERY_ASSIGNED","DELIVERY_ASSIGNED","DELIVERY_PROGRESS","DELIVERY_PROGRESS",
+            "DELIVERY_PROGRESS","DELIVERY_PROGRESS","DELIVERY_ASSIGNED","RIDER_STATUS_UPDATED",
+        ])
+        self.assertEqual([event["payload"].get("delivery_progress") for event in events[6:10]],
+                         ["accepted","collected","arrived","delivered"])
+        self.assertEqual(events[9]["payload"]["rider_status"],"Available")
+        self.assertEqual(events[10]["payload"]["rider_status"],"On delivery")
+        self.assertEqual(events[11]["payload"]["status"],"Available")
     def test_setup_and_session_relock_clear_private_location_feed(self):
         self.protect();headers,_=self.paired();self.start(headers);self.gps(headers)
         with get_db() as s:s.query(PosAccessSession).delete()

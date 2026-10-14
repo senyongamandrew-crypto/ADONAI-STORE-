@@ -8,8 +8,8 @@
         landscape (or any short screen) can no longer be served the laptop
         type scale. Component rules stay scoped to the staff shells.
      B. JS — the device class follows the SHORT side of the screen, and the
-        Display size control (Compact / Standard / Large) applies, persists
-        and restores without touching any sale/stock logic.
+        Store Settings display-size control (Compact / Standard / Large) applies,
+        persists and restores without touching any sale/stock logic.
 
    Run:  node tests/adaptive-display.test.js
    ====================================================================== */
@@ -77,7 +77,7 @@ for (const token of tokens) {
   assert(/clamp\(/.test(value), `${token} must be clamped between a floor and a ceiling`);
   assert(value.includes("var(--ui-font-scale)"), `${token} must answer the Display size control`);
 }
-assert.equal(rootRule["--ui-font-scale"], "1", "Standard density is the default multiplier");
+assert.equal(Number(rootRule["--ui-font-scale"]), 0.86, "Compact density is the default multiplier");
 console.log(`✓ ${tokens.length} fluid vmin type tokens, all driven by --ui-font-scale`);
 
 const posRules = rules.filter(rule => /\.pos-app\b/.test(rule.selector));
@@ -130,19 +130,27 @@ for (const file of ["pos.html", "admin.html"]) {
   assert(links.includes(LINK), `${file} must load ${LINK}`);
   assert.equal(links[links.length - 1], LINK, `${file} must load the display layer last so it wins the cascade`);
   assert(
-    /<html lang="en" data-display-size="standard">/.test(html),
-    `${file} must publish a default density before js/adaptive.js boots`
+    /<html lang="en" data-display-size="compact">/.test(html),
+    `${file} must publish Compact as the default density before js/adaptive.js boots`
   );
-  for (const size of ["compact", "standard", "large"]) {
-    assert(
-      html.includes(`data-display-size-option="${size}"`),
-      `${file} must offer the ${size} density control`
-    );
+
+  if (file === "pos.html") {
+    assert(!html.includes("data-display-size-option"), "the density selector must not appear in the cashier navigation menu");
+  } else {
+    const mainStart = html.indexOf('<main class="main">');
+    const settingsStart = html.indexOf('id="view-settings"');
+    assert(mainStart > 0 && settingsStart > mainStart, "display settings belong in the Store Settings workspace");
+    assert(!html.slice(0, mainStart).includes("data-display-size-option"), "the Admin sidebar must not contain the density selector");
+    const settings = html.slice(settingsStart);
+    for (const size of ["compact", "standard", "large"]) {
+      assert(settings.includes(`data-display-size-option="${size}"`), `Store Settings must offer ${size}`);
+    }
+    assert(/data-display-size-option="compact"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*data-display-size-option="compact"/.test(settings),
+      "Store Settings must mark Compact as the default");
   }
-  assert(/data-display-size-option="standard"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*data-display-size-option="standard"/.test(html),
-    `${file} must mark Standard as the pressed default`);
-  console.log(`✓ ${file} loads the layer last and ships the Compact / Standard / Large control`);
+  console.log(`✓ ${file} uses Compact by default; density choice is kept out of the main menu`);
 }
+
 
 const icons = read("js/icons.js");
 assert(icons.includes('"monitor"'), "the density control icon must exist in js/icons.js");
@@ -153,12 +161,12 @@ console.log("✓ density control icon ships with the shared icon set");
 const adaptiveSource = read("js/adaptive.js");
 
 function boot({ url = "https://appassets.androidplatform.net/pos.html", innerWidth = 360, innerHeight = 740, touch = true, stored = null } = {}) {
-  const dom = new JSDOM(`<!doctype html><html lang="en" data-display-size="standard"><body>
-    <div class="ds-panel" role="group" aria-label="Display size">
-      <button type="button" data-display-size-option="compact" aria-pressed="false">Compact</button>
-      <button type="button" data-display-size-option="standard" aria-pressed="true">Standard</button>
+  const dom = new JSDOM(`<!doctype html><html lang="en" data-display-size="compact"><body>
+    <section class="ds-panel" aria-label="Display size">
+      <button type="button" data-display-size-option="compact" aria-pressed="true">Compact</button>
+      <button type="button" data-display-size-option="standard" aria-pressed="false">Standard</button>
       <button type="button" data-display-size-option="large" aria-pressed="false">Large</button>
-    </div>
+    </section>
   </body></html>`, { url, runScripts: "outside-only", pretendToBeVisual: true });
 
   const { window } = dom;
@@ -208,6 +216,20 @@ console.log("✓ device class follows the SHORT side of the screen (landscape ph
     assert.equal(dom.window.document.documentElement.getAttribute("data-viewport"), "wide");
   } finally { dom.window.close(); }
   console.log("✓ laptops publish data-viewport=wide and keep the full-size type scale");
+}
+
+{
+  const dom = boot();
+  const { window } = dom;
+  try {
+    const root = window.document.documentElement;
+    assert.equal(root.getAttribute("data-display-size"), "compact");
+    assert.equal(root.style.getPropertyValue("--ui-font-scale"), "0.86");
+    assert.equal(window.AdonaiDisplay.get(), "compact");
+    assert.equal(window.document.querySelector('[data-display-size-option="compact"]').getAttribute("aria-pressed"), "true");
+    assert.equal(window.document.querySelector('[data-display-size-option="standard"]').getAttribute("aria-pressed"), "false");
+  } finally { window.close(); }
+  console.log("✓ Compact is the default display size on a fresh device");
 }
 
 {
@@ -264,8 +286,9 @@ console.log("✓ device class follows the SHORT side of the screen (landscape ph
     );
 
     window.AdonaiDisplay.reset();
-    assert.equal(root.getAttribute("data-display-size"), "standard");
-    assert.deepEqual(events, ["large", "compact", "standard"], "every change announces itself to the shells");
+    assert.equal(root.getAttribute("data-display-size"), "compact");
+    assert.equal(root.style.getPropertyValue("--ui-font-scale"), "0.86");
+    assert.deepEqual(events, ["large", "compact", "compact"], "every change announces itself to the shells");
   } finally { window.close(); }
   console.log("✓ the Display size control applies, persists, animates the pressed state and announces changes");
 }
@@ -288,11 +311,11 @@ console.log("✓ device class follows the SHORT side of the screen (landscape ph
   const { window } = dom;
   try {
     assert.equal(
-      window.document.documentElement.getAttribute("data-display-size"), "standard",
-      "an unknown saved value falls back to Standard instead of breaking the shell"
+      window.document.documentElement.getAttribute("data-display-size"), "compact",
+      "an unknown saved value falls back to Compact instead of breaking the shell"
     );
   } finally { window.close(); }
-  console.log("✓ an unknown stored density degrades to Standard");
+  console.log("✓ an unknown stored density degrades to Compact");
 
   const noTouch = boot({ innerWidth: 900, innerHeight: 700, touch: false });
   try {
@@ -317,6 +340,8 @@ console.log("✓ device class follows the SHORT side of the screen (landscape ph
     const doc = window.document;
     const frames = doc.querySelectorAll("iframe");
     assert.equal(frames.length, 4, "the harness must render four device frames");
+    assert.equal(doc.querySelector('#sizeSeg button[data-size="compact"]').getAttribute("aria-pressed"), "true",
+      "the device-fit harness also starts at Compact");
     const viewports = [...frames].map(frame => `${frame.getAttribute("width")}x${frame.getAttribute("height")}`);
     assert.deepEqual(
       viewports,

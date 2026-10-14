@@ -336,7 +336,7 @@
   if (btnAdminSbOpenWebStore) btnAdminSbOpenWebStore.addEventListener("click", openAdminWebStorefront);
 
   /* =============== navigation =============== */
-  const VALID_VIEWS = ["overview", "sales", "inventory", "intake", "customers", "dispatch", "payments", "staff", "settings"];
+  const VALID_VIEWS = ["overview", "sales", "inventory", "intake", "customers", "dispatch", "payments", "partners", "staff", "settings"];
 
   function requestedView() {
     // Query-string routes survive Android WebView navigation and the staff-login
@@ -406,7 +406,8 @@
     render();
     // Lots can be registered/allocated while another dashboard is open. Refresh
     // on entry, not on every background DB poll (which runs every two seconds).
-    if (v === "intake" && previousView !== v) loadIntakeStockLots();
+    if (v === "intake" && previousView !== v) { loadIntakeStockLots(); if (intakeSource() === "partner") loadIntakePartners(); }
+    if (v === "partners" && (previousView !== v || !partnerDashboard.loaded)) loadConsignmentDashboard();
     if (v === "settings" && typeof PosAccess !== "undefined") PosAccess.renderSettings();
   }
 
@@ -1542,10 +1543,28 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
      ============================================================ */
   const DEMO_CODES = { Men: "MEN", Women: "WOM", Children: "KID", Unisex: "UNI" };
   const INTAKE_CONDITIONS = ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"];
-  const GROUPS = { "Apparel": ["Tops & Shirts", "Dresses & Skirts", "Pants & Jeans"], "Outerwear": ["Outerwear & Jackets"], "Footwear": ["Shoes"], "Accessories": ["Accessories"], "Kids": ["Children Wear"] };
+  const GROUPS = {
+    "Apparel": ["Tops & Shirts", "Dresses & Skirts", "Pants & Jeans"],
+    "Outerwear & Tailoring": ["Outerwear & Jackets", "Suits & Formalwear"],
+    "Traditional & Occasionwear": ["Traditional & Occasionwear"],
+    "Footwear": ["Shoes", "Boots", "Sandals"],
+    "Sports, Swim & Loungewear": ["Activewear & Sportswear", "Underwear & Sleepwear", "Swimwear & Beachwear"],
+    "Bags": ["Bags & Handbags"],
+    "Jewelry": ["Necklaces & Chains", "Bracelets & Bangles", "Rings & Earrings", "Watches"],
+    "Eyewear": ["Eyewear & Sunglasses"],
+    "Accessories": ["Accessories", "Hats, Scarves & Belts"],
+    "Kids": ["Children Wear"]
+  };
   let intakeMedia = null;
   let intakeBound = false;
   let intakeLotsLoadInFlight = null;
+  let intakePartnersLoadInFlight = null;
+  let intakePartnersCache = [];
+  let intakeConditionBeforePartner = null;
+  let intakeQtyBeforePartner = null;
+  let intakeStatusBeforePartner = null;
+  let intakeLotBeforePartner = null;
+  let intakeGradeBeforePartner = null;
   let intakeSaving = false;
   let lastTaggedProductId = null;
   let tagLayoutPreviewOpened = false;
@@ -1712,7 +1731,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function measureSetForCategory(category) {
     const value = String(category || "").toLowerCase();
     if (/pant|jean|skirt|short|trouser/.test(value)) return "bottom";
-    if (/shoe|accessor|bag|belt/.test(value)) return "other";
+    if (/shoe|boot|sandal|footwear|accessor|bag|handbag|wallet|belt|hat|scarf|necklace|chain|bracelet|bangle|ring|earring|watch|eyewear|sunglass/.test(value)) return "other";
     return "top";
   }
 
@@ -1746,6 +1765,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
   function setIntakeCondition(value) {
     const preLoved = value === "PRE_LOVED";
+    const partnerSource = typeof $ === "function" && $("#inInventorySource") && $("#inInventorySource").value === "partner";
     $("#inItemCondition").value = preLoved ? "PRE_LOVED" : "BRAND_NEW";
     $$("[data-intake-condition]").forEach(button => {
       const active = button.dataset.intakeCondition === intakeCondition();
@@ -1755,10 +1775,143 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     ["inSizeVariantsField", "inFactoryNotesField"].forEach(id => { $("#" + id).hidden = preLoved; });
     $("#inMeasurementsField").hidden = !preLoved;
     const qty = $("#inQty");
-    qty.readOnly = preLoved;
-    if (preLoved) { qty.value = "1"; qty.max = "1"; }
+    qty.readOnly = preLoved || partnerSource;
+    if (preLoved || partnerSource) { qty.value = "1"; qty.max = "1"; }
     else qty.removeAttribute("max");
-    $("#inQtyHint").textContent = preLoved ? "Unique piece · 1-of-1" : "Brand-new supports multi-stock";
+    $("#inQtyHint").textContent = partnerSource ? "Partner item · 1-of-1" : (preLoved ? "Unique piece · 1-of-1" : "Brand-new supports multi-stock");
+  }
+
+  function intakeSource() {
+    const field = $("#inInventorySource");
+    return field && field.value === "partner" ? "partner" : "store";
+  }
+
+  function syncIntakePartnerRateHint() {
+    const select = $("#inConsignmentPartner");
+    const hint = $("#inConsignmentRateHint");
+    if (!select || !hint) return;
+    const partner = intakePartnersCache.find(row => row.id === select.value);
+    hint.textContent = partner
+      ? `Leave blank to inherit ${partner.name}’s default (${Number(partner.default_commission_rate || 0).toFixed(2)}%).`
+      : "Leave blank to inherit the selected partner's default (5%).";
+  }
+
+  function applyPendingIntakePartner(select) {
+    const pendingId = select && select.dataset.pendingPartnerId;
+    if (!pendingId) return;
+    const exists = intakePartnersCache.some(partner => partner.id === pendingId);
+    if (exists) select.value = pendingId;
+    else toast("That partner is not active for new intake. Choose an active partner or reactivate the profile.", false);
+    delete select.dataset.pendingPartnerId;
+  }
+
+  function syncIntakeRoute(partnerId) {
+    if (currentView !== "intake") return;
+    const url = new URL(location.href);
+    if (intakeSource() === "partner") {
+      url.searchParams.set("inventory_source", "partner");
+      const selected = partnerId === undefined ? $("#inConsignmentPartner").value : partnerId;
+      if (selected) url.searchParams.set("consignment_partner_id", selected);
+      else url.searchParams.delete("consignment_partner_id");
+    } else {
+      url.searchParams.delete("inventory_source");
+      url.searchParams.delete("consignment_partner_id");
+    }
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+  }
+
+  function loadIntakePartners(force = false) {
+    const select = $("#inConsignmentPartner");
+    if (!select || (!force && intakePartnersLoadInFlight)) return intakePartnersLoadInFlight || Promise.resolve();
+    const emptyPartnerState = $("#consignmentNoPartners");
+    if (!force && intakePartnersCache.length) {
+      const current = select.value;
+      select.innerHTML = `<option value=\"\">Choose an active partner…</option>` + intakePartnersCache.map(partner => `<option value=\"${esc(partner.id)}\">${esc(partner.name)} · ${Number(partner.default_commission_rate || 0).toFixed(2)}%</option>`).join("");
+      if (intakePartnersCache.some(partner => partner.id === current)) select.value = current;
+      if (emptyPartnerState) emptyPartnerState.hidden = true;
+      applyPendingIntakePartner(select);
+      syncIntakePartnerRateHint();
+      return Promise.resolve();
+    }
+    if (emptyPartnerState) emptyPartnerState.hidden = true;
+    select.innerHTML = '<option value="">Loading active partners…</option>';
+    intakePartnersLoadInFlight = DB.consignmentRequest("partners/choices").then(data => {
+      intakePartnersCache = Array.isArray(data.partners) ? data.partners : [];
+      const current = select.value;
+      select.innerHTML = `<option value=\"\">${intakePartnersCache.length ? "Choose an active partner…" : "No active partners yet"}</option>` + intakePartnersCache.map(partner => `<option value=\"${esc(partner.id)}\">${esc(partner.name)} · ${Number(partner.default_commission_rate || 0).toFixed(2)}%</option>`).join("");
+      if (intakePartnersCache.some(partner => partner.id === current)) select.value = current;
+      if (emptyPartnerState) emptyPartnerState.hidden = intakePartnersCache.length > 0;
+      applyPendingIntakePartner(select);
+      syncIntakePartnerRateHint();
+    }).catch(error => {
+      select.innerHTML = '<option value="">Partner list could not load</option>';
+      if (emptyPartnerState) emptyPartnerState.hidden = true;
+      toast(error.message || "Could not load partner list", false);
+    }).finally(() => { intakePartnersLoadInFlight = null; });
+    return intakePartnersLoadInFlight;
+  }
+
+  async function openConsignmentIntake(partnerId = "") {
+    await setView("intake", false);
+    if (!viewReady || currentView !== "intake") return;
+    const url = new URL(location.href);
+    url.searchParams.set("view", "intake");
+    url.searchParams.set("inventory_source", "partner");
+    if (partnerId) url.searchParams.set("consignment_partner_id", partnerId);
+    else url.searchParams.delete("consignment_partner_id");
+    history.pushState({ view: "intake" }, "", url.pathname + url.search);
+    const partnerSelect = $("#inConsignmentPartner");
+    if (partnerId && partnerSelect) partnerSelect.dataset.pendingPartnerId = partnerId;
+    else if (partnerSelect) { delete partnerSelect.dataset.pendingPartnerId; partnerSelect.value = ""; }
+    $("#inInventorySource").value = "partner";
+    applyIntakeSource();
+    await loadIntakePartners();
+    syncIntakeRoute(partnerSelect && partnerSelect.value ? partnerSelect.value : "");
+    if (partnerSelect) partnerSelect.focus();
+    const sourcePanel = $("#intakeSourceTitle");
+    if (sourcePanel && sourcePanel.scrollIntoView) sourcePanel.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function applyIntakeSource() {
+    const partnerSource = intakeSource() === "partner";
+    $("#consignmentIntakeFields").hidden = !partnerSource;
+    $("#intakeConditionControls").hidden = partnerSource;
+    ["inStockLotField", "inLotGradeField", "inCostField", "inTransportField"].forEach(id => { const field = $("#" + id); if (field) field.hidden = partnerSource; });
+    $("#partnerMediaRule").hidden = !partnerSource;
+    const status = $("#inStatus");
+    const qty = $("#inQty");
+    if (partnerSource) {
+      if (intakeConditionBeforePartner === null) {
+        intakeConditionBeforePartner = intakeCondition();
+        intakeQtyBeforePartner = qty.value;
+        intakeStatusBeforePartner = status.value;
+        intakeLotBeforePartner = $("#inStockLot").value;
+        intakeGradeBeforePartner = $("#inLotGrade").value;
+      }
+      if (intakeCondition() !== "PRE_LOVED") setIntakeCondition("PRE_LOVED");
+      else setIntakeCondition("PRE_LOVED");
+      status.value = "1"; status.disabled = true;
+      $("#inStockLot").value = "";
+      syncIntakeLotGradeUI();
+      if (intakeMedia && intakeMedia.setConsignmentMode) intakeMedia.setConsignmentMode(true);
+      loadIntakePartners();
+    } else {
+      status.disabled = false;
+      if (intakeConditionBeforePartner !== null) {
+        const savedCondition = intakeConditionBeforePartner;
+        setIntakeCondition(savedCondition);
+        if (savedCondition === "BRAND_NEW" && intakeQtyBeforePartner != null) qty.value = intakeQtyBeforePartner;
+        status.value = intakeStatusBeforePartner || "1";
+        $("#inStockLot").value = intakeLotBeforePartner || "";
+        syncIntakeLotGradeUI();
+        if (intakeGradeBeforePartner && $("#inLotGrade")) $("#inLotGrade").value = intakeGradeBeforePartner;
+        intakeConditionBeforePartner = intakeQtyBeforePartner = intakeStatusBeforePartner = null;
+        intakeLotBeforePartner = intakeGradeBeforePartner = null;
+      } else setIntakeCondition($("#inItemCondition").value || "BRAND_NEW");
+      if (intakeMedia && intakeMedia.setConsignmentMode) intakeMedia.setConsignmentMode(false);
+    }
+    syncIntakePartnerRateHint();
+    paintTag();
   }
 
   function initIntakeForm() {
@@ -1771,11 +1924,23 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#inGroup").innerHTML = Object.keys(GROUPS).map(g => `<option>${g}</option>`).join("");
     $("#inSizePreset").innerHTML = `<option value="">Preset</option>` + ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"].map(s => `<option value="${s}">${s}</option>`).join("");
     $("#inSku").value = newIntakeSku();
+    const intakeRoute = new URLSearchParams(location.search);
+    if (intakeRoute.get("inventory_source") === "partner") {
+      $("#inInventorySource").value = "partner";
+      const routePartnerId = intakeRoute.get("consignment_partner_id");
+      if (routePartnerId) $("#inConsignmentPartner").dataset.pendingPartnerId = routePartnerId;
+    }
     intakeBound = true;
     loadIntakeStockLots();
 
     $$('[data-intake-condition]').forEach(button => button.addEventListener("click", () => setIntakeCondition(button.dataset.intakeCondition)));
     $("#btnRollSku").addEventListener("click", () => { $("#inSku").value = newIntakeSku(); paintTag(); });
+    $("#inInventorySource").addEventListener("change", () => { applyIntakeSource(); syncIntakeRoute(); });
+    $("#inConsignmentPartner").addEventListener("change", () => { syncIntakePartnerRateHint(); syncIntakeRoute(); });
+    $("#btnIntakeAddPartner").addEventListener("click", async () => {
+      await setView("partners");
+      if (viewReady && currentView === "partners") openPartnerEditor();
+    });
     $("#inDemo").addEventListener("change", () => { $("#inSku").value = newIntakeSku(); paintTag(); });
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
     $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; paintTag(); });
@@ -1817,6 +1982,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#btnPrintLastTag").addEventListener("click", () => { if (lastTaggedProductId && window.GarmentTools) GarmentTools.openTag(lastTaggedProductId); });
     buildPhotoRow();
     setIntakeCondition($("#inItemCondition").value || "BRAND_NEW");
+    applyIntakeSource();
     paintTag();
   }
 
@@ -1847,7 +2013,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#tagTitle").textContent = $("#inTitle").value.trim() || "Garment name";
     $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonai-store.onrender.com";
     const basePrice = Number($("#inSell").value) || 0;
-    const transport = Number($("#inTransport").value) || 0;
+    const transport = intakeSource() === "partner" ? 0 : (Number($("#inTransport").value) || 0);
     const sell = basePrice + (transport * 0.5);
     const code = $("#inSku").value.trim() || "ADN-XXX-0000";
     $("#tagCode").textContent = code;
@@ -1860,12 +2026,17 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (intakeSaving) return;
     let garmentMedia;
     try { garmentMedia = intakeMedia.snapshot(); } catch (error) { return toast(error.message, false); }
+    const partnerSource = intakeSource() === "partner";
+    const commissionInput = $("#inConsignmentRate").value.trim();
     const vals = {
       name: $("#inTitle").value.trim(),
       brand: $("#inBrand").value.trim() || "Unbranded",
       color: $("#inColor").value.trim(),
       demographic: $("#inDemo").value, category: $("#inCat").value,
       size: $("#inSize").value.trim() || "-",
+      inventory_source: partnerSource ? "partner" : "store",
+      consignment_partner_id: partnerSource ? $("#inConsignmentPartner").value : "",
+      commission_rate: partnerSource ? (commissionInput === "" ? null : Number(commissionInput)) : null,
       item_condition: intakeCondition(),
       quantity_type: intakeCondition(),
       condition: $("#inCond").value,
@@ -1875,12 +2046,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         const parts = pair.split(":"); if (parts[0] && parts[1]) out[parts[0].trim()] = parts.slice(1).join(":").trim(); return out;
       }, {}),
       fabric_grading_notes: $("#inFabricNotes").value.trim(),
-      cost_price: Number($("#inCost").value) || 0,
-      stock_lot_id: $("#inStockLot").value,
-      lot_grade_id: ($("#inLotGradeField") && !$("#inLotGradeField").hidden && $("#inLotGrade")) ? $("#inLotGrade").value : "",
+      cost_price: partnerSource ? 0 : (Number($("#inCost").value) || 0),
+      stock_lot_id: partnerSource ? "" : $("#inStockLot").value,
+      lot_grade_id: partnerSource ? "" : (($('#inLotGradeField') && !$('#inLotGradeField').hidden && $('#inLotGrade')) ? $('#inLotGrade').value : ""),
       base_price: Number($("#inSell").value) || 0,
       selling_price: Number($("#inSell").value) || 0,
-      total_transport_cost: Number($("#inTransport").value) || 0,
+      total_transport_cost: partnerSource ? 0 : (Number($("#inTransport").value) || 0),
       compare_price: Number($("#inRrp").value) || 0,
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
@@ -1891,7 +2062,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       flaw_notes: $("#inFlaws").value.trim(),
       flaw_photo_index: Number($("#inFlawPhoto").value),
       visibility: $("#inVis").value,
-      in_stock_count: Number($("#inStatus").value) ? Math.max(0, Math.floor(Number($("#inQty").value) || 0)) : 0,
+      in_stock_count: partnerSource ? 1 : (Number($("#inStatus").value) ? Math.max(0, Math.floor(Number($("#inQty").value) || 0)) : 0),
       sku: $("#inSku").value.trim(),
       barcode_id: (() => {
         const sku = $("#inSku").value.trim().slice(0, 50);
@@ -1901,6 +2072,16 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     };
     if (!vals.name) return toast("Item title is required", false);
     if (!vals.selling_price) return toast("Set a sell price first", false);
+    if (partnerSource) {
+      if (!vals.consignment_partner_id) return toast("Choose the partner supplying this item", false);
+      if (!garmentMedia.images || !garmentMedia.images.length) return toast("Partner items need at least one photo", false);
+      if (!garmentMedia.video_id || Number(garmentMedia.video_duration) < 15 || Number(garmentMedia.video_duration) > 20) {
+        return toast("Partner items need an uploaded 15–20 second video", false);
+      }
+      if (commissionInput !== "" && (!Number.isFinite(vals.commission_rate) || vals.commission_rate < 0 || vals.commission_rate > 100)) {
+        return toast("Item commission must be from 0 to 100 percent", false);
+      }
+    }
     if (["ADN-000000", "ADONAI-SAMPLE"].includes(vals.sku.toUpperCase())) return toast("This code is reserved for printer setup. Roll a different SKU.", false);
     if (!vals.sku || vals.sku.length > 45 || !/^[\x21-\x7e]+$/.test(vals.sku)) return toast("Use a unique SKU of 1–45 English letters, numbers or symbols, without spaces.", false);
     if (vals.stock_lot_id && !vals.lot_grade_id) {
@@ -1967,8 +2148,303 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   }
 
   /* ============================================================
-     CUSTOMER BOOK (guest book)
+     DYNAMIC CONSIGNMENT PARTNERS & SETTLEMENTS
      ============================================================ */
+  const partnerRoot = $("#view-partners");
+  const partnerDashboard = {
+    loaded: false, loading: false, error: "", data: null, detail: null,
+    selectedId: "", region: "", supplySource: "", requestId: 0, detailRequestId: 0,
+  };
+
+  function partnerFilterOptions(select, values, label, selected) {
+    if (!select) return;
+    const current = selected || "";
+    select.innerHTML = `<option value=\"\">${esc(label)}</option>` + (values || []).map(value =>
+      `<option value=\"${esc(value)}\">${esc(value)}</option>`).join("");
+    if ([...select.options].some(option => option.value === current)) select.value = current;
+  }
+
+  async function loadConsignmentDashboard() {
+    if (!partnerRoot) return;
+    const requestId = ++partnerDashboard.requestId;
+    partnerDashboard.loading = true;
+    partnerDashboard.error = "";
+    renderPartners();
+    const params = new URLSearchParams();
+    if (partnerDashboard.region) params.set("region", partnerDashboard.region);
+    if (partnerDashboard.supplySource) params.set("supply_source", partnerDashboard.supplySource);
+    try {
+      const data = await DB.consignmentRequest("dashboard" + (params.toString() ? "?" + params.toString() : ""));
+      if (requestId !== partnerDashboard.requestId) return;
+      partnerDashboard.data = data;
+      partnerDashboard.loaded = true;
+      partnerDashboard.error = "";
+      const selectedStillVisible = (data.partners || []).some(row => row.id === partnerDashboard.selectedId);
+      if (partnerDashboard.selectedId && selectedStillVisible) loadPartnerDetail(partnerDashboard.selectedId);
+      else if (partnerDashboard.selectedId) { partnerDashboard.selectedId = ""; partnerDashboard.detail = null; }
+    } catch (error) {
+      if (requestId !== partnerDashboard.requestId) return;
+      partnerDashboard.error = error.message || "Could not load consignment partners";
+      partnerDashboard.loaded = false;
+    } finally {
+      if (requestId === partnerDashboard.requestId) {
+        partnerDashboard.loading = false;
+        renderPartners();
+      }
+    }
+  }
+
+  async function loadPartnerDetail(id) {
+    if (!id) return;
+    const requestId = ++partnerDashboard.detailRequestId;
+    partnerDashboard.selectedId = id;
+    partnerDashboard.detail = { loading: true, data: null, error: "" };
+    renderPartners();
+    try {
+      const data = await DB.consignmentRequest("partners/" + encodeURIComponent(id));
+      if (requestId !== partnerDashboard.detailRequestId || id !== partnerDashboard.selectedId) return;
+      partnerDashboard.detail = { loading: false, data, error: "" };
+    } catch (error) {
+      if (requestId !== partnerDashboard.detailRequestId) return;
+      partnerDashboard.detail = { loading: false, data: null, error: error.message || "Could not load partner details" };
+    }
+    renderPartners();
+  }
+
+  function renderPartnerPayoutRows(rows, partnerMap = {}) {
+    if (!rows || !rows.length) return '<p class="partner-list-empty">No payouts recorded yet.</p>';
+    return `<div class="partner-mini-list">${rows.map(payout => {
+      const partnerName = payout.partner_name || partnerMap[payout.partner_id] || "Partner";
+      const date = payout.created_at ? new Date(payout.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—";
+      return `<div class="partner-mini-row"><div><strong>${esc(partnerName)}</strong><span>${esc(date)} · ${esc(payout.payment_method || "cash")}${payout.reference ? ` · ${esc(payout.reference)}` : ""}</span></div><b>${ugx(payout.amount || 0)}</b></div>`;
+    }).join("")}</div>`;
+  }
+
+  function renderPartners() {
+    if (!partnerRoot) return;
+    const data = partnerDashboard.data;
+    const state = $("#partnerLoadState");
+    if (state) {
+      state.hidden = !(partnerDashboard.loading || partnerDashboard.error);
+      state.innerHTML = partnerDashboard.loading ? '<span class="live-dot"></span> Syncing partner balances…' :
+        `<span role="alert">${esc(partnerDashboard.error)}</span> <button class="btn sm" type="button" data-partner-retry>Try again</button>`;
+    }
+    const kpis = $("#consignmentKpis");
+    const summary = data && data.summary ? data.summary : {};
+    if (kpis) kpis.innerHTML = data ? [
+      kpiCard("GROSS PARTNER SALES", ugx(summary.gross_revenue || 0), `${summary.sold || 0} items sold`, "green", Icons.svg("banknote", "ico-18")),
+      kpiCard("STORE COMMISSION EARNED", ugx(summary.commission_earned || 0), "Recorded at the sale-time rate", "rust", Icons.svg("receipt", "ico-18")),
+      kpiCard("TOTAL PAID OUT", ugx(summary.payouts_total || 0), `Across ${summary.partners || 0} partners`, "blue", Icons.svg("banknote", "ico-18")),
+      kpiCard("PARTNER PAYABLES", ugx(summary.payable_balance || 0), "After historical payouts", "amber", Icons.svg("wallet", "ico-18")),
+      kpiCard("ACTIVE INVENTORY", summary.active_inventory || 0, `${summary.submitted || 0} pieces submitted`, "blue", Icons.svg("boxes", "ico-18")),
+      kpiCard("INVENTORY TURNOVER", `${Number(summary.inventory_turnover_pct || 0).toFixed(1)}%`, "Sold ÷ submitted items", "green", Icons.svg("trending-up", "ico-18")),
+    ].join("") : "";
+    const filterData = data && data.filters || {};
+    partnerFilterOptions($("#partnerRegionFilter"), filterData.regions, "All regions", partnerDashboard.region);
+    partnerFilterOptions($("#partnerSourceFilter"), filterData.supply_sources, "All sources", partnerDashboard.supplySource);
+    const partners = data && Array.isArray(data.partners) ? data.partners : [];
+    const rows = $("#partnerRows");
+    if (rows) rows.innerHTML = partners.map(partner => `
+      <tr>
+        <td><strong>${esc(partner.name)}</strong><span class="partner-row-meta">${esc(partner.phone || partner.whatsapp || "No phone")} · ${partner.active ? "Active" : "Inactive"}</span></td>
+        <td>${esc(partner.region || "—")}<span class="partner-row-meta">${esc(partner.supply_source || "Source not set")}</span></td>
+        <td>${Number(partner.submitted || 0)}</td><td>${Number(partner.sold || 0)}</td><td>${Number(partner.active_inventory || 0)}</td>
+        <td>${ugx(partner.gross_revenue || 0)}</td><td>${ugx(partner.commission_earned || 0)}</td>
+        <td><strong class="partner-payable-value">${ugx(partner.payable_balance || 0)}</strong></td>
+        <td>${Number(partner.inventory_turnover_pct || 0).toFixed(1)}%</td>
+        <td><div class="partner-row-actions"><button class="btn sm" type="button" data-partner-view="${esc(partner.id)}">View</button><button class="btn sm ghost" type="button" data-partner-edit="${esc(partner.id)}">Edit</button><button class="btn sm primary" type="button" data-partner-payout="${esc(partner.id)}" ${Number(partner.payable_balance || 0) <= 0 ? "disabled" : ""}>Pay</button></div></td>
+      </tr>`).join("");
+    const count = $("#partnerCountLabel"); if (count) count.textContent = `${partners.length} partner${partners.length === 1 ? "" : "s"}`;
+    const empty = $("#partnerEmptyState");
+    if (empty) { empty.hidden = partners.length > 0 || partnerDashboard.loading; empty.textContent = partnerDashboard.error ? "Partner data is unavailable. Try refreshing after confirming Finance access." : "No matching partners. Add your first supply partner or change the region/source filters."; }
+    const partnerMap = Object.fromEntries(partners.map(partner => [partner.id, partner.name]));
+    const leaderboard = $("#partnerLeaderboard");
+    const leaders = data && data.leaderboard || [];
+    if (leaderboard) leaderboard.innerHTML = leaders.length ? `<div class="partner-leader-list">${leaders.map((row, index) => `
+      <button type="button" class="partner-leader-row" data-partner-view="${esc(row.id)}"><span class="partner-rank">${index + 1}</span><span><strong>${esc(row.name)}</strong><small>${Number(row.sold || 0)} sold · ${ugx(row.gross_revenue || 0)} · ${Number(row.inventory_turnover_pct || 0).toFixed(1)}% turnover</small></span><span class="partner-leader-arrow">↗</span></button>`).join("")}</div>` : '<p class="partner-list-empty">Sales-volume rankings appear after the first partner item sells.</p>';
+    const payouts = $("#partnerRecentPayouts");
+    if (payouts) payouts.innerHTML = renderPartnerPayoutRows(data && data.recent_payouts, partnerMap);
+    const detailPanel = $("#selectedPartnerDetail");
+    if (detailPanel) {
+      const detailState = partnerDashboard.detail;
+      if (!partnerDashboard.selectedId) { detailPanel.hidden = true; detailPanel.innerHTML = ""; }
+      else {
+        detailPanel.hidden = false;
+        if (!detailState || detailState.loading) detailPanel.innerHTML = '<p class="muted">Loading partner items and settlement history…</p>';
+        else if (detailState.error) detailPanel.innerHTML = `<p class="partner-detail-error" role="alert">${esc(detailState.error)}</p>`;
+        else detailPanel.innerHTML = partnerDetailMarkup(detailState.data);
+      }
+    }
+  }
+
+  function partnerDetailMarkup(data) {
+    const partner = data.partner, metrics = data.metrics || {};
+    const items = data.items || [], payouts = data.payouts || [];
+    const itemTable = items.length ? `<div class="partner-table-wrap"><table class="partner-table partner-items-table"><thead><tr><th>Item</th><th>Stock</th><th>Sold</th><th>Gross sales</th><th>Store commission</th><th>Price</th><th>Rate</th><th></th></tr></thead><tbody>${items.map(item => `
+      <tr><td><strong>${esc(item.name)}</strong><span class="partner-row-meta">${esc(item.sku || "No SKU")}</span></td>
+      <td>${Number(item.in_stock_count || 0)} · ${esc(item.inventory_status || "")}</td><td>${Number(item.sold || 0)}</td><td>${ugx(item.gross_revenue || 0)}</td><td>${ugx(item.commission_earned || 0)}</td><td>${ugx(item.selling_price || 0)}</td>
+      <td>${Number(item.effective_commission_rate || 0).toFixed(2)}%<span class="partner-row-meta">${item.commission_source === "item" ? "Item rate" : "Partner default"}</span></td>
+      <td><button class="btn sm ghost" type="button" data-partner-item-rate="${esc(item.id)}">Change rate</button></td></tr>`).join("")}</tbody></table></div>` : '<p class="partner-list-empty">No catalog items have been submitted by this partner.</p>';
+    return `<div class="partner-detail-head"><div><p class="kicker">PARTNER ACCOUNT</p><h2>${esc(partner.name)}</h2><p class="partner-detail-meta">${esc(partner.region || "Region not set")} · ${esc(partner.supply_source || "Supply source not set")} · ${partner.active ? "Active" : "Inactive"}</p></div>
+      <div class="partner-row-actions"><button class="btn primary" type="button" data-partner-intake="${esc(partner.id)}" ${partner.active ? "" : "disabled title=\"Reactivate this partner to add new items\""}>+ Add items</button><button class="btn" type="button" data-partner-edit="${esc(partner.id)}">Edit profile</button><button class="btn ghost" type="button" data-partner-payout="${esc(partner.id)}" ${Number(metrics.payable_balance || 0) <= 0 ? "disabled" : ""}>Record payout</button><button class="btn ghost" type="button" data-partner-close-detail>Close</button></div></div>
+      <div class="partner-contact-strip"><span>${esc(partner.phone || "No phone")} · WhatsApp ${esc(partner.whatsapp || "not set")}</span><span>${esc(partner.email || "No email")}</span><span>${esc(partner.payout_provider || "Payout channel not set")} · ${esc(partner.payout_account_name || "")} ${esc(partner.payout_account || "")}</span><span>Default commission ${Number(partner.default_commission_rate || 0).toFixed(2)}%</span></div>
+      <div class="partner-detail-stats"><span><b>${Number(metrics.submitted || 0)}</b> submitted</span><span><b>${Number(metrics.sold || 0)}</b> sold</span><span><b>${Number(metrics.active_inventory || 0)}</b> active</span><span><b>${ugx(metrics.gross_revenue || 0)}</b> gross sales</span><span><b>${ugx(metrics.commission_earned || 0)}</b> commission earned</span><span><b>${ugx(metrics.payable_balance || 0)}</b> payable</span><span><b>${Number(metrics.inventory_turnover_pct || 0).toFixed(1)}%</b> turnover</span></div>
+      <div class="partner-detail-columns"><div><div class="partner-card-head"><div><p class="kicker">PARTNER CATALOG</p><h3>Submitted items &amp; rates</h3></div></div>${itemTable}</div><div><div class="partner-card-head"><div><p class="kicker">FULL PAYOUT HISTORY</p><h3>Settlements</h3></div></div>${renderPartnerPayoutRows(payouts)}</div></div>`;
+  }
+
+  function partnerById(id) {
+    const listed = partnerDashboard.data && partnerDashboard.data.partners || [];
+    if (partnerDashboard.detail && partnerDashboard.detail.data && partnerDashboard.detail.data.partner.id === id) return partnerDashboard.detail.data.partner;
+    return listed.find(partner => partner.id === id) || null;
+  }
+
+  function openPartnerEditor(partner = null) {
+    const value = key => esc(partner && partner[key] != null ? partner[key] : "");
+    const defaultRate = partner ? Number(partner.default_commission_rate || 0).toFixed(2) : "5.00";
+    const activeChecked = !partner || partner.active ? "checked" : "";
+    openModal(`<div class="partner-modal"><button class="modal-x" data-close aria-label="Close">×</button><p class="kicker">${partner ? "PARTNER PROFILE" : "NEW SUPPLY PARTNER"}</p><h3>${partner ? "Edit partner" : "Add a consignment partner"}</h3><p class="muted small">Contact, region and payout details are visible only in the Finance-protected workspace.</p>
+      <form id="consignmentPartnerForm" novalidate><div class="partner-form-grid">
+        <div class="field"><label for="partnerName">Partner / supplier name</label><input class="sel-full" id="partnerName" required maxlength="160" value="${value("name")}" /></div>
+        <div class="field"><label for="partnerPhone">Contact phone</label><input class="sel-full" id="partnerPhone" maxlength="50" value="${value("phone")}" placeholder="+256…" /></div>
+        <div class="field"><label for="partnerWhatsApp">WhatsApp number</label><input class="sel-full" id="partnerWhatsApp" maxlength="50" value="${value("whatsapp")}" placeholder="+256…" /></div>
+        <div class="field"><label for="partnerEmail">Email</label><input class="sel-full" id="partnerEmail" type="email" maxlength="160" value="${value("email")}" /></div>
+        <div class="field full"><label for="partnerAddress">Address / pickup location</label><textarea class="sel-full" id="partnerAddress" rows="2" maxlength="1200">${value("address")}</textarea></div>
+        <div class="field"><label for="partnerPayoutProvider">Payout network / provider</label><input class="sel-full" id="partnerPayoutProvider" maxlength="60" value="${value("payout_provider")}" placeholder="MTN Mobile Money / Airtel / Bank" /></div>
+        <div class="field"><label for="partnerPayoutName">Account name</label><input class="sel-full" id="partnerPayoutName" maxlength="120" value="${value("payout_account_name")}" /></div>
+        <div class="field"><label for="partnerPayoutAccount">Mobile-money number / bank account</label><input class="sel-full" id="partnerPayoutAccount" maxlength="100" value="${value("payout_account")}" /></div>
+        <div class="field"><label for="partnerCommission">Default store commission (%)</label><input class="sel-full" id="partnerCommission" type="number" min="0" max="100" step="0.01" required value="${defaultRate}" /><span class="fhint">New partners start at 5%; each item can override its partner’s saved default rate.</span></div>
+        <div class="field"><label for="partnerRegion">Region</label><input class="sel-full" id="partnerRegion" maxlength="100" value="${value("region")}" placeholder="Kampala Central" /></div>
+        <div class="field"><label for="partnerSupplySource">Regional / supply source</label><input class="sel-full" id="partnerSupplySource" maxlength="120" value="${value("supply_source")}" placeholder="Owino market · Kampala" /></div>
+        <div class="field full"><label for="partnerNotes">Internal notes</label><textarea class="sel-full" id="partnerNotes" rows="2" maxlength="2000">${value("notes")}</textarea></div>
+        <label class="partner-active-toggle"><input id="partnerActive" type="checkbox" ${activeChecked} /> Active for new consignment intake</label>
+      </div><p id="partnerFormError" class="partner-form-error" role="alert"></p><div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="submit" id="partnerFormSubmit">${partner ? "Save partner" : "Create partner"}</button></div></form></div>`);
+    $("#consignmentPartnerForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const submit = $("#partnerFormSubmit"), errorEl = $("#partnerFormError");
+      submit.disabled = true; errorEl.textContent = "";
+      const payload = {
+        name: $("#partnerName").value.trim(), phone: $("#partnerPhone").value.trim(),
+        whatsapp: $("#partnerWhatsApp").value.trim(), email: $("#partnerEmail").value.trim(),
+        address: $("#partnerAddress").value.trim(), payout_provider: $("#partnerPayoutProvider").value.trim(),
+        payout_account_name: $("#partnerPayoutName").value.trim(), payout_account: $("#partnerPayoutAccount").value.trim(),
+        default_commission_rate: Number($("#partnerCommission").value), region: $("#partnerRegion").value.trim(),
+        supply_source: $("#partnerSupplySource").value.trim(), notes: $("#partnerNotes").value.trim(),
+        active: $("#partnerActive").checked,
+      };
+      try {
+        const result = await DB.consignmentRequest("partners" + (partner ? "/" + encodeURIComponent(partner.id) : ""), {
+          method: partner ? "PATCH" : "POST", body: JSON.stringify(payload),
+        });
+        const saved = result.partner;
+        partnerDashboard.selectedId = saved.id;
+        partnerDashboard.data = null; partnerDashboard.loaded = false;
+        closeModal(); toast(partner ? "Partner profile updated" : "Consignment partner created");
+        await loadConsignmentDashboard();
+        await loadPartnerDetail(saved.id);
+        intakePartnersCache = [];
+      } catch (error) {
+        errorEl.textContent = error.message || "Could not save partner"; submit.disabled = false;
+      }
+    });
+  }
+
+  const pendingPartnerPayoutKeys = new Map();
+
+  function newPayoutKey() {
+    try { if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID(); } catch (_) {}
+    return `payout-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  }
+
+  function openPartnerPayout(partner) {
+    if (!partner) return;
+    const balance = Number(partner.payable_balance || 0);
+    if (balance <= 0) return toast("This partner has no available payable balance", false);
+    const payoutProvider = String(partner.payout_provider || "").toLowerCase();
+    const preferred = /bank|transfer/.test(payoutProvider) ? "bank" : (partner.payout_account ? "mobile_money" : "cash");
+    const destination = [partner.payout_provider, partner.payout_account_name, partner.payout_account].filter(Boolean).join(" · ") || "Cash settlement";
+    const payoutIdempotencyKey = pendingPartnerPayoutKeys.get(partner.id) || newPayoutKey();
+    pendingPartnerPayoutKeys.set(partner.id, payoutIdempotencyKey);
+    openModal(`<div class="partner-modal payout-modal"><button class="modal-x" data-close aria-label="Close">×</button><p class="kicker">PARTNER SETTLEMENT</p><h3>Pay ${esc(partner.name)}</h3><p class="muted small">Available balance <strong>${ugx(balance)}</strong>. The server prevents settlement above the amount still owed.</p>
+      <form id="partnerPayoutForm" novalidate><div class="partner-form-grid">
+        <div class="field"><label for="partnerPayoutAmount">Payout amount (UGX)</label><input class="sel-full" id="partnerPayoutAmount" type="number" min="1" max="${balance}" step="1" value="${balance}" required /></div>
+        <div class="field"><label for="partnerPayoutMethod">Paid from</label><select class="sel-full" id="partnerPayoutMethod"><option value="mobile_money" ${preferred === "mobile_money" ? "selected" : ""}>Mobile money</option><option value="bank" ${preferred === "bank" ? "selected" : ""}>Bank transfer</option><option value="cash" ${preferred === "cash" ? "selected" : ""}>Cash drawer</option></select></div>
+        <div class="field full"><label>Partner destination snapshot</label><div class="partner-destination">${esc(destination)}</div></div>
+        <div class="field full"><label for="partnerPayoutReference">Payment reference / receipt</label><input class="sel-full" id="partnerPayoutReference" maxlength="120" placeholder="Transaction or receipt reference" /></div>
+        <div class="field full"><label for="partnerPayoutNotes">Notes</label><textarea class="sel-full" id="partnerPayoutNotes" rows="2" maxlength="1000"></textarea></div>
+      </div><p id="partnerPayoutError" class="partner-form-error" role="alert"></p><div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" id="partnerPayoutSubmit" type="submit">Record payout &amp; journal</button></div></form></div>`);
+    $("#partnerPayoutForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const button = $("#partnerPayoutSubmit"), errorEl = $("#partnerPayoutError");
+      button.disabled = true; errorEl.textContent = "";
+      const payload = {
+        amount: Number($("#partnerPayoutAmount").value), payment_method: $("#partnerPayoutMethod").value,
+        reference: $("#partnerPayoutReference").value.trim(), notes: $("#partnerPayoutNotes").value.trim(),
+        idempotency_key: payoutIdempotencyKey,
+      };
+      try {
+        await DB.consignmentRequest(`partners/${encodeURIComponent(partner.id)}/payouts`, { method: "POST", body: JSON.stringify(payload) });
+        pendingPartnerPayoutKeys.delete(partner.id);
+        partnerDashboard.selectedId = partner.id;
+        partnerDashboard.data = null; partnerDashboard.loaded = false;
+        closeModal(); toast("Payout posted · payable balance updated");
+        await loadConsignmentDashboard(); await loadPartnerDetail(partner.id);
+      } catch (error) {
+        errorEl.textContent = error.message || "Could not record payout"; button.disabled = false;
+      }
+    });
+  }
+
+  function openPartnerRateEditor(item, partner) {
+    if (!item || !partner) return;
+    const custom = item.commission_rate == null ? "" : Number(item.commission_rate).toFixed(2);
+    openModal(`<div class="partner-modal rate-modal"><button class="modal-x" data-close aria-label="Close">×</button><p class="kicker">ITEM COMMISSION</p><h3>${esc(item.name)}</h3><p class="muted small">Effective rate: ${Number(item.effective_commission_rate || 0).toFixed(2)}%. Leave the field blank to inherit ${esc(partner.name)}’s ${Number(partner.default_commission_rate || 0).toFixed(2)}% default. Past sales remain unchanged.</p>
+      <form id="partnerRateForm"><div class="field"><label for="partnerItemRate">Custom commission (%)</label><input class="sel-full" id="partnerItemRate" type="number" min="0" max="100" step="0.01" value="${custom}" placeholder="Use partner default" /></div><button class="btn sm" type="button" id="partnerRateReset">Use partner default</button><p id="partnerRateError" class="partner-form-error" role="alert"></p><div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button><button class="btn primary" type="submit" id="partnerRateSubmit">Save commission rate</button></div></form></div>`);
+    $("#partnerRateReset").addEventListener("click", () => { $("#partnerItemRate").value = ""; });
+    $("#partnerRateForm").addEventListener("submit", async event => {
+      event.preventDefault();
+      const button = $("#partnerRateSubmit"), errorEl = $("#partnerRateError"), raw = $("#partnerItemRate").value.trim();
+      button.disabled = true; errorEl.textContent = "";
+      try {
+        await DB.consignmentRequest(`products/${encodeURIComponent(item.id)}/commission`, {
+          method: "PATCH", body: JSON.stringify({ commission_rate: raw === "" ? null : Number(raw) }),
+        });
+        closeModal(); toast("Item commission updated · historical sales unchanged"); await loadPartnerDetail(partner.id);
+      } catch (error) { errorEl.textContent = error.message || "Could not update commission"; button.disabled = false; }
+    });
+  }
+
+  if (partnerRoot) {
+    setInterval(() => {
+      if (currentView === "partners" && viewReady && !partnerDashboard.loading) loadConsignmentDashboard();
+    }, 30000);
+    $("#btnPartnerAdd").addEventListener("click", () => openPartnerEditor());
+    $("#btnPartnerIntake").addEventListener("click", () => openConsignmentIntake());
+    $("#btnPartnerRefresh").addEventListener("click", () => loadConsignmentDashboard());
+    $("#partnerRegionFilter").addEventListener("change", event => { partnerDashboard.region = event.target.value; loadConsignmentDashboard(); });
+    $("#partnerSourceFilter").addEventListener("change", event => { partnerDashboard.supplySource = event.target.value; loadConsignmentDashboard(); });
+    partnerRoot.addEventListener("click", event => {
+      if (event.target.closest("[data-partner-retry]")) { loadConsignmentDashboard(); return; }
+      if (event.target.closest("[data-partner-close-detail]")) { partnerDashboard.selectedId = ""; partnerDashboard.detail = null; renderPartners(); return; }
+      const intakeButton = event.target.closest("[data-partner-intake]");
+      if (intakeButton) { openConsignmentIntake(intakeButton.dataset.partnerIntake); return; }
+      const viewButton = event.target.closest("[data-partner-view]");
+      if (viewButton) { loadPartnerDetail(viewButton.dataset.partnerView); return; }
+      const editButton = event.target.closest("[data-partner-edit]");
+      if (editButton) { openPartnerEditor(partnerById(editButton.dataset.partnerEdit)); return; }
+      const payoutButton = event.target.closest("[data-partner-payout]");
+      if (payoutButton) { openPartnerPayout(partnerById(payoutButton.dataset.partnerPayout)); return; }
+      const rateButton = event.target.closest("[data-partner-item-rate]");
+      if (rateButton) {
+        const detail = partnerDashboard.detail && partnerDashboard.detail.data;
+        const item = detail && detail.items.find(row => row.id === rateButton.dataset.partnerItemRate);
+        if (item && detail.partner) openPartnerRateEditor(item, detail.partner);
+      }
+    });
+  }
+
+  /* ============================================================
+     CUSTOMER BOOK (guest book)
+     ============================================================
   let guestTerm = "";
   const guestSearchEl = $("#guestSearch");
   if (guestSearchEl) guestSearchEl.addEventListener("input", e => { guestTerm = e.target.value.trim().toLowerCase(); renderGuests(); });
@@ -3909,6 +4385,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (currentView === "customers") renderAuditLogs();
     if (currentView === "dispatch") renderRiders();
     if (currentView === "payments") renderLedger();
+    if (currentView === "partners") renderPartners();
     if (currentView === "staff") renderStaff();
     if (currentView === "settings") renderSettings();
     const webPend = allSales().filter(s => s.channel === "web" && s.status === "pending").length;

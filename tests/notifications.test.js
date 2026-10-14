@@ -85,15 +85,19 @@ async function pollingReadAndSameSecondEvents() {
     doc.querySelector("#notifBellBtn").click();
     await f.engine.inFlight;
     assert.equal(f.engine.drawerOpen(), true);
-    assert.equal(f.engine.unreadCount, 0);
+    assert.equal(f.engine.unreadCount, 1, "opening the inbox does not silently mark messages read");
     assert.equal(doc.querySelector("#notifBellBtn").getAttribute("aria-expanded"), "true");
+    const row = doc.querySelector('[data-notification-row="read-first"]');
+    row.querySelector("[data-nd-menu-toggle]").click();
+    row.querySelector('[data-nd-menu-action="toggle-read"]').click();
+    assert.equal(f.engine.unreadCount, 0, "the row menu can mark one message read");
     doc.querySelector("#notifDrawerClose").click();
     const second = notification("same-second", { timestamp: first.timestamp });
     f.feed([second, first]);
     await f.runTimer(5000);
     assert.equal(f.engine.unreadCount, 1, "reading an earlier event must not hide a new event in the same second");
     assert.equal(doc.querySelectorAll(".nd-item").length, 2);
-    assert.equal(doc.querySelectorAll(".nd-unread").length, 1);
+    assert.equal(doc.querySelectorAll("#notifDrawerList .nd-row.nd-unread").length, 1);
     assert.equal(doc.querySelectorAll(".toast-card").length, 1);
     await f.engine.syncHistory();
     f.engine.handleNotification(second); // duplicate delivery from any adapter
@@ -136,12 +140,22 @@ async function actionWakeupAndMobileLinks() {
     assert.equal(f.win.document.querySelector(".toast-view").getAttribute("href"), "admin.html?view=sales");
     f.win.document.querySelector("#notifBellBtn").click();
     await f.engine.inFlight;
-    f.feed([notification("stock-intake", { type: "STOCK_ADDED", area: "stock" }), notification("local-checkout")]);
+    f.feed([
+      notification("stock-intake", { type: "STOCK_ADDED", area: "stock" }),
+      notification("local-checkout"),
+      notification("rider-profile", { type: "RIDER_UPDATED", title: "Partner profile updated", message: "The rider's zone changed.", area: "orders" }),
+      notification("rider-progress", { type: "DELIVERY_PROGRESS", title: "Delivery O1: collected", message: "The rider reported collected.", area: "orders" })
+    ]);
     f.win.document.querySelector("#notifRefresh").click();
     await f.engine.inFlight;
-    assert.equal(f.win.document.querySelectorAll(".nd-item").length, 2);
-    assert.equal(f.engine.unreadCount, 0, "new items visible in an open drawer are read");
-    assert.equal(f.win.document.querySelector('.nd-stock_added').getAttribute("href"), "admin.html?view=inventory");
+    assert.equal(f.win.document.querySelectorAll(".nd-item").length, 4);
+    assert.equal(f.engine.unreadCount, 4, "opening the drawer leaves each message's unread state intact");
+    assert.equal(f.win.document.querySelector('.nd-stock_added .nd-item').getAttribute("href"), "admin.html?view=inventory");
+    assert.equal(f.win.document.querySelector('.nd-rider_updated .nd-item').getAttribute("href"), "admin.html?view=dispatch");
+    assert.equal(f.win.document.querySelector('.nd-delivery_progress .nd-item').getAttribute("href"), "admin.html?view=dispatch");
+    assert(f.win.document.querySelector('.nd-rider_updated .nd-time').textContent.includes("Partner profile"));
+    f.win.document.querySelector("#notifMarkAllRead").click();
+    assert.equal(f.engine.unreadCount, 0, "the header can still mark every message read");
     console.log("✓ checkout actions wake the bell promptly; drawer refresh and links open the relevant workspaces");
   } finally { f.close(); }
 }

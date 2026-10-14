@@ -12,7 +12,14 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const EMOJI = {
     "Outerwear & Jackets": Icons.svg("shirt", "ico-cat"), "Tops & Shirts": Icons.svg("shirt", "ico-cat"), "Dresses & Skirts": Icons.svg("shopping-bag", "ico-cat"),
-    "Pants & Jeans": Icons.svg("ruler", "ico-cat"), "Shoes": Icons.svg("footprints", "ico-cat"), "Accessories": Icons.svg("shopping-bag", "ico-cat"), "Children Wear": Icons.svg("baby", "ico-cat")
+    "Pants & Jeans": Icons.svg("ruler", "ico-cat"), "Shoes": Icons.svg("footprints", "ico-cat"), "Boots": Icons.svg("footprints", "ico-cat"), "Sandals": Icons.svg("footprints", "ico-cat"),
+    "Accessories": Icons.svg("shopping-bag", "ico-cat"), "Children Wear": Icons.svg("baby", "ico-cat"),
+    "Activewear & Sportswear": Icons.svg("shirt", "ico-cat"), "Suits & Formalwear": Icons.svg("shirt", "ico-cat"),
+    "Underwear & Sleepwear": Icons.svg("shirt", "ico-cat"), "Bags & Handbags": Icons.svg("shopping-bag", "ico-cat"),
+    "Necklaces & Chains": Icons.svg("tag", "ico-cat"), "Bracelets & Bangles": Icons.svg("tag", "ico-cat"),
+    "Rings & Earrings": Icons.svg("tag", "ico-cat"), "Watches": Icons.svg("clock-3", "ico-cat"),
+    "Eyewear & Sunglasses": Icons.svg("search", "ico-cat"), "Hats, Scarves & Belts": Icons.svg("shopping-bag", "ico-cat"),
+    "Traditional & Occasionwear": Icons.svg("shirt", "ico-cat"), "Swimwear & Beachwear": Icons.svg("shirt", "ico-cat")
   };
 
   /* ---------- header: cashier pill + network status ---------- */
@@ -275,7 +282,7 @@
       .filter(p => activeDemo === "All" || p.demographic === activeDemo)
       .filter(p => activeCat === "All" || p.category === activeCat)
       .filter(p => activeInventory === "All" || (p.item_condition || "PRE_LOVED") === activeInventory)
-      .filter(p => !term || [p.name, p.brand, p.size, p.color, p.sku, p.barcode_id, p.condition, p.item_condition].join(" ").toLowerCase().includes(term))
+      .filter(p => !term || [p.name, p.brand, p.category, p.desc, p.size, p.color, p.sku, p.barcode_id, p.condition, p.item_condition].join(" ").toLowerCase().includes(term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#tileGrid").innerHTML = list.length ? list.map(p => {
       const out = p.in_stock_count <= 0;
@@ -284,8 +291,8 @@
       <button class="tile" data-tile="${esc(p.id)}" ${out ? "disabled" : ""}>
         <span class="tile-img">${img || (EMOJI[p.category] || Icons.svg("tag", "ico-cat"))}</span>
         <span class="tile-body">
-          <span class="t-name"><span class="pos-condition-tag ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span> ${esc(p.name)}</span>
-          <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${p.item_condition === "BRAND_NEW" ? "Factory tagged" : "1-of-1 vintage"}</span>
+          <span class="t-name"><span class="pos-condition-tag ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span>${p.is_consignment ? ' <span class="pos-consignment-tag">CONSIGNMENT</span>' : ""} ${esc(p.name)}</span>
+          <span class="t-meta">${esc(p.demographic)} · ${esc(p.category)} · Size ${esc(p.size)} · ${p.is_consignment ? "Partner item · 1-of-1" : (p.item_condition === "BRAND_NEW" ? "Factory tagged" : "1-of-1 vintage")}</span>
           <span class="t-row">
             <span class="t-price">${DB.ugx(p.selling_price)}</span>
             <span class="stock-dot ${out ? "out" : ""}">${out ? "SOLD" : p.in_stock_count + " left"}</span>
@@ -425,7 +432,7 @@
     } else {
       box.innerHTML = det.map(({ l, p, amt }) => `
         <div class="cline">
-          <span class="c-name"><span class="pos-condition-tag ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span> ${esc(p.name)}</span>
+          <span class="c-name"><span class="pos-condition-tag ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span>${p.is_consignment ? ' <span class="pos-consignment-tag">CONSIGNMENT</span>' : ""} ${esc(p.name)}</span>
           <span class="c-amt">${DB.ugx(amt)}</span>
           <span class="c-unit">${DB.ugx(p.selling_price)} each · ${esc(p.barcode_id)}</span>
           <span class="c-controls">
@@ -718,7 +725,7 @@
             ${sale.items.map(it => `
               <tr>
                 <td style="text-align:left">
-                  <div class="rc-it-name">[${it.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}] ${esc(it.name)}</div>
+                  <div class="rc-it-name">[${it.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}${it.is_consignment ? " · CONSIGNMENT" : ""}] ${esc(it.name)}</div>
                   <div class="rc-it-sku">${esc(it.sku || it.barcode_id || "")}</div>
                 </td>
                 <td style="text-align:center">${it.qty}</td>

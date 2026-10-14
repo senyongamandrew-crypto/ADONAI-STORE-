@@ -61,7 +61,12 @@
   };
 
   /* ---------- domain constants ---------- */
-  const CATEGORIES    = ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear"];
+  const CATEGORIES    = [
+    "Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear",
+    "Boots", "Sandals", "Activewear & Sportswear", "Suits & Formalwear", "Underwear & Sleepwear", "Bags & Handbags",
+    "Necklaces & Chains", "Bracelets & Bangles", "Rings & Earrings", "Watches", "Eyewear & Sunglasses", "Hats, Scarves & Belts",
+    "Traditional & Occasionwear", "Swimwear & Beachwear"
+  ];
   const ITEM_CONDITIONS = ["BRAND_NEW", "PRE_LOVED"];
   const QUANTITY_TYPES = ["BRAND_NEW", "PRE_LOVED"];
   const DEMO_CODES    = { "Men": "MEN", "Women": "WOM", "Children": "KID", "Unisex": "UNI" };
@@ -69,7 +74,14 @@
   // Unisex is a first-class demographic so it is available in inventory,
   // cashier filters, and the public storefront filters.
   const DEMOGRAPHICS  = ["Men", "Women", "Children", "Unisex"];
-  const CAT_CODES     = { "Outerwear & Jackets": "JKT", "Tops & Shirts": "TOP", "Dresses & Skirts": "DRS", "Pants & Jeans": "PNT", "Shoes": "SHO", "Accessories": "ACC", "Children Wear": "CHD" };
+  const CAT_CODES     = {
+    "Outerwear & Jackets": "JKT", "Tops & Shirts": "TOP", "Dresses & Skirts": "DRS", "Pants & Jeans": "PNT",
+    "Shoes": "SHO", "Accessories": "ACC", "Children Wear": "CHD", "Boots": "BTS", "Sandals": "SND",
+    "Activewear & Sportswear": "ACT", "Suits & Formalwear": "SUI", "Underwear & Sleepwear": "SLP",
+    "Bags & Handbags": "BAG", "Necklaces & Chains": "NCK", "Bracelets & Bangles": "BRB",
+    "Rings & Earrings": "JWL", "Watches": "WCH", "Eyewear & Sunglasses": "EYE", "Hats, Scarves & Belts": "HSB",
+    "Traditional & Occasionwear": "TRD", "Swimwear & Beachwear": "SWM"
+  };
   const TENDER_TYPES  = ["cash", "mtn", "airtel"];
   const DISPATCH_STATUSES = ["Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed"];
   const RIDER_STATUSES    = ["Available", "On delivery", "Offline"];
@@ -1241,6 +1253,10 @@
     financeRequest(path, options) {
       const suffix = String(path || "").replace(/^\//, "");
       return apiRequest("/api/finance/" + suffix, options || { method: "GET" }, true);
+    },
+    consignmentRequest(path, options) {
+      const suffix = String(path || "").replace(/^\//, "");
+      return apiRequest("/api/consignment/" + suffix, options || { method: "GET" }, true);
     },
     acquireInventoryLock(productId, lockOwner, quantity = 1) {
       const publicReservation = String(lockOwner || "").startsWith("WEB-");

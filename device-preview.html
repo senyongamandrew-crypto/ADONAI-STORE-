@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-display-size="standard">
+<html lang="en" data-display-size="compact">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -75,8 +75,8 @@
     </div>
     <div class="grp"><span>Display size</span>
       <div class="seg" id="sizeSeg">
-        <button type="button" data-size="compact" aria-pressed="false">Compact</button>
-        <button type="button" data-size="standard" aria-pressed="true">Standard</button>
+        <button type="button" data-size="compact" aria-pressed="true">Compact</button>
+        <button type="button" data-size="standard" aria-pressed="false">Standard</button>
         <button type="button" data-size="large" aria-pressed="false">Large</button>
       </div>
     </div>
@@ -106,7 +106,7 @@
     <strong>Sign in once first.</strong> The register and the dashboards open the login gate in a fresh browser profile —
     unlock the POS (or the Admin Suite passkey) in a normal tab of this same address, then return here and the frames render
     the real screens. Changing <strong>Display size</strong> here uses the exact same saved setting as
-    <em>Menu → Display size</em> inside the app (<code>adonai.ui.display-size</code>), so what you tune here is what the phone keeps.
+        <em>Store Settings → Display size</em> inside the app (<code>adonai.ui.display-size</code>), so what you tune here is what the phone keeps.
   </div>
   <p class="legend">
     Frames are true CSS-pixel viewports (a 780 × 360 frame is a phone held in landscape), so each frame triggers exactly the
@@ -133,7 +133,7 @@
   function readStoredSize() {
     var value = null;
     try { value = localStorage.getItem(DISPLAY_KEY); } catch (e) {}
-    return value === "compact" || value === "large" ? value : "standard";
+    return value === "compact" || value === "standard" || value === "large" ? value : "compact";
   }
 
   function srcFor(device) {

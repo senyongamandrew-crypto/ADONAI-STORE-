@@ -25,6 +25,17 @@
     NEW_ORDER: { label: "Checkout / order", icon: "🛍️", view: "sales" },
     NEW_MESSAGE: { label: "Customer note", icon: "💬", view: "sales" },
     ORDER_UPDATED: { label: "Order update", icon: "📦", view: "dispatch" },
+    DELIVERY_ASSIGNED: { label: "Delivery assigned", icon: "🚚", view: "dispatch" },
+    DELIVERY_PROGRESS: { label: "Rider delivery update", icon: "📍", view: "dispatch" },
+    RIDER_ADDED: { label: "Partner added", icon: "🛵", view: "dispatch" },
+    RIDER_UPDATED: { label: "Partner profile", icon: "👤", view: "dispatch" },
+    RIDER_STATUS_UPDATED: { label: "Partner availability", icon: "🟢", view: "dispatch" },
+    RIDER_ARCHIVED: { label: "Partner archived", icon: "🗂️", view: "dispatch" },
+    RIDER_PAIRING_CODE_ISSUED: { label: "Phone pairing code", icon: "🔑", view: "dispatch" },
+    RIDER_PHONE_PAIRED: { label: "Partner phone paired", icon: "📱", view: "dispatch" },
+    RIDER_PHONE_REVOKED: { label: "Partner phone access", icon: "🔒", view: "dispatch" },
+    RIDER_DUTY_STARTED: { label: "Rider duty started", icon: "▶️", view: "dispatch" },
+    RIDER_DUTY_STOPPED: { label: "Rider duty stopped", icon: "⏸️", view: "dispatch" },
     ORDER_PAID: { label: "Payment received", icon: "💳", view: "sales" },
     ORDER_EXPIRED: { label: "Payment expired", icon: "⌛", view: "sales" },
     LOW_STOCK: { label: "Stock warning", icon: "⚠️", view: "inventory" },
@@ -57,7 +68,6 @@
       this.readIds = this.restoreReadIds();
       this.deletedIds = loadIdSet(DELETED_KEY, DELETED_MAX);
       saveIdSet(DELETED_KEY, this.deletedIds, DELETED_MAX);
-      this.selected = new Set();
       try { localStorage.removeItem(HOLD_KEY); } catch (e) {}
       this.unreadCount = 0;
       this.hasSynced = false;
@@ -159,8 +169,10 @@
         this.hasSynced = true;
         this.failures = 0;
         this.setStatus("live", "Updates connected · refreshes every 5 seconds");
-        if (this.drawerOpen()) this.markAllRead();
-        else { this.recountUnread(); this.renderDrawerList(); }
+        // Simply viewing the inbox must not silently mark every new alert read;
+        // each row has its own read state and the header retains a bulk action.
+        this.recountUnread();
+        this.renderDrawerList();
         return true;
       } catch (error) {
         if (epoch !== this.accessEpoch || this.stopped) return false;
@@ -197,8 +209,8 @@
       this.seenIds.add(notification.id);
       this.saveLocal(notification);
       if (fresh) this.announce(notification);
-      if (this.drawerOpen()) this.markAllRead();
-      else { this.recountUnread(); this.renderDrawerList(); }
+      this.recountUnread();
+      this.renderDrawerList();
     }
 
     announce(notification) {
@@ -228,40 +240,44 @@
       this.unreadCount = this.visibleItems().filter(n => !this.readIds.has(n.id)).length;
       this.updateBadgeUI();
     }
-    toggleSelected(id, on) {
-      if (on) this.selected.add(id); else this.selected.delete(id);
-      this.renderDrawerList();
+    persistReadIds() {
+      this.readIds = new Set(Array.from(this.readIds).slice(-MAX_READ));
+      try { sessionStorage.setItem(READ_KEY, JSON.stringify(Array.from(this.readIds))); } catch (e) {}
     }
-    selectAllVisible() {
-      const items = this.visibleItems();
-      const allSelected = items.length > 0 && items.every(n => this.selected.has(n.id));
-      this.selected = allSelected ? new Set() : new Set(items.map(n => n.id));
-      this.renderDrawerList();
+    setReadState(id, isRead) {
+      if (!id) return;
+      if (isRead) this.readIds.add(id); else this.readIds.delete(id);
+      this.persistReadIds();
+      this.recountUnread();
+
+      // Update the row in place so opening its workspace link is never interrupted.
+      const row = Array.from(document.querySelectorAll("#notifDrawerList [data-notification-row]"))
+        .find(el => el.dataset.notificationRow === id);
+      if (row) {
+        row.classList.toggle("nd-unread", !isRead);
+        const item = row.querySelector("[data-notification-open]");
+        if (item) item.classList.toggle("nd-unread", !isRead);
+        const readAction = row.querySelector("[data-nd-menu-action='toggle-read']");
+        if (readAction) readAction.textContent = isRead ? "Mark as unread" : "Mark as read";
+      }
     }
-    deleteIds(ids, message) {
-      if (!ids.length) return;
-      if (typeof window.confirm === "function" && !window.confirm(message)) return;
-      ids.forEach(id => { this.deletedIds.add(id); this.selected.delete(id); });
+    toggleReadState(id) {
+      this.setReadState(id, !this.readIds.has(id));
+    }
+    deleteNotification(id) {
+      if (!id || !this.visibleItems().some(n => n.id === id)) return;
+      this.deletedIds.add(id);
       saveIdSet(DELETED_KEY, this.deletedIds, DELETED_MAX);
-      this.recountUnread(); this.renderDrawerList();
-    }
-    deleteSelected() {
-      const ids = Array.from(this.selected);
-      this.deleteIds(ids, `Delete ${ids.length} selected notification${ids.length === 1 ? "" : "s"} from this device? The store keeps its own records.`);
-    }
-    deleteReadMessages() {
-      const ids = this.visibleItems().filter(n => this.readIds.has(n.id)).map(n => n.id);
-      this.deleteIds(ids, `Delete ${ids.length} read notification${ids.length === 1 ? "" : "s"} from this device?`);
-    }
-    deleteAllMessages() {
-      const ids = this.visibleItems().map(n => n.id);
-      this.deleteIds(ids, `Delete all ${ids.length} notification${ids.length === 1 ? "" : "s"} from this device?`);
+      this.readIds.delete(id);
+      this.persistReadIds();
+      this.closeActionMenus();
+      this.recountUnread();
+      this.renderDrawerList();
     }
 
     markAllRead() {
       this.history.forEach(n => this.readIds.add(n.id));
-      this.readIds = new Set(Array.from(this.readIds).slice(-MAX_READ));
-      try { sessionStorage.setItem(READ_KEY, JSON.stringify(Array.from(this.readIds))); } catch (e) {}
+      this.persistReadIds();
       this.recountUnread();
       this.renderDrawerList();
     }
@@ -272,6 +288,8 @@
         badge.textContent = this.unreadCount > 99 ? "99+" : String(this.unreadCount);
         badge.style.display = this.unreadCount > 0 ? "inline-flex" : "none";
       }
+      const markAll = document.getElementById("notifMarkAllRead");
+      if (markAll) markAll.disabled = this.unreadCount === 0;
       const bell = document.getElementById("notifBellBtn");
       if (bell) {
         bell.setAttribute("aria-label", this.unreadCount ? "Notifications, " + this.unreadCount + " unread" : "Notifications");
@@ -304,8 +322,7 @@
           '<button type="button" class="nd-close" id="notifDrawerClose" aria-label="Close notifications">&times;</button></div></div>' +
           '<div class="nd-feedbar"><span class="nd-feed-status" id="notifFeedStatus" data-state="loading" role="status">Connecting to updates…</span>' +
           '<button type="button" class="nd-refresh" id="notifRefresh" aria-label="Refresh notifications">Refresh</button></div>' +
-          '<div class="nd-toolbar" id="notifToolbar"></div>' +
-          '<div class="nd-list" id="notifDrawerList"></div>';
+          '<div class="nd-list" id="notifDrawerList" aria-label="Recent notifications"></div>';
         document.body.appendChild(d);
         const scrim = document.createElement("div");
         scrim.id = "notifScrim";
@@ -325,29 +342,39 @@
       const open = typeof force === "boolean" ? force : !this.drawerOpen();
       drawer.classList.toggle("open", open);
       if (scrim) scrim.classList.toggle("show", open);
-      if (open) { this.markAllRead(); this.syncHistory(); }
+      if (open) this.syncHistory();
+      else this.closeActionMenus();
       this.updateBadgeUI();
     }
     href(notification) {
       const meta = TYPE_META[notification.type];
       return meta && meta.view ? (/admin\.html/.test(location.pathname) ? "" : "admin.html") + "?view=" + meta.view : "";
     }
+    closeActionMenus() {
+      document.querySelectorAll("#notifDrawerList [data-nd-menu-toggle]").forEach(button => {
+        button.setAttribute("aria-expanded", "false");
+        const menu = button.parentElement && button.parentElement.querySelector(".nd-menu");
+        if (menu) menu.hidden = true;
+      });
+    }
+    toggleActionMenu(button) {
+      const menu = button.parentElement && button.parentElement.querySelector(".nd-menu");
+      if (!menu) return;
+      const shouldOpen = menu.hidden;
+      this.closeActionMenus();
+      if (!shouldOpen) return;
+      menu.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      const rect = button.getBoundingClientRect();
+      const menuHeight = menu.getBoundingClientRect().height || 96;
+      menu.dataset.placement = window.innerHeight - rect.bottom < menuHeight + 12 ? "top" : "bottom";
+      const firstAction = menu.querySelector("button");
+      if (firstAction) firstAction.focus();
+    }
     renderDrawerList() {
       const box = document.getElementById("notifDrawerList");
-      const toolbar = document.getElementById("notifToolbar");
       if (!box) return;
       const items = this.visibleItems();
-      // Selection only ever refers to rows currently on screen.
-      this.selected = new Set(Array.from(this.selected).filter(id => items.some(n => n.id === id)));
-      const selectedCount = this.selected.size;
-      const allSelected = items.length > 0 && selectedCount === items.length;
-      const readCount = items.filter(n => this.readIds.has(n.id)).length;
-      if (toolbar) {
-        toolbar.innerHTML = items.length ? '<label class="nd-selall"><input type="checkbox" data-nd-action="select-all"' + (allSelected ? " checked" : "") + '> Select all</label>' +
-          '<button type="button" class="nd-tool nd-danger" data-nd-action="delete" ' + (selectedCount ? "" : "disabled") + '>Delete selected' + (selectedCount ? ' (' + selectedCount + ')' : '') + '</button>' +
-          (readCount ? '<button type="button" class="nd-tool" data-nd-action="clear-read">Delete read (' + readCount + ')</button>' : "") +
-          '<button type="button" class="nd-tool" data-nd-action="clear-all">Clear all</button>' : "";
-      }
       let html;
       if (!items.length) {
         html = !this.history.length
@@ -360,15 +387,21 @@
       } else html = items.map(n => {
         const meta = TYPE_META[n.type] || { label: "Alert", icon: "🔔" };
         const when = n.timestamp ? new Date(n.timestamp * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-        const unread = !this.readIds.has(n.id) ? " nd-unread" : "";
+        const isRead = this.readIds.has(n.id);
+        const unread = isRead ? "" : " nd-unread";
         const href = this.href(n);
-        const tag = href ? "a" : "div";
-        const checked = this.selected.has(n.id) ? " checked" : "";
-        return '<div class="nd-row"><label class="nd-check"><input type="checkbox" data-nd-check="' + esc(n.id) + '"' + checked + ' aria-label="Select: ' + esc(n.title) + '"></label>' +
-          '<' + tag + (href ? ' href="' + esc(href) + '"' : '') + ' data-notification-id="' + esc(n.id) + '" class="nd-item' + unread + ' nd-' + esc(String(n.type || "alert").toLowerCase().replace(/[^a-z0-9_]/g, "")) + '">' +
+        const tag = href ? "a" : "button";
+        const openAttrs = href ? ' href="' + esc(href) + '"' : ' type="button"';
+        const typeClass = String(n.type || "alert").toLowerCase().replace(/[^a-z0-9_]/g, "");
+        const readAction = isRead ? "Mark as unread" : "Mark as read";
+        return '<div class="nd-row' + unread + ' nd-' + esc(typeClass) + '" data-notification-row="' + esc(n.id) + '">' +
+          '<' + tag + openAttrs + ' data-notification-open data-notification-id="' + esc(n.id) + '" class="nd-item' + unread + '">' +
           '<span class="nd-ico" aria-hidden="true">' + meta.icon + '</span><span class="nd-body"><strong>' + esc(n.title) + '</strong>' +
           '<span class="nd-msg">' + esc(n.message) + '</span><span class="nd-time">' + esc(meta.label) + ' · ' + esc(when) + (n.protected ? ' · 🔒 Details protected' : '') + '</span></span>' +
-          (href ? '<span class="nd-link" aria-hidden="true">›</span>' : '') + '</' + tag + '></div>';
+          (href ? '<span class="nd-link" aria-hidden="true">›</span>' : '') + '</' + tag + '>' +
+          '<div class="nd-more-wrap"><button type="button" class="nd-more" data-nd-menu-toggle aria-label="More actions for ' + esc(n.title) + '" aria-haspopup="menu" aria-controls="notifMenu-' + esc(n.id) + '" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>' +
+          '<div id="notifMenu-' + esc(n.id) + '" class="nd-menu" role="menu" data-placement="bottom" hidden><button type="button" role="menuitem" class="nd-menu-item" data-nd-menu-action="toggle-read" data-notification-id="' + esc(n.id) + '">' + readAction + '</button>' +
+          '<button type="button" role="menuitem" class="nd-menu-item nd-menu-danger" data-nd-menu-action="delete" data-notification-id="' + esc(n.id) + '">Remove from this device</button></div></div></div>';
       }).join("");
       if (box.innerHTML !== html) box.innerHTML = html;
     }
@@ -424,25 +457,55 @@
 
     bindUIEvents() {
       document.addEventListener("click", e => {
+        const menuToggle = e.target.closest("[data-nd-menu-toggle]");
+        if (menuToggle) { e.preventDefault(); this.toggleActionMenu(menuToggle); return; }
+
+        const menuAction = e.target.closest("[data-nd-menu-action]");
+        if (menuAction) {
+          e.preventDefault();
+          const id = menuAction.dataset.notificationId;
+          const action = menuAction.dataset.ndMenuAction;
+          const row = menuAction.closest(".nd-row");
+          const toggle = row && row.querySelector("[data-nd-menu-toggle]");
+          const fallbackFocus = row && (row.nextElementSibling && row.nextElementSibling.querySelector("[data-nd-menu-toggle]") ||
+            row.previousElementSibling && row.previousElementSibling.querySelector("[data-nd-menu-toggle]"));
+          this.closeActionMenus();
+          if (action === "toggle-read") {
+            this.toggleReadState(id);
+            if (toggle) toggle.focus();
+          } else if (action === "delete") {
+            this.deleteNotification(id);
+            (fallbackFocus || document.getElementById("notifBellBtn"))?.focus();
+          }
+          return;
+        }
+
+        const notification = e.target.closest("[data-notification-open]");
+        if (notification) this.setReadState(notification.dataset.notificationId, true);
+        else if (!e.target.closest(".nd-more-wrap")) this.closeActionMenus();
+
         if (e.target.closest("#notifBellBtn")) { e.preventDefault(); this.toggleDrawer(); return; }
         if (e.target.closest("#notifDrawerClose") || e.target.id === "notifScrim") { this.toggleDrawer(false); return; }
         if (e.target.closest("#notifMarkAllRead")) this.markAllRead();
         if (e.target.closest("#notifRefresh")) this.syncHistory();
-        const action = e.target.closest("[data-nd-action]");
-        if (action && action.tagName === "BUTTON") {
-          const name = action.dataset.ndAction;
-          if (name === "delete") this.deleteSelected();
-          else if (name === "clear-read") this.deleteReadMessages();
-          else if (name === "clear-all") this.deleteAllMessages();
+      });
+      document.addEventListener("keydown", e => {
+        const menu = e.target.closest && e.target.closest(".nd-menu:not([hidden])");
+        if (menu && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End")) {
+          const actions = Array.from(menu.querySelectorAll("button[role='menuitem']"));
+          const current = actions.indexOf(document.activeElement);
+          const index = e.key === "Home" ? 0 : e.key === "End" ? actions.length - 1 :
+            (current + (e.key === "ArrowDown" ? 1 : actions.length - 1)) % actions.length;
+          if (actions[index]) actions[index].focus();
+          e.preventDefault();
           return;
         }
-        if (e.target.matches && e.target.matches("[data-nd-action='select-all']")) this.selectAllVisible();
+        if (e.key === "Escape") {
+          const openButton = document.querySelector("#notifDrawerList [data-nd-menu-toggle][aria-expanded='true']");
+          if (openButton) { this.closeActionMenus(); openButton.focus(); }
+          else this.toggleDrawer(false);
+        }
       });
-      document.addEventListener("change", e => {
-        const check = e.target.closest && e.target.closest("[data-nd-check]");
-        if (check) this.toggleSelected(check.dataset.ndCheck, check.checked);
-      });
-      document.addEventListener("keydown", e => { if (e.key === "Escape") this.toggleDrawer(false); });
       document.addEventListener("visibilitychange", () => { if (!document.hidden) this.requestRefresh(0); });
       window.addEventListener("online", () => this.requestRefresh(0));
       window.addEventListener("focus", () => this.requestRefresh(0));

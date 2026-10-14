@@ -19,7 +19,7 @@ OWNER_ID = "OWNER"
 POLICY_KEY = "pos_access_protected_areas"
 SESSION_SECONDS = 1800
 AREAS = {
-    "finance": {"label": "Finance & sales analytics", "description": "Financial ledgers, expenses, bale costs and sales analytics.", "views": ["overview", "payments"]},
+    "finance": {"label": "Finance & sales analytics", "description": "Financial ledgers, expenses, bale costs, partner settlements and sales analytics.", "views": ["overview", "payments", "partners"]},
     "stock": {"label": "Stock management & intake", "description": "Inventory editing, stock deletion and catalog intake. Checkout and product search stay open.", "views": ["inventory", "intake"]},
     "orders": {"label": "Orders, dispatch & audit", "description": "Order history, fulfillment, delivery dispatch and posting audit logs.", "views": ["sales", "customers", "dispatch"]},
     "settings": {"label": "Store settings", "description": "Changes to store details, contact numbers and delivery fees.", "views": ["settings"]},
@@ -112,6 +112,10 @@ def public_policy(headers=None, session=None):
 
 
 def required_area(method, path, body):
+    if path == "/api/consignment/partners/choices" and method == "GET":
+        return "stock"
+    if path.startswith("/api/consignment/"):
+        return "finance"
     if path == "/api/exports/prepare" and method == "POST":
         if not isinstance(body.get("kind", "sales"), str): return None
         return {"sales": "orders", "orders": "orders", "customers": "orders", "ledger": "finance", "expenses": "finance", "journal": "finance", "stock": "stock", "staff": "security"}.get(body.get("kind", "sales"))
@@ -156,15 +160,26 @@ def sanitize_sale(data, access):
     if not allowed("finance", access) or (not allowed("stock", access) and "finance" not in access["granted"]):
         for key in ("cost_total", "profit_total", "gross_profit", "cost_of_goods_sold", "margin"):
             data.pop(key, None)
-        data["items"] = [{k: v for k, v in item.items() if k not in {"unit_cost", "cost_price", "cost_total"}} for item in data.get("items", [])]
+        data["items"] = [{k: v for k, v in item.items() if k not in {
+            "unit_cost", "cost_price", "cost_total", "consignment_partner_id",
+            "partner_name_snapshot", "commission_rate_snapshot", "consignment_gross_amount",
+            "consignment_commission_amount", "partner_payable_amount",
+        }} for item in data.get("items", [])]
     return data
 
 
 NOTIFICATION_AREAS = {
     "NEW_ORDER": "orders", "NEW_MESSAGE": "orders", "ORDER_UPDATED": "orders",
     "ORDER_PAID": "orders", "ORDER_EXPIRED": "orders",
+    "DELIVERY_ASSIGNED": "orders", "DELIVERY_PROGRESS": "orders",
+    "RIDER_ADDED": "orders", "RIDER_UPDATED": "orders", "RIDER_STATUS_UPDATED": "orders",
+    "RIDER_ARCHIVED": "orders", "RIDER_PAIRING_CODE_ISSUED": "orders",
+    "RIDER_PHONE_PAIRED": "orders", "RIDER_PHONE_REVOKED": "orders",
+    "RIDER_DUTY_STARTED": "orders", "RIDER_DUTY_STOPPED": "orders",
     "NEW_EXPENSE": "finance", "EXPENSE_UPDATED": "finance", "EXPENSE_VOIDED": "finance",
     "STOCK_LOT_RECEIVED": "finance", "STOCK_MARKDOWN": "finance", "STOCK_WRITTEN_OFF": "finance",
+    "CONSIGNMENT_PARTNER_ADDED": "finance", "CONSIGNMENT_PARTNER_UPDATED": "finance",
+    "CONSIGNMENT_PAYOUT": "finance",
     "STOCK_ADDED": "stock", "STOCK_UPDATED": "stock", "STOCK_REMOVED": "stock", "LOW_STOCK": "stock",
     "SETTINGS_UPDATED": "settings",
 }
@@ -189,6 +204,8 @@ def sanitize_notification(event, access):
               "stock": "New stock activity", "settings": "Store settings updated"}
     if data.get("type") == "NEW_ORDER":
         titles["orders"] = "Checkout recorded" if (event.get("payload") or {}).get("channel") == "pos" else "New order received"
+    elif str(data.get("type", "")).startswith(("RIDER_", "DELIVERY_")):
+        titles["orders"] = "New delivery activity"
     data["title"] = titles[area]
     data["message"] = f"Unlock {AREAS[area]['label']} to view the details."
     data["payload"] = {}

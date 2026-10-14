@@ -419,6 +419,8 @@ h1, h2, h3, .brand-word, .section-title {
 }
 .inventory-badge.new { background: #b45309; }
 .inventory-badge.vintage { background: #047857; }
+.inventory-badge.vintage { max-width: calc(100% - 20px); white-space: nowrap; font-size: 9px; letter-spacing: .045em; }
+.line-source-tag { margin-top: 4px; color: #77542f; font: 750 10px/1.4 var(--font-text); letter-spacing: .01em; }
 
 /* Top-Left Calculated Discount Badge (#DC2626) */
 .discount-badge {

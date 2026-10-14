@@ -103,9 +103,23 @@
     "Outerwear & Jackets": "top",
     "Dresses & Skirts": "top",
     "Children Wear": "top",
+    "Suits & Formalwear": "top",
+    "Activewear & Sportswear": "top",
+    "Underwear & Sleepwear": "top",
+    "Traditional & Occasionwear": "top",
+    "Swimwear & Beachwear": "top",
     "Pants & Jeans": "bottom",
     Shoes: "feet",
-    Accessories: "any"
+    Boots: "feet",
+    Sandals: "feet",
+    "Accessories": "any",
+    "Bags & Handbags": "none",
+    "Necklaces & Chains": "none",
+    "Bracelets & Bangles": "none",
+    "Rings & Earrings": "none",
+    Watches: "none",
+    "Eyewear & Sunglasses": "none",
+    "Hats, Scarves & Belts": "none"
   };
 
   const titleCase = key => String(key || "")
@@ -160,6 +174,7 @@
   /** Which measurement fields staff should capture for this category. */
   function expectedMeasurementFields(category) {
     const group = MEASUREMENT_GROUPS[category] || "any";
+    if (group === "none") return [];
     if (group === "any") return MEASUREMENT_FIELDS;
     return MEASUREMENT_FIELDS.filter(f => f.group === group);
   }

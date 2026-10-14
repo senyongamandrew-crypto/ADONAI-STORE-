@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-display-size="standard">
+<html lang="en" data-display-size="compact">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
@@ -10,12 +10,13 @@
 <link rel="stylesheet" href="styles.css?v=7.6" />
 <link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/dispatch.css?v=1.0" />
-<link rel="stylesheet" href="css/notifications.css?v=2.2" />
+<link rel="stylesheet" href="css/notifications.css?v=2.4" />
 <link rel="stylesheet" href="css/admin-overhaul.css?v=1.0" />
+<link rel="stylesheet" href="css/consignment.css?v=1.0" />
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
 <link rel="stylesheet" href="css/garment-media.css?v=1.0" />
-<link rel="stylesheet" href="css/adaptive-display.css?v=1.0" />
+<link rel="stylesheet" href="css/adaptive-display.css?v=1.1" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
 <link rel="icon" href="assets/favicon.ico" sizes="any" />
@@ -66,22 +67,13 @@
       <button class="nav-item" data-view="customers"><span class="nav-ico"><i data-icon="printer"></i></span><span>Posting Audit Logs</span></button>
       <button class="nav-item" data-view="dispatch"><span class="nav-ico"><i data-icon="truck"></i></span><span>Delivery Partners &amp; Dispatch</span></button>
       <button class="nav-item" data-view="overview"><span class="nav-ico"><i data-icon="bar-chart-3"></i></span><span>Sales Analytics</span></button>
+      <button class="nav-item" data-view="partners"><span class="nav-ico"><i data-icon="users"></i></span><span>Consignment Partners</span></button>
       <button class="nav-item" data-view="payments"><span class="nav-ico"><i data-icon="book-open"></i></span><span>Financial Ledgers</span></button>
       <button class="nav-item" data-view="staff"><span class="nav-ico"><i data-icon="key-round" class="ico-lime"></i></span><span>Staff &amp; Permissions</span></button>
       <button class="nav-item" data-view="settings"><span class="nav-ico"><i data-icon="settings"></i></span><span>Store Settings</span></button>
       <button class="nav-item store-nav-item" id="btnAdminSbOpenWebStore" type="button" title="Launch live customer website in device browser"><span class="nav-ico"><i data-icon="globe"></i></span><span>Open Live Web Storefront ↗</span></button>
       <button class="nav-item" id="btnRefreshSystem" type="button" title="Reload the whole system (keeps saved sales and stock)"><span class="nav-ico"><i data-icon="refresh-cw"></i></span><span>Refresh system</span></button>
     </nav>
-
-    <div class="ds-panel" id="adminDisplaySize" role="group" aria-label="Display size">
-      <div class="ds-panel-head"><i data-icon="monitor" data-size="13"></i><span>Display size</span></div>
-      <div class="ds-options">
-        <button class="ds-opt" type="button" data-display-size-option="compact" aria-pressed="false">Compact</button>
-        <button class="ds-opt is-active" type="button" data-display-size-option="standard" aria-pressed="true">Standard</button>
-        <button class="ds-opt" type="button" data-display-size-option="large" aria-pressed="false">Large</button>
-      </div>
-      <p class="ds-hint">Fits words to this screen. Saved on this device.</p>
-    </div>
 
     <div class="sidebar-foot">
       <div class="me-card">
@@ -266,7 +258,7 @@
       <div class="page-head">
         <p class="kicker">POS INTAKE &amp; BARCODE MANAGEMENT</p>
         <h1>Catalog Intake</h1>
-        <p class="muted">Register factory-fresh multi-quantity products or curated 1-of-1 vintage pieces with barcode tags, variants, photos, and UGX pricing.</p>
+        <p class="muted">Register store stock or list a partner-supplied garment for your catalog, storefront, and POS.</p>
       </div>
 
       <section class="gt-intake-guide" aria-labelledby="garmentWorkflowTitle">
@@ -276,6 +268,23 @@
 
       <div class="card intake-card">
         <div class="flip" id="flipDemo" hidden></div>
+        <section class="intake-source-panel" aria-labelledby="intakeSourceTitle">
+          <div class="intake-source-intro">
+            <span class="intake-source-step">STEP 1 · ITEM SOURCE</span>
+            <div><strong>Who supplied this garment?</strong><p>Store stock stays selected by default. For a partner's item, choose Partner consignment, select their name, then complete the garment details below.</p></div>
+          </div>
+          <div class="field"><label id="intakeSourceTitle" for="inInventorySource">Inventory source</label>
+            <select class="sel-full" id="inInventorySource"><option value="store">Store-owned · regular stock</option><option value="partner">Partner-supplied · consignment</option></select>
+            <span class="fhint">This choice controls ownership and how sale proceeds are shared; store-owned intake is unchanged.</span>
+          </div>
+          <div class="consignment-intake-fields" id="consignmentIntakeFields" hidden>
+            <div class="field"><label for="inConsignmentPartner">Which partner supplied it?</label><select class="sel-full" id="inConsignmentPartner"><option value="">Loading active partners…</option></select><span class="fhint">Choose the saved partner profile for this specific garment.</span></div>
+            <div class="field"><label for="inConsignmentRate">Item commission rate (%) <span class="fhint" id="inConsignmentRateHint">Leave blank to inherit the partner default (5%).</span></label>
+              <input class="sel-full" id="inConsignmentRate" type="number" min="0" max="100" step="0.01" placeholder="Partner default" /></div>
+            <p class="consignment-intake-note">Each partner garment is listed as a unique 1-of-1 item. Add its photos and 15–20 second video below; the partner share and store commission are recorded when it sells.</p>
+            <div class="consignment-no-partners" id="consignmentNoPartners" hidden><div><strong>No active partners yet</strong><span>Create a partner profile first, then return here to select who supplied this item.</span></div><button class="btn sm" type="button" id="btnIntakeAddPartner">+ Add partner profile</button></div>
+          </div>
+        </section>
         <h4 class="sec">1. Target Audience &amp; Category</h4>
         <div class="fgrid">
           <div class="field"><label>Primary demographic</label><select id="inDemo" class="sel-full"></select></div>
@@ -284,7 +293,7 @@
         </div>
 
         <h4 class="sec">2. Item Details &amp; Barcode</h4>
-        <div class="inventory-toggle" role="group" aria-label="Inventory type">
+        <div class="inventory-toggle" id="intakeConditionControls" role="group" aria-label="Inventory type">
           <button type="button" class="inventory-toggle-btn" data-intake-condition="PRE_LOVED">Curated Pre-Loved / Vintage · 1-of-1</button>
           <button type="button" class="inventory-toggle-btn active" data-intake-condition="BRAND_NEW">Brand-New Apparel · Multi-Quantity</button>
         </div>
@@ -322,11 +331,11 @@
 
         <h4 class="sec">3. Pricing Structure (UGX)</h4>
         <div class="fgrid">
-          <div class="field full"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
+          <div class="field full" id="inStockLotField"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
           <div class="field full" id="inLotGradeField" hidden><label>Graded tier<span class="fhint" id="inLotGradeHint">Pre-graded tier · locks the unit COGS</span></label><select class="sel-full" id="inLotGrade"><option value="">Choose tier…</option></select></div>
-          <div class="field"><label>Cost price (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
+          <div class="field" id="inCostField"><label>Cost price (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
           <div class="field"><label>Base price (UGX)<span class="fhint">Before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
-          <div class="field"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
+          <div class="field" id="inTransportField"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
         </div>
 
@@ -337,6 +346,7 @@
           <span class="muted small" id="angleCount">0 / 12 photos</span>
         </div>
         <div id="photoRow"></div>
+        <p class="partner-media-rule" id="partnerMediaRule" hidden>Consignment items require at least one photo and one uploaded video between 15 and 20 seconds. The server verifies the saved clip duration.</p>
 
         <div class="field"><label>Item story / description (visible on catalog)</label><textarea class="sel-full" id="inStory" placeholder="Describe fit, fabric feel, vintage era, and standout features…"></textarea></div>
         <div class="field"><label>Notes for shoppers / floor staff (intake notes)</label><textarea class="sel-full" id="inNotes" placeholder="Any minor wear details, dry clean status, or special handling notes…"></textarea></div>
@@ -668,6 +678,46 @@
     </section>
 
     <!-- ==================== STAFF & PERMISSIONS ==================== -->
+    <!-- ==================== CONSIGNMENT PARTNERS ==================== -->
+    <section class="view consignment-workspace" id="view-partners">
+      <div class="page-head row">
+        <div>
+          <p class="kicker">SOURCE B · PARTNER-SUPPLIED INVENTORY</p>
+          <h1>Consignment Partners</h1>
+          <p class="muted">Manage partners, track one-of-one items through sale, and settle verified partner balances. To list a garment, choose <strong>Add consignment item</strong>—the catalog form will open with partner ownership selected.</p>
+        </div>
+        <div class="head-actions partner-head-actions">
+          <button class="btn" type="button" id="btnPartnerRefresh">Refresh</button>
+          <button class="btn" type="button" id="btnPartnerAdd">+ Add partner</button>
+          <button class="btn primary" type="button" id="btnPartnerIntake">+ Add consignment item</button>
+        </div>
+      </div>
+      <div class="partner-filter-bar">
+        <label>Region <select class="sel" id="partnerRegionFilter"><option value="">All regions</option></select></label>
+        <label>Supply source <select class="sel" id="partnerSourceFilter"><option value="">All sources</option></select></label>
+        <span class="partner-protected-note">Finance-protected · manager access</span>
+      </div>
+      <div id="consignmentKpis" class="consignment-kpis" aria-live="polite"></div>
+      <div id="partnerLoadState" class="partner-load-state" role="status" hidden></div>
+      <div class="partner-workspace-grid">
+        <article class="card partner-list-card">
+          <div class="partner-card-head"><div><p class="kicker">PARTNER SCORECARD</p><h2>Supply &amp; sales performance</h2></div><span id="partnerCountLabel" class="partner-count-label"></span></div>
+          <div class="partner-table-wrap">
+            <table class="partner-table">
+              <thead><tr><th>Partner</th><th>Region / source</th><th>Submitted</th><th>Sold</th><th>Active</th><th>Gross sales</th><th>Commission</th><th>Payable</th><th>Turnover</th><th>Actions</th></tr></thead>
+              <tbody id="partnerRows"></tbody>
+            </table>
+          </div>
+          <div id="partnerEmptyState" class="partner-empty-state" hidden></div>
+        </article>
+        <aside class="partner-side-stack">
+          <article class="card partner-leader-card"><div class="partner-card-head"><div><p class="kicker">SALES-VOLUME LEADERBOARD</p><h2>Top partners</h2></div></div><div id="partnerLeaderboard"></div></article>
+          <article class="card partner-payouts-card"><div class="partner-card-head"><div><p class="kicker">LATEST SETTLEMENTS</p><h2>Payout history</h2></div></div><div id="partnerRecentPayouts"></div></article>
+        </aside>
+      </div>
+      <section class="card partner-detail-card" id="selectedPartnerDetail" hidden aria-live="polite"></section>
+    </section>
+
     <section class="view" id="view-staff">
       <div class="page-head row">
         <div>
@@ -728,6 +778,17 @@
         <button class="chip-gold big" id="unlockChip" data-credential-control><i data-icon="lock" data-size="14"></i> Unlock Master Key</button>
       </div>
 
+      <section class="ds-panel" id="displaySizeSettings" aria-labelledby="displaySizeTitle">
+        <div class="ds-panel-head"><i data-icon="monitor" data-size="16"></i><h2 id="displaySizeTitle">Display size</h2></div>
+        <p class="ds-copy">Choose the text density for this device’s cashier register and Admin Suite.</p>
+        <div class="ds-options" role="group" aria-label="Display size">
+          <button class="ds-opt is-active" type="button" data-display-size-option="compact" aria-pressed="true">Compact</button>
+          <button class="ds-opt" type="button" data-display-size-option="standard" aria-pressed="false">Standard</button>
+          <button class="ds-opt" type="button" data-display-size-option="large" aria-pressed="false">Large</button>
+        </div>
+        <p class="ds-hint">Compact is the default. Your choice is saved on this device.</p>
+      </section>
+
       <div class="access-card" id="terminalAccessNotice" style="max-width:860px;margin-bottom:16px" hidden>
         <span class="live-dot" aria-hidden="true"></span>
         <div class="grow">
@@ -774,10 +835,10 @@
 <div id="receiptSheet"></div>
 
 <script src="js/analytics.js"></script>
-<script src="js/adaptive.js?v=1.0"></script>
-<script src="js/notifications.js?v=2.2"></script>
+<script src="js/adaptive.js?v=1.1"></script>
+<script src="js/notifications.js?v=2.4"></script>
 <script src="js/icons.js?v=1.1"></script>
-<script src="js/db.js?v=4.9"></script>
+<script src="js/db.js?v=5.0"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/intake.js?v=5.1"></script>
@@ -788,7 +849,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=7.5"></script>
+<script src="app.js?v=7.6"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

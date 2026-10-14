@@ -52,7 +52,11 @@ def get_formatted_database_url() -> tuple[str, bool]:
             logger.info("Dynamically converted legacy 'postgres://' schema to 'postgresql://' for SQLAlchemy compatibility.")
         else:
             formatted_url = raw_url
-        return formatted_url, True
+        # DATABASE_URL can also point at an explicitly isolated SQLite file
+        # (for local previews and tests). Select dialect behavior from the URL
+        # scheme instead of assuming every configured URL is PostgreSQL.
+        scheme = formatted_url.split(":", 1)[0].lower()
+        return formatted_url, scheme.startswith("postgres")
     
     # Development fallback to SQLite
     sqlite_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "adonai.db")
