@@ -50,8 +50,21 @@ assert.ok(pos.includes("DB.CATEGORIES.map(c => [c, c])"), "POS filters use the s
 assert.ok(pos.includes("p.name, p.brand, p.category, p.desc"), "cashier search can find category and item-description terms");
 assert.ok(storefront.includes("concat(DB.CATEGORIES)"), "storefront filters use the shared category list");
 assert.ok(api.includes('clean_path == "/api/categories"'), "the public catalog category API exposes seeded categories");
-assert.ok(adminHtml.includes("js/db.js?v=5.0") && adminHtml.includes("app.js?v=7.6"), "admin cache keys advance with the expanded intake catalog");
-assert.ok(posHtml.includes("js/db.js?v=5.0") && posHtml.includes("js/pos.js?v=6.10"), "cashier cache keys advance with the expanded category filter");
-assert.ok(productHtml.includes("/js/db.js?v=5.0") && productHtml.includes("/js/product-kit.js?v=1.1"), "public product pages fetch the updated catalog assets");
+/* Every interface loads db.js behind the same cache key: the key itself moves
+ * whenever the file changes, so a pinned number would only have to be re-pinned
+ * on every cache-bust — what actually matters is that no page is left serving an
+ * older build than the others. */
+function cacheKey(html, file) {
+  const pattern = new RegExp(file.split(".").join("\\.") + "\\?v=([0-9][0-9.]*)");
+  const match = html.match(pattern);
+  assert.ok(match, `${file} is loaded with a cache key`);
+  return match[1];
+}
+const indexHtml = read("index.html");
+const dbKeys = [adminHtml, posHtml, productHtml, indexHtml].map(html => cacheKey(html, "js/db.js"));
+assert.equal(new Set(dbKeys).size, 1, `every interface loads the same db.js build (${dbKeys.join(", ")})`);
+assert.ok(adminHtml.includes("app.js?v="), "admin console loads the operations script behind a cache key");
+assert.ok(posHtml.includes("js/pos.js?v="), "cashier loads the register script behind a cache key");
+assert.ok(productHtml.includes("/js/product-kit.js?v="), "public product pages fetch the shared product kit");
 
 console.log("✓ broad fashion categories stay consistent across intake, database, storefront and POS");

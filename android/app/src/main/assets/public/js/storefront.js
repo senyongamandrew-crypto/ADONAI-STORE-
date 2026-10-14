@@ -718,7 +718,7 @@
 
         const footButtons = [];
         if (paymentState === "pending" && orderResult.method === "card") {
-          footButtons.push(`<button class="claim-confirm-btn" id="payNowBtn" ${paymentBusy ? "disabled" : ""}>${paymentBusy ? "Opening secure payment…" : `Pay ${DB.ugx(orderResult.total)} now — Card & MoMo`}</button>`);
+          footButtons.push(`<button class="claim-confirm-btn" id="payNowBtn" ${paymentBusy ? "disabled" : ""}>${paymentBusy ? "Opening secure payment…" : `Pay ${DB.ugx(orderResult.total)} now by card`}</button>`);
         }
         footButtons.push(`<button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`);
         $("#cartFoot").innerHTML = footButtons.join("");
@@ -783,10 +783,15 @@
               ? `Your pieces stay reserved for ${esc(String(paymentConfig.payment_window_minutes || 30))} minutes while you pay.`
               : `You will get the exact payment details and reference on the next step. Your pieces stay reserved for about ${esc(String(Math.round((paymentConfig.offline_window_minutes || 180) / 60)))} hour${Math.round((paymentConfig.offline_window_minutes || 180) / 60) === 1 ? "" : "s"}.`
           }</p>` : ""}
-          ${paymentMethod === "momo" || paymentMethod === "merchant" ? `
-            <label class="claim-field-label" for="coPayerAccount">${paymentMethod === "merchant" ? "Paying number (optional — for whoever is paying)" : "Number you will pay from"}</label>
-            <input class="claim-input" id="coPayerAccount" inputmode="tel" autocomplete="tel"
-              placeholder="e.g. 0758873398" value="${esc(paymentDrafts.account || payerAccount)}" />` : ""}
+          ${paymentMethod === "cod" || paymentMethod === "card" ? "" : `
+            <label class="claim-field-label" for="coPayerAccount">${
+              paymentMethod === "merchant"
+                ? "Paying number (optional — for whoever is paying)"
+                : paymentMethod === "bank"
+                  ? "Account name or number you will pay from (optional — helps us match the transfer)"
+                  : "Number you will pay from"}</label>
+            <input class="claim-input" id="coPayerAccount" ${paymentMethod === "bank" ? "" : 'inputmode="tel" autocomplete="tel"'}
+              placeholder="${paymentMethod === "bank" ? "e.g. Adonai Traders · 9030…" : "e.g. 0758873398"}" value="${esc(paymentDrafts.account || payerAccount)}" />`}
         </div>
 
         <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
@@ -815,7 +820,7 @@
         paymentMethod === "cod"
           ? `Confirm order (${DB.ugx(grandTotal)})`
           : paymentMethod === "card"
-            ? `Pay ${DB.ugx(grandTotal)} — Card & MoMo`
+            ? `Pay ${DB.ugx(grandTotal)} — Card`
             : `Confirm order & pay ${DB.ugx(grandTotal)}`
       }</button>
       <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
@@ -840,9 +845,6 @@
     if (btnBoda) btnBoda.addEventListener("click", () => { deliveryType = "boda"; renderCart(); });
     if (btnPickup) btnPickup.addEventListener("click", () => { deliveryType = "pickup"; renderCart(); });
 
-    const btnPayNow = $("#btnPayNow"), btnPayLater = $("#btnPayLater");
-    if (btnPayNow) btnPayNow.addEventListener("click", () => setPaymentMethod("card"));
-    if (btnPayLater) btnPayLater.addEventListener("click", () => setPaymentMethod("cod"));
     $$("[data-pay-method]").forEach(btn => {
       btn.addEventListener("click", () => setPaymentMethod(btn.dataset.payMethod));
     });
@@ -1059,12 +1061,16 @@
   function payToCardHTML(channel) {
     const payTo = paymentConfig.pay_to || {};
     if (channel === "momo") {
+      const payer = orderResult.payerAccount || paymentDrafts.account || "";
       const rows = [
         ["Send to", payTo.momo_name || payTo.store_name || "Adonai Store"],
         ["Merchant number", payTo.momo_number || "—"],
         ["Amount", DB.ugx(orderResult.total)],
         ["Reference", orderResult.id]
       ];
+      // Show back the number we captured at checkout so the shopper can see the
+      // payment is matched to the right line before they send anything.
+      if (payer) rows.push(["Paying from", payer]);
       return `<div class="pay-detail-card">${rows.map(([k, v]) => `
         <div class="pay-detail-row"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("")}
       </div>`;
@@ -1142,11 +1148,11 @@
       body = `<p class="wa-instruct">Your pieces are reserved. Pay with Visa, Mastercard, MTN MoMo or Airtel Money in the secure window — you will approve with your PIN or one-time code there.</p>`;
     } else if (channel === "momo") {
       body = `${payToCardHTML("momo")}
-        <p class="pay-hint">Send the exact amount to the merchant number above, using order ${esc(orderResult.id)} as the reason. Then paste the transaction ID from your MoMo confirmation message below.</p>
+        <p class="pay-hint">Send the exact amount to the merchant number above, using order ${esc(orderResult.id)} as the reason. Your MoMo app asks for your PIN — we never see it. Then paste the transaction ID from your MoMo confirmation message below.</p>
         ${payReferenceFormHTML("momo", "MoMo transaction ID", "I have paid — submit transaction ID")}`;
     } else if (channel === "bank") {
       body = `${payToCardHTML("bank")}
-        <p class="pay-hint">Transfer the exact amount and keep the reference. Then paste the reference or transaction ID below so we can confirm it against the statement.</p>
+        <p class="pay-hint">Transfer the exact amount from your bank app or branch and keep the reference. Your bank confirms the transfer with your PIN or token — we never see it. Then paste the reference or transaction ID below so we can confirm it against the statement.</p>
         ${payReferenceFormHTML("bank", "Bank reference / transaction ID", "I have paid — submit reference")}`;
     } else if (channel === "merchant") {
       body = `${payCodeCardHTML()}

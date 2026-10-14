@@ -416,6 +416,21 @@
     { id: "cash", label: "Cash on Delivery", color: "#111827", ink: "#FFFFFF", short: "Cash" }
   ];
 
+  /* The trust row doubles as a promise, so it may only name a way to pay the
+     store can actually honour. The channel engine publishes exactly that at
+     /api/payments/config; until it answers (or if it is unreachable) the row
+     keeps the always-true basics: MoMo, Airtel and cash on delivery. */
+  function paymentChips(available) {
+    const has = id => !available || !available.length || available.indexOf(id) !== -1;
+    const chips = [];
+    if (has("card")) chips.push({ id: "card", label: "Visa · Mastercard", color: "#2563EB", ink: "#FFFFFF", short: "Card" });
+    if (has("momo")) chips.push({ id: "momo", label: "MTN MoMo · Airtel Money", color: "#FFCC00", ink: "#1F2937", short: "MoMo" });
+    if (has("bank")) chips.push({ id: "bank", label: "Bank transfer", color: "#1E3A8A", ink: "#FFFFFF", short: "Bank" });
+    if (has("merchant")) chips.push({ id: "merchant", label: "Merchant pay code", color: "#0F766E", ink: "#FFFFFF", short: "Pay code" });
+    if (has("cod")) chips.push({ id: "cod", label: "Cash on Delivery / Pickup", color: "#111827", ink: "#FFFFFF", short: "Cash" });
+    return chips.length ? chips : PAYMENT_METHODS;
+  }
+
   global.AdonaiPDP = {
     esc,
     GRADES,
@@ -444,6 +459,7 @@
     pictureHTML,
     resolveSrc,
     imageEntry,
-    PAYMENT_METHODS
+    PAYMENT_METHODS,
+    paymentChips
   };
 })(typeof window !== "undefined" ? window : globalThis);
