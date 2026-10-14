@@ -152,6 +152,31 @@ def sanitize_product(data, access):
     return data
 
 
+# The base-price / transport allocation is an internal costing rule. Cashiers
+# and administrators need it in the consoles and the ledger; a shopper must
+# never see it. Storefront payloads therefore drop the split inputs entirely
+# and carry only the one flat delivery charge that is actually collected.
+STOREFRONT_INTERNAL_PRICING = (
+    "base_price",
+    "total_transport_cost",
+    "embedded_transport_portion",
+    "checkout_transport_portion",
+)
+
+
+def sanitize_storefront_pricing(data):
+    """Replace the internal transport allocation with a single delivery charge."""
+    data = dict(data)
+    try:
+        delivery_fee = round(float(data.get("checkout_transport_portion") or 0), 2)
+    except (TypeError, ValueError):
+        delivery_fee = 0.0
+    for key in STOREFRONT_INTERNAL_PRICING:
+        data.pop(key, None)
+    data["delivery_fee"] = delivery_fee
+    return data
+
+
 def sanitize_sale(data, access):
     data = dict(data)
     if not allowed("orders", access):

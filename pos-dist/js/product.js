@@ -332,7 +332,7 @@
         ${compare > price ? `
           <span class="pdp-compare">${K.ugx(compare)}</span>
           <span class="pdp-save">Save ${discount}%</span>` : ""}
-        <span class="pdp-price-note">Price in Ugandan Shillings · transport split 50/50 at checkout</span>
+        <span class="pdp-price-note">Price in Ugandan Shillings · delivery arranged at checkout</span>
       </div>
 
       <dl class="pdp-highlights">

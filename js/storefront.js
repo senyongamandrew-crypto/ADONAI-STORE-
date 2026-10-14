@@ -633,15 +633,20 @@
     }).filter(Boolean);
   }
 
-  function cartCheckoutTransport(lines) {
-    return lines.reduce((sum, x) => sum + (Number(x.p.checkout_transport_portion) || 0) * x.line.qty, 0);
+  // Shoppers pay one flat delivery charge. The internal base-price/transport
+  // allocation that produces it is never surfaced on the storefront.
+  function cartDeliveryFee(lines) {
+    return lines.reduce((sum, x) => {
+      const fee = x.p.delivery_fee != null ? x.p.delivery_fee : x.p.checkout_transport_portion;
+      return sum + (Number(fee) || 0) * x.line.qty;
+    }, 0);
   }
 
   function renderCart() {
     const lines = cartLines();
     const itemCount = lines.reduce((s, x) => s + x.line.qty, 0);
     const subtotal = lines.reduce((s, x) => s + x.sub, 0);
-    const currentDeliveryFee = deliveryType === "pickup" ? 0 : cartCheckoutTransport(lines);
+    const currentDeliveryFee = deliveryType === "pickup" ? 0 : cartDeliveryFee(lines);
     const grandTotal = subtotal + currentDeliveryFee;
     $("#cartCount").textContent = itemCount;
 
@@ -750,7 +755,7 @@
     $("#cartFoot").innerHTML = `
       <div class="claim-summary-box">
         <div class="sum-line"><span>Items (${itemCount}):</span><span>${DB.ugx(subtotal)}</span></div>
-        <div class="sum-line"><span>Allocated delivery (50% transport):</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
+        <div class="sum-line"><span>Delivery fee:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
       <button class="claim-confirm-btn" id="confirmOrder">${paymentMethod === "flutterwave" ? `Pay ${DB.ugx(grandTotal)} — MoMo & Card` : `Confirm order (${DB.ugx(grandTotal)})`}</button>
@@ -849,7 +854,7 @@
         toast("Location allocated. Please review the updated delivery total and confirm again.");
         return;
       }
-      const deliveryFee = deliveryType === "pickup" ? 0 : cartCheckoutTransport(cartLines());
+      const deliveryFee = deliveryType === "pickup" ? 0 : cartDeliveryFee(cartLines());
       const pickupAddress = S.address || "Kampala, Uganda";
       const areaName = deliveryType === "pickup" ? `Store Pickup (${pickupAddress})` : areaObj.name;
       const deliveryAddress = dropoff || address;

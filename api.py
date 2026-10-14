@@ -1585,6 +1585,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 area_access = access_control.state(headers, session)
                 for product in products:
                     data = access_control.sanitize_product(product.to_dict(), area_access)
+                    if public_availability:
+                        # Storefront channel: the internal transport allocation
+                        # never leaves the server, shoppers see one delivery fee.
+                        data = access_control.sanitize_storefront_pricing(data)
                     data["authoritative_stock_count"] = data["in_stock_count"]
                     data["in_stock_count"] = max(0, data["in_stock_count"] - held.get(product.id, 0))
                     data["available_count"] = data["in_stock_count"]
@@ -2000,6 +2004,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not prod:
                     return json_response({"error": "Product not found"}, status=404)
                 data = access_control.sanitize_product(prod.to_dict(), access_control.state(headers, session))
+                # This is the shopper-facing product-detail channel, so the
+                # internal transport allocation is replaced by one delivery fee.
+                data = access_control.sanitize_storefront_pricing(data)
                 held = (
                     session.query(func.coalesce(func.sum(InventoryLock.quantity), 0))
                     .filter(
