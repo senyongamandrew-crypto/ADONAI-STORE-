@@ -458,6 +458,22 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .sel-full.err { border-color: var(--red); }
 .sel-mini { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--muted); padding: 0 8px; font-size: 12px; }
 /* Pay-to details (merchant line, bank account) shown to shoppers at checkout. */
+/* Order panel — payment trail (gateway reconciliation) */
+.odm-attempts { margin-top: 12px; border-top: 1px dashed var(--line, #E5E7EB); padding-top: 10px; }
+.odm-attempts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.odm-attempts-summary { margin: 0 0 8px; }
+.odm-attempt {
+  border: 1px solid var(--line, #E5E7EB); border-radius: 9px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; background: var(--page, #FAFAFA);
+}
+.odm-attempt-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.odm-attempt-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted, #6B7280); }
+.odm-attempt-meta code, .odm-attempts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(17, 24, 39, .06); padding: 1px 5px; border-radius: 4px; font-size: 11px;
+}
+.stat-chip.bad { background: rgba(185, 28, 28, .12); color: #991B1B; }
+
 /* Payment gateway status card (Store Settings). Informational only — the
    console never sees or stores the gateway keys. */
 .gw-status-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }

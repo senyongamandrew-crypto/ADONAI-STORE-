@@ -188,8 +188,11 @@ set this on Render.
   moves that debit to 1020, so the books follow the money rather than the
   button the shopper pressed. Manual MoMo stays on `1010` and cash on `1000`.
 * Every attempt is recorded in the `payment_transactions` table (reference,
-  amount, channel, Flutterwave transaction id) — visible to staff via the
-  order's payment block.
+  amount, channel, Flutterwave transaction id). Staff see them in the console:
+  open the order → **Payment trail**, which lists each attempt, whether it
+  settled, who confirmed an offline one, and the reference to match against the
+  Flutterwave payout. The trail is staff-only (`GET
+  /api/orders/<id>/payments`); shoppers never receive it.
 
 ## 6. Go-live checklist
 

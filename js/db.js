@@ -1110,6 +1110,18 @@
       if (!data || !data.merchant_pay_code) throw new Error((data && data.error) || "Could not issue a pay code");
       return data;
     },
+    /* The reconciliation trail for one order: every gateway attempt with its
+       reference and Flutterwave transaction id. Staff-only view data. */
+    async fetchOrderPaymentTrail(orderId) {
+      try {
+        return await apiRequest(`/api/orders/${encodeURIComponent(orderId)}/payments`, { method: "GET" }, true);
+      } catch (err) {
+        const message = (err && err.data && err.data.error) || (err && err.message) || "Could not load the payment trail";
+        const failure = new Error(message);
+        failure.status = err && err.status;
+        throw failure;
+      }
+    },
     /* Counter lookup: which order does this merchant pay code belong to?
        Staff-only — it exposes the customer behind the code. */
     async findOrderByPayCode(code) {

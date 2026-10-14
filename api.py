@@ -1011,6 +1011,23 @@ def issue_merchant_pay_code(session, order, now=None) -> str:
     raise ValueError("Could not allocate a merchant pay code — please try again")
 
 
+def staff_name_of_last_offline_attempt(session, order) -> str:
+    """Name of the staff member who confirmed the latest offline payment, if recorded."""
+    attempt = (
+        session.query(PaymentTransaction)
+        .filter(PaymentTransaction.order_id == order.id, PaymentTransaction.status == "successful")
+        .order_by(PaymentTransaction.created_at.desc())
+        .first()
+    )
+    if not attempt or not attempt.gateway_payload:
+        return ""
+    try:
+        payload = json.loads(attempt.gateway_payload)
+    except (TypeError, ValueError):
+        return ""
+    return str(payload.get("confirmed_by_name") or payload.get("confirmed_by") or "")
+
+
 def staff_confirm_order_payment(session, order, staff, *, paid=True, method="cash", reference="", note=""):
     """
     Staff confirmation that money actually landed for an offline channel
@@ -2417,6 +2434,60 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     order.list_archived_at = datetime.utcnow()
                 session.flush()
                 return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session))})
+
+        if clean_path.startswith("/api/orders/") and clean_path.endswith("/payments") and method == "GET":
+            # The reconciliation trail for one order: every gateway attempt with
+            # its own reference, the gateway's transaction id and the state it
+            # ended in. Staff need this to match a Flutterwave payout against
+            # the order; it is never shown to shoppers.
+            order_id = safe_identifier(clean_path.split("/")[-2])
+            if not order_id:
+                return json_response({"ok": False, "error": "A valid order id is required"}, status=400)
+            with get_db() as session:
+                area_access = access_control.state(headers, session)
+                if not access_control.allowed("orders", area_access) and not access_control.allowed("finance", area_access):
+                    status, payload = access_control.locked_response("orders")
+                    return json_response(payload, status=status)
+                is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
+                if not is_authed:
+                    return json_response({
+                        "ok": False,
+                        "error": "Unauthorized: Staff terminal authentication required to read payment attempts",
+                    }, status=401)
+                order = session.query(Order).filter_by(id=order_id).first()
+                if not order:
+                    return json_response({"ok": False, "error": "Order not found"}, status=404)
+                attempts = (
+                    session.query(PaymentTransaction)
+                    .filter(PaymentTransaction.order_id == order.id)
+                    .order_by(PaymentTransaction.created_at.desc())
+                    .limit(25)
+                    .all()
+                )
+                confirmed_by = ""
+                if order.payment_status == "paid" and (order.tender_type or "") != payments.PROVIDER:
+                    # Offline channels are settled by a person, and the attempt
+                    # row records who. Surface it so a later reviewer can see
+                    # the money was checked by someone, not by a machine.
+                    confirmed_by = staff_name_of_last_offline_attempt(session, order) or ""
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "payment_status": order.payment_status or "unpaid",
+                    "channel": order.payment_channel or "",
+                    "tender": order.tender_type or "",
+                    "reference": order.payment_reference or "",
+                    "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+                    "payer_account": order.payer_account or "",
+                    "merchant_pay_code": order.merchant_pay_code or "",
+                    "claim": {
+                        "channel": order.payment_claim_channel or "",
+                        "reference": order.payment_claim_reference or "",
+                        "at": order.payment_claim_at.isoformat() if order.payment_claim_at else None,
+                    } if order.payment_claim_at else None,
+                    "confirmed_by": confirmed_by,
+                    "attempts": [attempt.to_dict() for attempt in attempts],
+                })
 
         if clean_path.startswith("/api/orders/") and clean_path.endswith("/payment") and method == "POST":
             # Staff confirmation of money received (mobile money, bank

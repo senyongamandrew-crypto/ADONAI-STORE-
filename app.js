@@ -1312,6 +1312,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
             <input class="sel-full" id="odmRefInput" placeholder="Transaction ID / reference from the payment message" autocomplete="off" />
             <button class="btn sm primary" id="odmRefConfirm">✓ Confirm payment received</button>
           </div>` : ""}
+        <!-- Reconciliation trail: the gateway's own record of every attempt on
+             this order, so a payout can be matched line by line. Loaded from
+             the server when the panel opens. -->
+        <div class="odm-attempts" id="odmAttempts" hidden></div>
       </div>
 
       <div class="odm-info-block">
@@ -1391,6 +1395,56 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         printReceiptModal(s.id);
       });
     }
+
+    loadOrderPaymentTrail(s.id);
+  }
+
+  /* The gateway's own record of this order: every attempt, its reference, the
+     Flutterwave transaction id and how it ended. Staff reconcile a payout with
+     these lines; the browser list can never settle anything, so this is a view
+     only. Loaded after the panel opens so a slow network never blocks it. */
+  async function loadOrderPaymentTrail(orderId) {
+    const box = $("#odmAttempts");
+    if (!box) return;
+    let trail = null;
+    try {
+      trail = await DB.fetchOrderPaymentTrail(orderId);
+    } catch (err) {
+      return;                                  // signed out or offline: stay quiet
+    }
+    if (!trail || !$("#odmAttempts")) return;
+    const attempts = trail.attempts || [];
+    const rows = attempts.map(a => {
+      const state = a.status === "successful" ? "ok" : a.status === "failed" ? "bad" : "pend";
+      const label = a.status === "successful" ? "Settled" : a.status === "failed" ? "Declined / failed" : "Opened, not settled";
+      return `
+        <div class="odm-attempt">
+          <div class="odm-attempt-main">
+            <span class="stat-chip ${state}">${esc(label)}</span>
+            <strong>${esc(ugx(a.amount))}</strong>
+            <span class="muted small">${esc(a.channel || a.provider || "gateway")}</span>
+          </div>
+          <div class="odm-attempt-meta">
+            <span>Ref <code>${esc(a.tx_ref)}</code></span>
+            ${a.flw_transaction_id ? `<span>Flutterwave ID <code>${esc(a.flw_transaction_id)}</code></span>` : ""}
+            <span>${esc(readableDateTime(a.created_at))} · ${esc(ago(a.created_at))}</span>
+          </div>
+        </div>`;
+    }).join("");
+    const headline = trail.paid_at
+      ? `Paid ${esc(readableDateTime(trail.paid_at))}${trail.confirmed_by ? ` · confirmed by ${esc(trail.confirmed_by)}` : ""}`
+      : trail.claim && trail.claim.reference
+        ? `Customer reference on file: <code>${esc(trail.claim.reference)}</code>`
+        : "No settled payment on file yet.";
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="odm-attempts-head">
+        <span class="odm-section-label">Payment trail</span>
+        <span class="muted small">${attempts.length} gateway attempt${attempts.length === 1 ? "" : "s"}</span>
+      </div>
+      <p class="muted small odm-attempts-summary">${headline}</p>
+      ${rows || `<p class="muted small">No gateway attempts on this order — it is settled by cash, or by the merchant line with no card/wallet attempt.</p>`}
+      <p class="muted small">Match these references against the Flutterwave dashboard payout before releasing anything.</p>`;
   }
 
   /* ============================================================
