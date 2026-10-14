@@ -332,7 +332,7 @@
         ${compare > price ? `
           <span class="pdp-compare">${K.ugx(compare)}</span>
           <span class="pdp-save">Save ${discount}%</span>` : ""}
-        <span class="pdp-price-note">Price in Ugandan Shillings · transport split 50/50 at checkout</span>
+        <span class="pdp-price-note">Price in Ugandan Shillings · delivery arranged at checkout</span>
       </div>
 
       <dl class="pdp-highlights">
@@ -426,6 +426,23 @@
   /* ============================================================
      RENDER — RIGHT COLUMN: STICKY BUY BOX
      ============================================================ */
+  /* Ways to pay the store can actually honour, straight from the server's
+     channel engine. Until it answers, the row falls back to the basics. */
+  let paymentChannels = null;
+  let payLabel = "Pay on delivery or pickup";
+  function loadPaymentChannels() {
+    if (typeof DB === "undefined" || !DB.getPaymentConfig) return;
+    DB.getPaymentConfig().then(config => {
+      const available = (config && config.channels || []).filter(c => c.available !== false).map(c => c.id);
+      if (!available.length) return;
+      paymentChannels = available;
+      payLabel = available.indexOf("cod") === -1
+        ? "Pay securely at checkout"
+        : "Pay now, or on delivery / pickup";
+      if (product) renderBuyBox();
+    }).catch(() => {});
+  }
+
   function renderBuyBox() {
     const stock = K.stockState(product);
     const price = K.displayPrice(product);
@@ -471,9 +488,9 @@
         </div>
 
         <div class="buybox-trust">
-          <p class="buybox-label">Pay on delivery or pickup</p>
+          <p class="buybox-label">${esc(payLabel)}</p>
           <div class="pay-icons">
-            ${K.PAYMENT_METHODS.map(method => `
+            ${K.paymentChips(paymentChannels).map(method => `
               <span class="pay-chip" style="--pay:${method.color};--pay-ink:${method.ink}">${esc(method.label)}</span>`).join("")}
           </div>
           <ul class="trust-list">
@@ -634,6 +651,7 @@
   async function boot() {
     renderStoreProfile();
     paintCartCount();
+    loadPaymentChannels();
 
     if (!product) product = resolveFromLocalCatalog();
     if (product) renderAll();

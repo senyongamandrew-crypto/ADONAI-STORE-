@@ -133,7 +133,13 @@ PUBLIC_STORE_SETTING_KEYS = {
     "store_name", "tagline", "address", "whatsapp", "whatsapp_display",
     "phone", "hotline", "email", "tiktok", "instagram", "hours",
     "delivery_scope", "base_delivery_fee", "boda_base_fee", "currency",
-    "receipt_footer", "website_url", "app_url"
+    "receipt_footer", "website_url", "app_url",
+    # Pay-to details. Published on purpose, exactly like the bank details at
+    # the bottom of an invoice: a shopper cannot transfer money to an account
+    # they are not told about. Nothing here is a credential.
+    "momo_merchant_name", "momo_merchant_number",
+    "bank_name", "bank_account_name", "bank_account_number", "bank_branch",
+    "bank_reference_hint",
 }
 
 # Parameters accepted from the protected System Parameters screen. Secret keys
@@ -391,7 +397,7 @@ ACCOUNT_NAMES = {
 
 def payment_account(method: str) -> tuple[str, str]:
     value = str(method or "cash").strip().lower().replace("-", "_").replace(" ", "_")
-    if value in {"mtn", "airtel", "mobile", "mobile_money", "momo"}:
+    if value in {"mtn", "airtel", "mobile", "mobile_money", "momo", "merchant", "merchant_code", "pay_code"}:
         return "1010", ACCOUNT_NAMES["1010"]
     if value in {"bank", "bank_transfer", "card", "flutterwave", "flw", "online"}:
         return "1020", ACCOUNT_NAMES["1020"]
@@ -841,13 +847,16 @@ def expire_stale_flutterwave_orders(session, now=None):
     Release stock on web orders whose payment window lapsed without a verified
     charge. Mirrors the staff 'Cancelled' transition (restock + status) so a
     one-of-one thrift piece goes back on the rail automatically.
+
+    Covers every collect-now channel, not just the gateway: an order parked on
+    "mobile money" or "bank transfer" and never settled must release its pieces
+    too. Any order carrying a payment_expires_at is by definition one of them.
     """
     now = now or datetime.utcnow()
     stale = (
         session.query(Order)
         .filter(
-            Order.payment_status == "pending",
-            Order.payment_provider == payments.PROVIDER,
+            Order.payment_status.in_(["pending", "claimed"]),
             Order.payment_expires_at.isnot(None),
             Order.payment_expires_at <= now,
             ~Order.status.in_(["cancelled", "completed"]),
@@ -878,13 +887,243 @@ def expire_stale_flutterwave_orders(session, now=None):
         broadcast_event(
             "ORDER_EXPIRED",
             f"⌛ Unpaid order {order.id} released",
-            "Online payment was not completed in time — the piece(s) are back on the rail.",
-            {"order_id": order.id, "amount": order.total},
+            f"{payments.channel_info(order.payment_channel or order.payment_provider or 'card')['label']} "
+            "payment was not confirmed in time — the piece(s) are back on the rail."
+            + (" A payment claim was still unverified." if order.payment_claim_at else ""),
+            {"order_id": order.id, "amount": order.total,
+             "channel": order.payment_channel or "", "merchant_pay_code": order.merchant_pay_code or ""},
             session=session,
         )
     if stale:
         session.flush()
     return len(stale)
+
+
+def checkout_payment_options(settings: dict) -> dict:
+    """
+    Compose what the storefront may offer at checkout.
+
+    A channel is only offered when the store can actually honour it:
+      * card     — needs the gateway keys,
+      * momo     — needs a published merchant line,
+      * bank     — needs a published bank account,
+      * merchant — needs a pay-code contact point (the shop itself),
+      * cod      — always.
+    """
+    config = payments.public_checkout_config()
+    pay_to = {
+        "store_name": settings.get("store_name") or "Adonai Store",
+        # Deliberately no fallback to the WhatsApp/hotline number: a shopper must
+        # only be told to send money to a line the owner has explicitly
+        # published as a merchant line.
+        "momo_name": (settings.get("momo_merchant_name") or settings.get("store_name") or "").strip(),
+        "momo_number": (settings.get("momo_merchant_number") or "").strip(),
+        "bank_name": (settings.get("bank_name") or "").strip(),
+        "bank_account_name": (settings.get("bank_account_name") or "").strip(),
+        "bank_account_number": (settings.get("bank_account_number") or "").strip(),
+        "bank_branch": (settings.get("bank_branch") or "").strip(),
+        "bank_reference_hint": (settings.get("bank_reference_hint") or "").strip(),
+        "merchant_contact": (settings.get("hotline") or settings.get("phone") or "").strip(),
+        "whatsapp": (settings.get("whatsapp") or "").strip(),
+    }
+    available = {
+        "card": bool(config["enabled"]),
+        # Instantly collectable through the gateway (push prompt + PIN on the
+        # shopper's phone) even when no merchant line has been published.
+        "momo": bool(pay_to["momo_number"]) or bool(config["enabled"]),
+        "bank": bool(pay_to["bank_account_number"] and pay_to["bank_name"]),
+        # A pay code is issued by the system and settled at the shop or
+        # through staff confirmation; there is nothing to configure, so it is
+        # always offered as the fallback for shoppers who cannot pay online.
+        "merchant": True,
+        "cod": True,
+    }
+    channels = []
+    for channel in config["channels"]:
+        entry = dict(channel)
+        entry["available"] = available.get(channel["id"], False)
+        entry["requires_account"] = channel["id"] in ("momo", "merchant")
+        channels.append(entry)
+    config["channels"] = channels
+    config["pay_to"] = pay_to
+    config["methods"] = [entry["id"] for entry in channels if entry["available"]]
+    return config
+
+
+def resolve_merchant_pay_code(session, order, code: str):
+    """Find the order that carries a merchant pay code (settled or not).
+
+    `order` is accepted for call-site symmetry with the other payment helpers;
+    a code is always resolved against the whole table, never just one order, so
+    the counter can look a customer's code up cold. The locked row is returned
+    so a caller that settles on the spot cannot race another confirmation.
+    """
+    normalized = payments.normalize_pay_code(code)
+    if not normalized:
+        return None
+    return (
+        session.query(Order)
+        .filter(Order.merchant_pay_code == normalized)
+        .with_for_update()
+        .first()
+    )
+
+
+def merchant_pay_code_instructions(code: str, order, settings: dict) -> dict:
+    """
+    Everything a shopper (or the person paying for them) needs in order to
+    settle one order at any Adonai merchant point.
+    """
+    store_name = settings.get("store_name") or "Adonai Store"
+    address = settings.get("address") or ""
+    hotline = settings.get("hotline") or settings.get("phone") or ""
+    whatsapp = settings.get("whatsapp") or ""
+    return {
+        "code": code,
+        "amount": int(order.total or 0),
+        "currency": payments.FLW_CURRENCY,
+        "store_name": store_name,
+        "address": address,
+        "hotline": hotline,
+        "whatsapp": whatsapp,
+        "lines": [
+            f"Show or quote this code — {code} — at any {store_name} merchant point, or send it to whoever is paying for you.",
+            f"The code is locked to order {order.id} and to UGX {int(order.total or 0):,}. Only that exact amount clears it.",
+            "Pay by mobile money or cash at the merchant point. Ask for the transaction ID and keep it.",
+            "Come back here and submit the transaction ID so our team confirms your order straight away.",
+        ],
+    }
+
+
+def issue_merchant_pay_code(session, order, now=None) -> str:
+    """Return the order's merchant pay code, minting a unique one on demand."""
+    now = now or datetime.utcnow()
+    if order.merchant_pay_code:
+        return order.merchant_pay_code
+    for _ in range(8):
+        candidate = payments.make_merchant_pay_code()
+        if not session.query(Order.id).filter(Order.merchant_pay_code == candidate).first():
+            order.merchant_pay_code = candidate
+            order.payment_channel = "merchant"
+            order.updated_at = now
+            session.flush()
+            return candidate
+    raise ValueError("Could not allocate a merchant pay code — please try again")
+
+
+def staff_name_of_last_offline_attempt(session, order) -> str:
+    """Name of the staff member who confirmed the latest offline payment, if recorded."""
+    attempt = (
+        session.query(PaymentTransaction)
+        .filter(PaymentTransaction.order_id == order.id, PaymentTransaction.status == "successful")
+        .order_by(PaymentTransaction.created_at.desc())
+        .first()
+    )
+    if not attempt or not attempt.gateway_payload:
+        return ""
+    try:
+        payload = json.loads(attempt.gateway_payload)
+    except (TypeError, ValueError):
+        return ""
+    return str(payload.get("confirmed_by_name") or payload.get("confirmed_by") or "")
+
+
+def staff_confirm_order_payment(session, order, staff, *, paid=True, method="cash", reference="", note=""):
+    """
+    Staff confirmation that money actually landed for an offline channel
+    (mobile money, bank transfer, merchant pay code, cash on hand).
+
+    This is the *only* way a non-gateway order becomes 'paid'. The browser's
+    claim is just a hint for the person checking the bank/MoMo statement.
+    Returns (ok, payment_status, error, message_parts).
+    """
+    now = datetime.utcnow()
+    channel = payments.normalize_channel(method or order.payment_channel or "cash", default="cash")
+    occurred_at = order.paid_at or now
+
+    if not paid:
+        if order.payment_status not in ("paid",):
+            return False, order.payment_status or "unpaid", "This order is not marked as paid", ""
+        order.payment_status = "pending" if order.payment_channel else "unpaid"
+        order.paid_at = None
+        order.tender_type = payments.channel_tender_type(order.payment_channel or "cod")
+        order.payment_reference = reference or order.payment_reference
+        order.updated_at = now
+        reverse_consignment_order_journals(
+            session, order,
+            staff={"id": (staff or {}).get("id") or order.cashier_id, "name": (staff or {}).get("name") or order.cashier_name or "Staff"},
+            reason="Payment marked unpaid", occurred_at=now,
+        )
+        session.query(PaymentTransaction).filter(
+            PaymentTransaction.order_id == order.id, PaymentTransaction.status == "successful",
+        ).update({"status": "reversed", "updated_at": now}, synchronize_session=False)
+        session.flush()
+        broadcast_event(
+            "ORDER_UPDATED",
+            f"↩️ Payment reverted — {order.id}",
+            f"{(staff or {}).get('name') or 'Staff'} marked the payment as not received.",
+            {"order_id": order.id, "amount": order.total, "status": "unpaid"}, session=session,
+        )
+        return True, order.payment_status, "", "unpaid"
+
+    if order.payment_status == "paid":
+        return True, "paid", "", "already paid"
+    if order.status == "cancelled":
+        return False, "cancelled", (
+            "This order was cancelled and its pieces returned to the rail. "
+            "Restore the pieces first, or refund the customer."
+        ), ""
+
+    code_used = payments.normalize_pay_code(reference) or order.merchant_pay_code or ""
+    tx_ref = (reference or "").strip()[:100] or f"MANUAL-{order.id[-8:]}-{int(time.time())}"
+    attempt = PaymentTransaction(
+        id=generate_uid("PAY"),
+        tx_ref=tx_ref,
+        order_id=order.id,
+        provider=channel,
+        amount=int(order.total or 0),
+        currency=payments.FLW_CURRENCY,
+        status="successful",
+        channel=channel,
+        gateway_payload=json.dumps({
+            "source": "staff_confirmation",
+            "confirmed_by": (staff or {}).get("id") or "",
+            "confirmed_by_name": (staff or {}).get("name") or "",
+            "channel": channel,
+            "reference": reference or "",
+            "merchant_pay_code": code_used,
+            "note": str(note or "")[:300],
+        })[:1500],
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(attempt)
+
+    order.payment_status = "paid"
+    order.tender_type = payments.channel_tender_type(channel)
+    order.payment_provider = channel
+    order.payment_channel = channel
+    order.payment_reference = tx_ref
+    order.paid_at = now
+    order.updated_at = now
+    # A confirmed payment ends the countdown: the pieces are sold.
+    order.payment_expires_at = None
+    session.flush()
+    post_pending_consignment_settlement(
+        session, order, {"id": (staff or {}).get("id"), "name": (staff or {}).get("name") or "Staff confirmation"},
+        occurred_at=occurred_at,
+    )
+    order_number = order.id.split("-")[-1] if "-" in order.id else order.id
+    label = payments.channel_info(channel)["label"]
+    broadcast_event(
+        "ORDER_PAID",
+        f"💳 Payment confirmed — Order #{order_number}",
+        f"{(staff or {}).get('name') or 'Staff'} confirmed UGX {int(order.total or 0):,} via {label}"
+        + (f" (ref {reference})." if reference else "."),
+        {"order_id": order.id, "amount": order.total, "reference": tx_ref, "channel": channel,
+         "merchant_pay_code": code_used}, session=session,
+    )
+    return True, "paid", "", "paid"
 
 
 def load_order_for_payment(session, order_id, payment_token):
@@ -960,6 +1199,30 @@ def settle_order_payment(session, order, verified, attempt=None, source="browser
     attempt.gateway_payload = payments.transaction_summary(verified)
     attempt.updated_at = now
 
+    # The sale was posted against the channel the shopper picked, but the money
+    # is now sitting with the gateway (which pays out to the bank), so move the
+    # debit to the settlement account instead of rewriting the original entry.
+    previous_tender = str(order.tender_type or "")
+    if previous_tender and previous_tender != payments.PROVIDER and int(order.total or 0) > 0:
+        old_code, old_name = payment_account(previous_tender)
+        new_code, new_name = payment_account(payments.PROVIDER)
+        if old_code != new_code:
+            create_journal_entry(
+                session,
+                reference=order.id,
+                source="payment_gateway_settlement",
+                description=f"Gateway settlement for {order.id}: {previous_tender} → {payments.PROVIDER}",
+                occurred_at=now,
+                staff={"id": "GATEWAY", "name": "Flutterwave settlement"},
+                lines=[
+                    {"account_code": new_code, "account_name": new_name, "debit": int(order.total or 0)},
+                    {"account_code": old_code, "account_name": old_name, "credit": int(order.total or 0)},
+                ],
+            )
+            logger.info(
+                "Gateway settlement reclassified %s: %s -> %s", order.id, previous_tender, payments.PROVIDER
+            )
+
     order.payment_status = "paid"
     order.tender_type = payments.PROVIDER
     order.payment_provider = payments.PROVIDER
@@ -975,7 +1238,8 @@ def settle_order_payment(session, order, verified, attempt=None, source="browser
     broadcast_event(
         "ORDER_PAID",
         f"💳 Paid online — Order #{order_number}",
-        f"{order.customer_name or 'Online shopper'} paid UGX {int(order.total or 0):,} via Flutterwave ({attempt.channel or 'online'}).",
+        f"{order.customer_name or 'Online shopper'} paid UGX {int(order.total or 0):,} by "
+        f"{payments.gateway_type_label(attempt.channel)} — settled automatically, nothing to confirm.",
         {"order_id": order.id, "amount": order.total, "reference": attempt.tx_ref, "channel": attempt.channel or ""},
         session=session,
     )
@@ -1585,6 +1849,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 area_access = access_control.state(headers, session)
                 for product in products:
                     data = access_control.sanitize_product(product.to_dict(), area_access)
+                    if public_availability:
+                        # Storefront channel: the internal transport allocation
+                        # never leaves the server, shoppers see one delivery fee.
+                        data = access_control.sanitize_storefront_pricing(data)
                     data["authoritative_stock_count"] = data["in_stock_count"]
                     data["in_stock_count"] = max(0, data["in_stock_count"] - held.get(product.id, 0))
                     data["available_count"] = data["in_stock_count"]
@@ -2000,6 +2268,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not prod:
                     return json_response({"error": "Product not found"}, status=404)
                 data = access_control.sanitize_product(prod.to_dict(), access_control.state(headers, session))
+                # This is the shopper-facing product-detail channel, so the
+                # internal transport allocation is replaced by one delivery fee.
+                data = access_control.sanitize_storefront_pricing(data)
                 held = (
                     session.query(func.coalesce(func.sum(InventoryLock.quantity), 0))
                     .filter(
@@ -2163,6 +2434,114 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     order.list_archived_at = datetime.utcnow()
                 session.flush()
                 return json_response({"ok": True, "order": access_control.sanitize_sale(order.to_dict(), access_control.state(headers, session))})
+
+        if clean_path.startswith("/api/orders/") and clean_path.endswith("/payments") and method == "GET":
+            # The reconciliation trail for one order: every gateway attempt with
+            # its own reference, the gateway's transaction id and the state it
+            # ended in. Staff need this to match a Flutterwave payout against
+            # the order; it is never shown to shoppers.
+            order_id = safe_identifier(clean_path.split("/")[-2])
+            if not order_id:
+                return json_response({"ok": False, "error": "A valid order id is required"}, status=400)
+            with get_db() as session:
+                area_access = access_control.state(headers, session)
+                if not access_control.allowed("orders", area_access) and not access_control.allowed("finance", area_access):
+                    status, payload = access_control.locked_response("orders")
+                    return json_response(payload, status=status)
+                is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
+                if not is_authed:
+                    return json_response({
+                        "ok": False,
+                        "error": "Unauthorized: Staff terminal authentication required to read payment attempts",
+                    }, status=401)
+                order = session.query(Order).filter_by(id=order_id).first()
+                if not order:
+                    return json_response({"ok": False, "error": "Order not found"}, status=404)
+                attempts = (
+                    session.query(PaymentTransaction)
+                    .filter(PaymentTransaction.order_id == order.id)
+                    .order_by(PaymentTransaction.created_at.desc())
+                    .limit(25)
+                    .all()
+                )
+                confirmed_by = ""
+                if order.payment_status == "paid" and (order.tender_type or "") != payments.PROVIDER:
+                    # Offline channels are settled by a person, and the attempt
+                    # row records who. Surface it so a later reviewer can see
+                    # the money was checked by someone, not by a machine.
+                    confirmed_by = staff_name_of_last_offline_attempt(session, order) or ""
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "payment_status": order.payment_status or "unpaid",
+                    "channel": order.payment_channel or "",
+                    "tender": order.tender_type or "",
+                    "reference": order.payment_reference or "",
+                    "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+                    "payer_account": order.payer_account or "",
+                    "merchant_pay_code": order.merchant_pay_code or "",
+                    "claim": {
+                        "channel": order.payment_claim_channel or "",
+                        "reference": order.payment_claim_reference or "",
+                        "at": order.payment_claim_at.isoformat() if order.payment_claim_at else None,
+                    } if order.payment_claim_at else None,
+                    "confirmed_by": confirmed_by,
+                    "attempts": [attempt.to_dict() for attempt in attempts],
+                })
+
+        if clean_path.startswith("/api/orders/") and clean_path.endswith("/payment") and method == "POST":
+            # Staff confirmation of money received (mobile money, bank
+            # transfer, merchant pay code, cash). Protected exactly like the
+            # rest of the order pipeline: authenticated staff, and the Orders
+            # area password when the owner has turned it on.
+            order_id = safe_identifier(clean_path.split("/")[-2])
+            if not order_id:
+                return json_response({"ok": False, "error": "A valid order id is required"}, status=400)
+            with get_db() as session:
+                area_access = access_control.state(headers, session)
+                if not access_control.allowed("orders", area_access) and not access_control.allowed("finance", area_access):
+                    status, payload = access_control.locked_response("orders")
+                    return json_response(payload, status=status)
+                is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
+                if not is_authed:
+                    return json_response({
+                        "ok": False,
+                        "error": "Unauthorized: Staff terminal authentication required to confirm a payment",
+                    }, status=401)
+                order = session.query(Order).filter_by(id=order_id).with_for_update().first()
+                if not order:
+                    return json_response({"ok": False, "error": "Order not found"}, status=404)
+
+                paid = body.get("paid")
+                if paid is None:
+                    paid = str(body.get("status") or "").strip().lower() not in {"unpaid", "not_paid", "revert"}
+                method = clean_text(body.get("payment_method") or body.get("method") or order.payment_channel or "cash", 30)
+                reference = clean_text(body.get("reference") or body.get("transaction_id") or "", 100)
+                note = clean_multiline_text(body.get("note") or "", 300)
+
+                ok, payment_status, error, outcome = staff_confirm_order_payment(
+                    session, order, staff_info, paid=bool(paid), method=method,
+                    reference=reference, note=note,
+                )
+                if not ok:
+                    return json_response({"ok": False, "error": error, "payment_status": payment_status}, status=409)
+                response = {
+                    "ok": True,
+                    "order_id": order.id,
+                    "payment_status": order.payment_status,
+                    "outcome": outcome,
+                    "channel": order.payment_channel or "",
+                    "reference": order.payment_reference or "",
+                    "paid_at": order.paid_at.isoformat() if order.paid_at else None,
+                    "order": access_control.sanitize_sale(order.to_dict(), area_access),
+                }
+                if outcome == "paid":
+                    response["message"] = f"{order.id} recorded as PAID ({payments.channel_info(method)['label']})"
+                elif outcome == "unpaid":
+                    response["message"] = f"{order.id} reverted to unpaid — its pieces stay reserved until the window closes"
+                else:
+                    response["message"] = f"{order.id} was already marked paid"
+                return json_response(response)
 
         if clean_path.startswith("/api/orders/") and method in ("PUT", "PATCH"):
             staff_info, auth_error = authenticated_or_response(headers, body, query_params)
@@ -2424,23 +2803,31 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 cashier = body.get("cashier") or staff_info or {}
                 tender_type = tender.get("type", "cash" if channel == "pos" else "mobile_money")
 
-                # ---- Online payment intent (web storefront only) ----
-                # 'payment_method: flutterwave' reserves the pieces and issues
-                # a per-order payment token; the order only counts as PAID
-                # after the gateway transaction is verified server-side.
-                requested_payment_method = str(body.get("payment_method") or "").strip().lower()
-                wants_online_payment = channel != "pos" and requested_payment_method in {"flutterwave", "online", "card"}
-                if wants_online_payment and not payments.is_enabled():
+                # ---- Payment intent (web storefront only) --------------
+                # Every non-cash choice reserves the pieces and issues a
+                # per-order payment token. The order only counts as PAID after
+                # the gateway verifies the charge (card) or staff confirm the
+                # money landed (mobile money, bank transfer, merchant pay code).
+                requested_payment_method = str(body.get("payment_method") or "").strip()
+                payment_channel = payments.normalize_channel(requested_payment_method, default="cod")
+                wants_online_payment = channel != "pos" and payments.is_online_channel(payment_channel)
+                if wants_online_payment and payment_channel == "card" and not payments.is_enabled():
                     return json_response({
                         "ok": False,
-                        "error": "Online payment is not available right now — please choose pay on delivery",
+                        "error": "Card payment is not available right now — please choose another payment option",
                     }, status=503)
+                if wants_online_payment and payment_channel == "merchant":
+                    # A merchant pay code is meaningless if nobody can issue or
+                    # verify it. Refuse loudly rather than parking the order.
+                    pass
                 if wants_online_payment:
-                    # Route the double-entry debit to the online settlement
-                    # account (1020) so the books reflect gateway collections,
-                    # not loose mobile money.
-                    tender_type = payments.PROVIDER
+                    # Route the double-entry debit to the account that will
+                    # actually receive the money (1020 bank/card settlement,
+                    # 1010 mobile money) so the books match the statement.
+                    tender_type = payments.channel_tender_type(payment_channel)
+                    logger.info("Order %s opened for %s settlement (tender %s)", order_id, payment_channel, tender_type)
                 payment_token = payments.new_payment_token() if wants_online_payment else ""
+                payer_account = clean_text(body.get("payer_account") or body.get("payer_phone") or "", 60)
                 order = Order(
                     id=order_id,
                     channel=channel,
@@ -2461,9 +2848,16 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     tender_amount=tender.get("tendered"),
                     tender_change=tender.get("change"),
                     payment_status=("pending" if wants_online_payment else "unpaid"),
-                    payment_provider=(payments.PROVIDER if wants_online_payment else None),
+                    payment_provider=(payment_channel if wants_online_payment else None),
+                    payment_channel=(payment_channel if wants_online_payment else None),
+                    payer_account=(payer_account if wants_online_payment else None),
+                    merchant_pay_code=(
+                        payments.make_merchant_pay_code() if wants_online_payment and payment_channel == "merchant" else None
+                    ),
                     payment_token_hash=(payments.hash_payment_token(payment_token) if wants_online_payment else None),
-                    payment_expires_at=(now + timedelta(minutes=payments.PAYMENT_TTL_MINUTES) if wants_online_payment else None),
+                    payment_expires_at=(
+                        now + timedelta(minutes=payments.channel_ttl_minutes(payment_channel)) if wants_online_payment else None
+                    ),
                     cashier_id=cashier.get("id"),
                     cashier_name=cashier.get("name"),
                     created_at=now,
@@ -2550,15 +2944,19 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 }
                 if wants_online_payment:
                     # The payment token is issued ONCE, here, to the browser
-                    # that placed the order. It authorizes payment initiation
-                    # and verification for this order only, and is never stored
-                    # anywhere server-side except as a SHA-256 hash.
+                    # that placed the order. It authorizes payment initiation,
+                    # pay-code issuing, claim submission and status polling for
+                    # this order only, and is never stored anywhere server-side
+                    # except as a SHA-256 hash.
                     order_response["payment"] = {
                         "provider": payments.PROVIDER,
+                        "channel": payment_channel,
                         "status": "pending",
                         "token": payment_token,
+                        "merchant_pay_code": order.merchant_pay_code or "",
+                        "payer_account": order.payer_account or "",
                         "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
-                        "payment_window_minutes": payments.PAYMENT_TTL_MINUTES,
+                        "payment_window_minutes": payments.channel_ttl_minutes(payment_channel),
                     }
                 return json_response(order_response, status=201)
 
@@ -2566,8 +2964,261 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
         # 4b. Online payments — Flutterwave (public, order-token scoped)
         # ----------------------------------------------------
         if clean_path == "/api/payments/config" and method == "GET":
-            # Safe by design: only the PUBLIC key and display metadata.
-            return json_response({"ok": True, **payments.public_checkout_config()})
+            # Safe by design: only the PUBLIC key, the payable channels the
+            # store can actually honour, and the pay-to details a shopper needs
+            # in order to transfer money (published by design, like an invoice).
+            with get_db() as session:
+                settings = public_store_settings(session.query(StoreSetting).all())
+            return json_response({"ok": True, **checkout_payment_options(settings)})
+
+        if clean_path == "/api/payments/method" and method == "POST":
+            # The shopper changed how they will pay before settling. The sale
+            # journal is already posted against the original channel, so a
+            # switch posts a reclassification line instead of rewriting it —
+            # audit trail stays intact and the books still match the statement.
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.method", client_ip, 30, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many changes. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            with get_db() as session:
+                order, error = load_order_for_payment(
+                    session, body.get("order_id"), str(body.get("payment_token") or "")
+                )
+                if not order:
+                    return json_response({"ok": False, "error": error}, status=404)
+                if order.payment_status == "paid":
+                    return json_response({"ok": False, "error": "This order is already paid", "payment_status": "paid"}, status=409)
+                if order.status in ("cancelled", "completed") or order.payment_status == "failed":
+                    return json_response({
+                        "ok": False, "payment_status": "expired",
+                        "error": "This order's payment window closed and its pieces were released. Please order again.",
+                    }, status=410)
+                requested = str(body.get("payment_method") or body.get("channel") or "")
+                if not requested.strip():
+                    return json_response({"ok": False, "error": "payment_method is required"}, status=400)
+                channel = payments.normalize_channel(requested, default="")
+                if not payments.is_online_channel(channel):
+                    return json_response({
+                        "ok": False,
+                        "error": "Choose card, mobile money, bank transfer or a merchant pay code. To pay on delivery, cancel and re-order.",
+                    }, status=400)
+                if channel == "card" and not payments.is_enabled():
+                    return json_response({"ok": False, "error": "Card payment is not available right now"}, status=503)
+                options = checkout_payment_options(public_store_settings(session.query(StoreSetting).all()))
+                if channel not in options["methods"]:
+                    return json_response({
+                        "ok": False,
+                        "error": f"{payments.channel_info(channel)['label']} is not available right now — the store has not published the details for it yet.",
+                    }, status=409)
+
+                previous = payments.normalize_channel(order.payment_channel or order.payment_provider or "", default="card")
+                now = datetime.utcnow()
+                order.payment_channel = channel
+                order.payment_provider = channel
+                payer_account = clean_text(body.get("payer_account") or body.get("payer_phone") or "", 60)
+                if payer_account:
+                    order.payer_account = payer_account
+                order.tender_type = payments.channel_tender_type(channel)
+                order.payment_expires_at = now + timedelta(minutes=payments.channel_ttl_minutes(channel))
+                order.updated_at = now
+                pay_code = order.merchant_pay_code or ""
+                if payments.channel_info(channel)["issues_code"]:
+                    pay_code = issue_merchant_pay_code(session, order, now)
+                session.flush()
+
+                previous_tender = payments.channel_tender_type(previous)
+                new_tender = payments.channel_tender_type(channel)
+                if previous_tender != new_tender and int(order.total or 0) > 0:
+                    old_code, old_name = payment_account(previous_tender)
+                    new_code, new_name = payment_account(new_tender)
+                    create_journal_entry(
+                        session,
+                        reference=order.id,
+                        source="payment_channel_reclass",
+                        description=f"Payment channel change for {order.id}: {previous} → {channel}",
+                        occurred_at=now,
+                        staff={"id": "WEB-CHECKOUT", "name": "Online checkout"},
+                        lines=[
+                            {"account_code": new_code, "account_name": new_name, "debit": int(order.total or 0)},
+                            {"account_code": old_code, "account_name": old_name, "credit": int(order.total or 0)},
+                        ],
+                    )
+                    logger.info(
+                        "Payment channel reclassified for %s: %s -> %s", order.id, previous, channel
+                    )
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "channel": channel,
+                    "merchant_pay_code": pay_code,
+                    "payer_account": order.payer_account or "",
+                    "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
+                })
+
+        if clean_path == "/api/payments/merchant-code" and method == "POST":
+            # Issue (or return) the per-order merchant pay code. Anyone paying
+            # on the shopper's behalf can use it, so it is not a secret — but
+            # it only ever resolves to this one order and amount.
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.code", client_ip, 30, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many attempts. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            with get_db() as session:
+                order, error = load_order_for_payment(
+                    session, body.get("order_id"), str(body.get("payment_token") or "")
+                )
+                if not order:
+                    return json_response({"ok": False, "error": error}, status=404)
+                if order.payment_status == "paid":
+                    return json_response({
+                        "ok": True, "payment_status": "paid", "order_id": order.id,
+                        "merchant_pay_code": order.merchant_pay_code or "",
+                    })
+                if order.status in ("cancelled", "completed") or order.payment_status == "failed":
+                    return json_response({
+                        "ok": False, "payment_status": "expired",
+                        "error": "This order's payment window closed and its pieces were released. Please order again.",
+                    }, status=410)
+                try:
+                    code = issue_merchant_pay_code(session, order)
+                except ValueError as exc:
+                    return json_response({"ok": False, "error": str(exc)}, status=503)
+                session.flush()
+                settings = public_store_settings(session.query(StoreSetting).all())
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "merchant_pay_code": code,
+                    "amount": int(order.total or 0),
+                    "currency": payments.FLW_CURRENCY,
+                    "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
+                    "instructions": merchant_pay_code_instructions(code, order, settings),
+                })
+
+        if clean_path == "/api/payments/merchant-code/lookup" and method == "POST":
+            # Counter lookup: a customer quotes their ADN- code and staff need
+            # the order behind it. Staff-only, because it exposes customer
+            # details; the code itself is not treated as a secret.
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.code.lookup", client_ip, 60, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many lookups. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            with get_db() as session:
+                area_access = access_control.state(headers, session)
+                if not access_control.allowed("orders", area_access) and not access_control.allowed("finance", area_access):
+                    status, payload = access_control.locked_response("orders")
+                    return json_response(payload, status=status)
+                is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
+                if not is_authed:
+                    return json_response({
+                        "ok": False,
+                        "error": "Unauthorized: Staff terminal authentication required to look up a pay code",
+                    }, status=401)
+                typed = clean_text(body.get("code") or body.get("merchant_pay_code") or "", 40)
+                if not payments.normalize_pay_code(typed):
+                    return json_response({
+                        "ok": False,
+                        "error": "That does not look like one of our pay codes. Codes look like ADN-XXXXXX.",
+                    }, status=400)
+                order = resolve_merchant_pay_code(session, None, typed)
+                if not order:
+                    return json_response({
+                        "ok": False,
+                        "error": "No order carries that pay code. Check the code with the customer.",
+                    }, status=404)
+                logger.info(
+                    "Pay code %s looked up by %s -> %s",
+                    payments.normalize_pay_code(typed), (staff_info or {}).get("name") or "staff", order.id,
+                )
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "merchant_pay_code": order.merchant_pay_code or "",
+                    "amount": int(order.total or 0),
+                    "currency": payments.FLW_CURRENCY,
+                    "payment_status": order.payment_status or "unpaid",
+                    "order_status": order.status or "",
+                    "dispatch_status": order.dispatch_status or "",
+                    "customer_name": order.customer_name or "",
+                    "customer_phone": order.customer_phone or "",
+                    "settled": (order.payment_status == "paid"),
+                    "order": access_control.sanitize_sale(order.to_dict(), area_access),
+                })
+
+        if clean_path == "/api/payments/claim" and method == "POST":
+            # The shopper says they have paid. This records WHAT to look for in
+            # the bank / MoMo / merchant statement and alerts staff. It is
+            # deliberately incapable of marking the order paid — only a
+            # verified gateway charge or a staff confirmation can do that.
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.claim", client_ip, 20, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many submissions. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            reference = clean_text(body.get("reference") or body.get("transaction_id") or "", 120)
+            with get_db() as session:
+                order, error = load_order_for_payment(
+                    session, body.get("order_id"), str(body.get("payment_token") or "")
+                )
+                if not order:
+                    return json_response({"ok": False, "error": error}, status=404)
+                if order.payment_status == "paid":
+                    return json_response({"ok": True, "payment_status": "paid", "order_id": order.id})
+                if order.payment_status == "failed" or order.status in ("cancelled", "completed"):
+                    return json_response({
+                        "ok": False, "payment_status": "expired",
+                        "error": "This order's payment window closed. If you were charged, contact the store with your receipt.",
+                    }, status=410)
+                channel = payments.normalize_channel(
+                    body.get("payment_method") or body.get("channel") or order.payment_channel or "momo", default=""
+                )
+                if not payments.is_online_channel(channel):
+                    return json_response({"ok": False, "error": "Choose how you paid"}, status=400)
+                if not reference and channel != "merchant":
+                    return json_response({
+                        "ok": False,
+                        "error": "Enter the transaction ID or bank reference from your payment message",
+                    }, status=400)
+                now = datetime.utcnow()
+                order.payment_claim_channel = channel
+                order.payment_claim_reference = reference
+                order.payment_claim_at = now
+                order.payment_channel = channel
+                if order.payment_status == "pending":
+                    order.payment_status = "claimed"
+                order.updated_at = now
+                session.flush()
+                order_number = order.id.split("-")[-1] if "-" in order.id else order.id
+                label = payments.channel_info(channel)["label"]
+                broadcast_event(
+                    "ORDER_PAYMENT_CLAIMED",
+                    f"🧾 Payment submitted — Order #{order_number}",
+                    f"{order.customer_name or 'Online shopper'} says they paid UGX {int(order.total or 0):,} by {label}"
+                    + (f" · ref {reference}." if reference else f" · pay code {order.merchant_pay_code}.")
+                    + " Confirm it in the bank / merchant statement, then mark the order paid.",
+                    {"order_id": order.id, "amount": order.total, "channel": channel,
+                     "reference": reference, "merchant_pay_code": order.merchant_pay_code or ""},
+                    session=session,
+                )
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "payment_status": order.payment_status,
+                    "reference": reference,
+                    "channel": channel,
+                    "message": "Payment submitted. The store will confirm it and update your order.",
+                })
 
         if clean_path == "/api/payments/status" and method == "GET":
             now = datetime.utcnow()
@@ -2584,7 +3235,16 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "ok": True,
                     "order_id": order.id,
                     "payment_status": order.payment_status or "unpaid",
+                    "channel": order.payment_channel or order.payment_provider or "",
                     "total": order.total,
+                    "merchant_pay_code": order.merchant_pay_code or "",
+                    "payer_account": order.payer_account or "",
+                    "reference": order.payment_reference or "",
+                    "claim": {
+                        "channel": order.payment_claim_channel or "",
+                        "reference": order.payment_claim_reference or "",
+                        "at": order.payment_claim_at.isoformat() if order.payment_claim_at else None,
+                    } if order.payment_claim_at else None,
                     "paid_at": order.paid_at.isoformat() if order.paid_at else None,
                     "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
                 })
@@ -2607,8 +3267,26 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
                 if not order:
                     return json_response({"ok": False, "error": error}, status=404)
-                if order.payment_provider != payments.PROVIDER:
-                    return json_response({"ok": False, "error": "This order was not placed for online payment"}, status=409)
+                # Which channel this attempt collects. A mobile-money order can
+                # be collected on the momo rail (push prompt + PIN on the
+                # shopper's phone) just as a card order is charged on the card
+                # rail; bank and merchant orders have no gateway rail at all and
+                # must go back through their own instructions.
+                order_channel = payments.normalize_channel(order.payment_channel or "", default="")
+                requested_channel = payments.normalize_channel(body.get("channel") or "", default="")
+                gateway_channel = order_channel
+                # The browser may only ever *confirm* the rail this order was
+                # placed on. It can never move a bank or merchant order onto a
+                # gateway rail — that would take money twice or book it against
+                # the wrong account.
+                if not payments.is_gateway_collectable(gateway_channel) or (
+                    requested_channel and requested_channel != gateway_channel
+                ):
+                    return json_response({
+                        "ok": False,
+                        "error": "This order is not paid through the gateway — follow its payment instructions.",
+                        "payment_channel": order_channel or "cod",
+                    }, status=409)
                 expire_stale_flutterwave_orders(session, now)
                 if order.payment_status == "paid":
                     return json_response({"ok": False, "error": "This order is already paid", "payment_status": "paid"}, status=409)
@@ -2635,6 +3313,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order.updated_at = now
                 session.flush()
                 logger.info("Payment attempt %s opened for order %s (UGX %s)", attempt.tx_ref, order.id, order.total)
+                # The push prompt only works with the number that actually pays,
+                # so prefer the number captured at checkout over the contact
+                # number, and never invent one.
+                paying_number = (order.payer_account or "").strip() or (order.customer_phone or "").strip()
                 return json_response({
                     "ok": True,
                     "provider": payments.PROVIDER,
@@ -2644,9 +3326,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "amount": attempt.amount,
                     "currency": attempt.currency,
                     "order_id": order.id,
+                    "channel": gateway_channel,
+                    "payment_options": payments.gateway_payment_options(gateway_channel),
                     "customer": {
                         "name": order.customer_name or "Online Shopper",
-                        "phone": order.customer_phone or "",
+                        "phone": paying_number,
                         "email": "",
                     },
                     "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
@@ -2673,8 +3357,26 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 order, error = load_order_for_payment(session, body.get("order_id"), str(body.get("payment_token") or ""))
                 if not order:
                     return json_response({"ok": False, "error": error}, status=404)
-                if order.payment_provider != payments.PROVIDER:
-                    return json_response({"ok": False, "error": "This order was not placed for online payment"}, status=409)
+                # Which channel this attempt collects. A mobile-money order can
+                # be collected on the momo rail (push prompt + PIN on the
+                # shopper's phone) just as a card order is charged on the card
+                # rail; bank and merchant orders have no gateway rail at all and
+                # must go back through their own instructions.
+                order_channel = payments.normalize_channel(order.payment_channel or "", default="")
+                requested_channel = payments.normalize_channel(body.get("channel") or "", default="")
+                gateway_channel = order_channel
+                # The browser may only ever *confirm* the rail this order was
+                # placed on. It can never move a bank or merchant order onto a
+                # gateway rail — that would take money twice or book it against
+                # the wrong account.
+                if not payments.is_gateway_collectable(gateway_channel) or (
+                    requested_channel and requested_channel != gateway_channel
+                ):
+                    return json_response({
+                        "ok": False,
+                        "error": "This order is not paid through the gateway — follow its payment instructions.",
+                        "payment_channel": order_channel or "cod",
+                    }, status=409)
                 expire_stale_flutterwave_orders(session, now)
                 if order.payment_status == "paid":
                     return json_response({"ok": True, "payment_status": "paid", "order_id": order.id})

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.6" />
+<link rel="stylesheet" href="styles.css?v=7.8" />
 <link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/dispatch.css?v=1.0" />
 <link rel="stylesheet" href="css/notifications.css?v=2.4" />
@@ -194,6 +194,11 @@
             <i data-icon="search" data-size="16"></i>
             <span class="sr-only">Search orders</span>
             <input id="orderSearch" type="search" placeholder="Search order, customer, item or phone" autocomplete="off" />
+          </label>
+          <label class="order-search-field" title="A customer quoting their merchant pay code (ADN-XXXXXX)">
+            <i data-icon="qrcode" data-size="16"></i>
+            <span class="sr-only">Find order by merchant pay code</span>
+            <input id="orderPayCodeLookup" type="search" placeholder="Pay code (ADN-XXXXXX)" autocomplete="off" />
           </label>
           <label class="order-select-field">
             <span class="sr-only">Sort orders</span>
@@ -802,6 +807,17 @@
         <div id="posPasswordSettings" aria-live="polite"><p class="muted small">Loading password settings…</p></div>
       </section>
 
+      <div class="card" id="gatewayStatusCard" style="max-width:860px">
+        <div class="gw-status-head">
+          <div>
+            <p class="pa-eyebrow">PAYMENT GATEWAY</p>
+            <h3>Flutterwave — card &amp; instant mobile money</h3>
+          </div>
+          <span class="pa-status-badge" id="gatewayStatusBadge">Checking…</span>
+        </div>
+        <div id="gatewayStatusBody" aria-live="polite"><p class="muted small">Checking how the gateway is configured…</p></div>
+      </div>
+
       <div class="card" id="storeProfileSettings" style="max-width:860px">
         <div class="fgrid">
           <div class="field full"><label>Store name</label><input class="sel-full" id="setName" /></div>
@@ -814,6 +830,21 @@
           <div class="field full"><label>Physical store address</label><input class="sel-full" id="setAddress" /></div>
           <div class="field full"><label>Delivery area scope</label><input class="sel-full" id="setScope" /></div>
           <div class="field full"><label>Opening hours</label><input class="sel-full" id="setHours" /></div>
+          <div class="field full payment-payto-group"><label>Mobile money merchant line<span class="fhint">Where shoppers send mobile money when they pay the line themselves. With your Flutterwave keys set they get an instant prompt on their own phone instead, and this line becomes the alternative they can choose</span></label>
+            <div class="payto-pair">
+              <input class="sel-full" id="setMomoName" placeholder="Account / merchant name (e.g. Adonai Store)" />
+              <input class="sel-full" id="setMomoNumber" placeholder="Merchant number (e.g. 0758873398)" inputmode="tel" />
+            </div>
+          </div>
+          <div class="field full payment-payto-group"><label>Bank account for transfers<span class="fhint">Shown to shoppers who choose “Bank transfer”. Leave the number blank to hide the bank option entirely</span></label>
+            <div class="payto-pair">
+              <input class="sel-full" id="setBankName" placeholder="Bank name (e.g. Stanbic Bank)" />
+              <input class="sel-full" id="setBankAccountName" placeholder="Account name" />
+              <input class="sel-full" id="setBankAccountNumber" placeholder="Account number" />
+              <input class="sel-full" id="setBankBranch" placeholder="Branch (optional)" />
+            </div>
+            <input class="sel-full" id="setBankReferenceHint" placeholder="Reference to quote (optional — defaults to the order number)" />
+          </div>
           <div class="field"><label>Base delivery fee (UGX)<span class="fhint">Single source of truth · delivery zones &amp; new catalog items use it instantly</span></label><input class="sel-full" id="setFee" type="number" min="0" /></div>
           <div class="field full"><label style="display:flex;gap:10px;align-items:center;font-weight:600;cursor:pointer"><input type="checkbox" id="setFeeApplyAll" style="width:16px;height:16px;accent-color:#15803d;flex:none" /><span>Also apply this fee to all existing catalog items<span class="fhint" style="font-weight:400">overwrites each item&apos;s transport &amp; adjusts selling prices by the 50 / 50 split</span></span></label></div>
           <div class="field" data-credential-control><label>Update Admin Master Key<span class="fhint">Minimum 6 characters — leave blank to keep current key</span></label><input class="sel-full" id="setKey" placeholder="Leave blank to keep current key" /></div>
@@ -837,8 +868,8 @@
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.1"></script>
 <script src="js/notifications.js?v=2.4"></script>
-<script src="js/icons.js?v=1.1"></script>
-<script src="js/db.js?v=5.0"></script>
+<script src="js/icons.js?v=1.2"></script>
+<script src="js/db.js?v=5.6"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/intake.js?v=5.1"></script>
@@ -849,7 +880,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=7.6"></script>
+<script src="app.js?v=8.0"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

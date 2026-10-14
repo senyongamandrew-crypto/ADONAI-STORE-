@@ -32,6 +32,7 @@ import hmac as hmac_module
 import json
 import logging
 import os
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -40,6 +41,163 @@ import uuid
 logger = logging.getLogger("adonai.payments")
 
 PROVIDER = "flutterwave"
+
+# ============================================================================
+# Payment channels
+# ============================================================================
+# Every non-cash web order still reserves stock up front, but the *way* the
+# shopper settles decides who confirms the money landed:
+#
+#   card      — Flutterwave popup (card / wallet). Confirmed by the gateway,
+#               re-verified server-side. Books: 1020 Bank Account.
+#   momo      — shopper sends mobile money straight to the store's merchant
+#               line, then submits the transaction id. Confirmed by staff.
+#               Books: 1010 Mobile Money.
+#   bank      — shopper pays into the store bank account and submits the
+#               reference. Confirmed by staff. Books: 1020 Bank Account.
+#   merchant  — the system issues a per-order MERCHANT PAY CODE that the
+#               shopper (or whoever is paying for them) presents at any
+#               Adonai merchant point / agent. Confirmed by staff.
+#               Books: 1010 Mobile Money.
+#   cod       — pay on delivery / pickup. Untouched legacy behaviour.
+#
+# `card` and `momo` can both be collected by the gateway. For mobile money that
+# is the *instant* path: the shopper types the paying number, the network pushes
+# the approval prompt to their phone, they confirm it with their own MoMo PIN,
+# and the gateway tells this server the money landed — no staff step. The bank
+# and merchant channels are honest about what they are: instructions + a
+# reference trail + a staff confirmation step. The browser can submit a *claim*,
+# never a settlement.
+CHANNEL_CATALOG = {
+    "card": {
+        "id": "card", "label": "Card & wallet", "short": "Card",
+        "blurb": "Visa / Mastercard and mobile-wallet checkout.",
+        "tender_type": "flutterwave", "needs_gateway": True,
+        "pay_prompt": False, "issues_code": False,
+    },
+    "momo": {
+        "id": "momo", "label": "Mobile Money (MTN / Airtel)", "short": "Mobile Money",
+        "blurb": "Approve the prompt on your phone with your MoMo PIN, or send the total to our merchant line.",
+        "tender_type": "mobile_money", "needs_gateway": False,
+        "pay_prompt": True, "issues_code": False,
+    },
+    "bank": {
+        "id": "bank", "label": "Bank transfer", "short": "Bank",
+        "blurb": "Transfer to our store account and submit the reference.",
+        "tender_type": "bank_transfer", "needs_gateway": False,
+        "pay_prompt": False, "issues_code": False,
+    },
+    "merchant": {
+        "id": "merchant", "label": "Merchant pay code", "short": "Pay code",
+        "blurb": "Get a code to pay at any Adonai merchant point, or send to whoever is paying for you.",
+        "tender_type": "merchant_code", "needs_gateway": False,
+        "pay_prompt": True, "issues_code": True,
+    },
+    "cod": {
+        "id": "cod", "label": "Pay on delivery / pickup", "short": "On delivery",
+        "blurb": "Pay the rider or at the counter when your piece arrives.",
+        "tender_type": None, "needs_gateway": False,
+        "pay_prompt": False, "issues_code": False,
+    },
+}
+
+# Channels a gateway collection can settle. `card` is charged on the card rail;
+# `momo` is collected on the mobile-money rail (push prompt + PIN on the phone).
+GATEWAY_CHANNELS = {
+    "card": {"payment_options": "mobilemoneyuganda,card", "label": "Card / wallet"},
+    "momo": {"payment_options": "mobilemoneyuganda", "label": "Mobile money"},
+}
+
+
+def gateway_payment_options(channel) -> str:
+    """Popup payment options for a gateway-collected channel ('' when it cannot)."""
+    info = GATEWAY_CHANNELS.get(str(channel or "").strip().lower())
+    return info["payment_options"] if info else ""
+
+
+def is_gateway_collectable(channel) -> bool:
+    """True when the gateway can take this channel's money and confirm it."""
+    return str(channel or "").strip().lower() in GATEWAY_CHANNELS
+
+
+# What a shopper may pick at checkout. `cod` is always offered.
+ONLINE_CHANNELS = ("card", "momo", "bank", "merchant")
+
+# Values clients have historically posted for the same idea.
+CHANNEL_ALIASES = {
+    "flutterwave": "card", "online": "card", "visa": "card", "mastercard": "card",
+    "mobile_money": "momo", "mobilemoneyuganda": "momo", "mtn": "momo", "airtel": "momo",
+    "bank_transfer": "bank", "transfer": "bank", "banktransfer": "bank",
+    "merchant_code": "merchant", "pay_code": "merchant", "paycode": "merchant", "code": "merchant",
+    "cash": "cod", "delivery": "cod", "pickup": "cod", "pod": "cod",
+}
+
+
+def normalize_channel(value, default="cod") -> str:
+    """Map whatever a client called the payment method onto a real channel."""
+    key = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if not key:
+        return default
+    if key in CHANNEL_CATALOG:
+        return key
+    return CHANNEL_ALIASES.get(key, default)
+
+
+def channel_info(channel) -> dict:
+    return CHANNEL_CATALOG.get(normalize_channel(channel), CHANNEL_CATALOG["cod"])
+
+
+def is_online_channel(channel) -> bool:
+    """True when the shopper must settle now (not pay on delivery)."""
+    return normalize_channel(channel) in ONLINE_CHANNELS
+
+
+def channel_tender_type(channel) -> str:
+    """Ledger tender for the channel that actually receives the money."""
+    info = channel_info(channel)
+    return info["tender_type"] or "cash"
+
+
+# ---------------------------------------------------------------- pay codes
+# Crockford-style alphabet: no O/0 or I/1, so a code read aloud on a phone
+# call cannot be mistyped into a different valid-looking code.
+PAY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+
+
+def make_merchant_pay_code() -> str:
+    """Human-readable per-order merchant pay code, e.g. ADN-7K4P2Q."""
+    body = "".join(secrets.choice(PAY_CODE_ALPHABET) for _ in range(6))
+    return f"ADN-{body}"
+
+
+def normalize_pay_code(value) -> str:
+    """Accept 'adn 7k4p2q' / 'ADN-7K4P2Q' and return the canonical form.
+
+    Only alphabet characters survive, so separators, spacing and casing can
+    never change which code is being looked up. Characters outside the
+    alphabet are dropped rather than guessed at — a code is either right or
+    it is not the customer's code.
+    """
+    raw = "".join(ch for ch in str(value or "").upper() if ch in PAY_CODE_ALPHABET)
+    if len(raw) > 6:
+        # A pasted "ADN7K4P2Q" keeps the six code characters after the mark.
+        raw = raw[3:] if raw.startswith("ADN") else raw[-6:]
+    return f"ADN-{raw}" if len(raw) == 6 else ""
+
+
+# ------------------------------------------------------- offline lifetime
+# Card checkout may complete in minutes. An offline transfer needs room: the
+# shopper may be queueing at a bank or sending money from upcountry. Stock is
+# still protected, because the pieces are released when this window lapses.
+def offline_ttl_minutes() -> int:
+    try:
+        return max(PAYMENT_TTL_MINUTES, min(24 * 60, int(os.environ.get("ADONAI_OFFLINE_PAYMENT_TTL_MINUTES", "180"))))
+    except ValueError:
+        return max(PAYMENT_TTL_MINUTES, 180)
+
+
+def channel_ttl_minutes(channel) -> int:
+    return PAYMENT_TTL_MINUTES if normalize_channel(channel) == "card" else offline_ttl_minutes()
 
 
 def _first_env(*names: str) -> tuple[str, str]:
@@ -104,7 +262,15 @@ def public_checkout_config() -> dict:
         "public_key": FLW_PUBLIC_KEY if is_configured() else ("" if not MOCK_MODE else "FLWPUBK-MOCK-DEV-ONLY"),
         "currency": FLW_CURRENCY,
         "payment_window_minutes": PAYMENT_TTL_MINUTES,
+        "offline_window_minutes": offline_ttl_minutes(),
         "mock": MOCK_MODE,
+        # Static channel metadata. Whether a channel can actually be used also
+        # depends on the store's published pay-to details, which api.py folds
+        # in before answering the storefront.
+        "channels": [
+            {key: info[key] for key in ("id", "label", "short", "blurb", "needs_gateway", "pay_prompt", "issues_code")}
+            for info in (CHANNEL_CATALOG[key] for key in ("card", "momo", "bank", "merchant", "cod"))
+        ],
     }
 
 
@@ -228,6 +394,29 @@ def verify_transaction(transaction_id) -> dict:
             "payment_type": data.get("payment_type"),
         },
     }
+
+
+# Flutterwave reports the instrument it actually charged on. The raw value is
+# kept on the attempt row for reconciliation, but staff read a sentence, so map
+# the common ones to plain words.
+GATEWAY_TYPE_LABELS = {
+    "card": "card",
+    "mobilemoneyuganda": "mobile money",
+    "mobilemoney": "mobile money",
+    "mpesa": "mobile money",
+    "banktransfer": "bank transfer",
+    "bank_transfer": "bank transfer",
+    "ussd": "USSD",
+    "mock": "simulated gateway",
+}
+
+
+def gateway_type_label(payment_type) -> str:
+    """Human wording for a gateway payment type ('online' when unknown)."""
+    value = str(payment_type or "").strip().lower()
+    if not value:
+        return "online"
+    return GATEWAY_TYPE_LABELS.get(value, value.replace("_", " "))
 
 
 def transaction_summary(verified: dict, limit: int = 1500) -> str:

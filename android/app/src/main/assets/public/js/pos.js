@@ -47,7 +47,11 @@
   if (posMeAvatar) posMeAvatar.textContent = (cashier.name || "S").charAt(0).toUpperCase();
 
   function updatePosNavBadge() {
-    const webPend = DB.listSales().filter(s => s.channel === "web" && s.status === "pending").length;
+    // A web order counts until it is completed or cancelled; the ones awaiting
+    // payment are exactly what the register should flag for the counter staff.
+    const webPend = DB.listSales().filter(s =>
+      s.channel === "web" && !["completed", "cancelled", "canceled", "void"].includes(String(s.status || "").toLowerCase())
+    ).length;
     const badge = $("#posNavWebBadge");
     if (badge) badge.textContent = webPend || "";
   }

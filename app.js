@@ -20,6 +20,17 @@
   if (accessNotice) accessNotice.hidden = !pinFree;
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const ugx = DB.ugx;
+  /* Payment channel labels used by the order panel. Kept beside the console's
+     own vocabulary so staff read "Bank transfer", not a server key. */
+  const CHANNEL_LABELS = {
+    card: "Card / online (Flutterwave)", flutterwave: "Card / online (Flutterwave)",
+    momo: "Mobile money", mobile_money: "Mobile money",
+    mtn: "MTN MoMo", airtel: "Airtel Money",
+    bank: "Bank transfer", bank_transfer: "Bank transfer",
+    merchant: "Merchant pay code", merchant_code: "Merchant pay code",
+    cod: "Pay on delivery / pickup", cash: "Cash"
+  };
+  const channelLabel = value => CHANNEL_LABELS[String(value || "").toLowerCase()] || String(value || "—");
   const AV_PALETTE = ["#111827", "#1F2937", "#16A34A", "#15803D", "#166534", "#374151", "#22C55E", "#0B1120"];
   const avColor = name => AV_PALETTE[(String(name).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % AV_PALETTE.length];
   const initials = name => String(name || "OA").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -818,6 +829,28 @@
   }
 
   $("#orderSearch").addEventListener("input", e => { orderTerm = e.target.value.trim().toLowerCase(); renderSales(); });
+  /* A customer at the counter quotes their merchant pay code; this jumps
+     straight to that order so staff can take the money and settle it. */
+  const payCodeLookup = $("#orderPayCodeLookup");
+  if (payCodeLookup) payCodeLookup.addEventListener("keydown", async e => {
+    if (e.key !== "Enter") return;
+    const code = e.target.value.trim();
+    if (!code) return;
+    try {
+      const found = await DB.findOrderByPayCode(code);
+      e.target.value = "";
+      orderTerm = "";
+      const search = $("#orderSearch");
+      if (search) search.value = "";
+      await setView("sales", false);
+      orderDetailModal(found.order_id);
+      toast(found.settled
+        ? `${found.order_id} already shows as PAID — nothing else to collect`
+        : `${found.order_id} · ${ugx(found.amount)} due${found.customer_name ? " · " + found.customer_name : ""}`);
+    } catch (err) {
+      toast(err.message || "Could not look up that pay code", false);
+    }
+  });
   $("#orderSort").addEventListener("change", e => { orderSort = e.target.value; renderSales(); });
   $("#orderChannelFilter").addEventListener("change", e => { channelFilter = e.target.value; renderSales(); });
   $("#payFilterPills").addEventListener("click", e => {
@@ -1194,6 +1227,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!s) return toast("Order not found", false);
     const riders = DB.listRiders();
     const paid = isSalePaid(s);
+    // A customer-declared payment is not a payment. Staff see it as an action
+    // item: check the statement, then confirm or leave it alone.
+    const payClaimed = !paid && !!(s.payment && (s.payment.status === "claimed" || (s.payment.claim && s.payment.claim.reference)));
     const subtotal = s.subtotal || (s.total - (s.delivery_fee || 0));
     const locationStr = s.delivery_area ? `${s.delivery_area}${s.delivery_address ? " - " + s.delivery_address : ""}` : (s.delivery_address || "Kampala Road Store");
 
@@ -1246,19 +1282,40 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
           <div>
             <span style="font-weight:700">Payment:</span>
-            <span class="stat-chip ${paid ? 'ok' : 'pend'}" style="margin-left:6px">${paid ? 'PAID' : 'UNPAID'}</span>
+            <span class="stat-chip ${paid ? 'ok' : payClaimed ? 'pend' : 'pend'}" style="margin-left:6px">${
+              paid ? 'PAID' : payClaimed ? 'AWAITING CONFIRMATION' : 'UNPAID'}</span>
             ${paid ? `<span class="muted small" style="margin-left:6px">(${esc(DB.TENDER_LABEL(s.tender))})</span>` : ''}
+            ${!paid && s.payment && s.payment.channel ? `<span class="muted small" style="margin-left:6px">(${esc(channelLabel(s.payment.channel))})</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${!paid ? `
               <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">${Icons.svg("banknote", "ico-13")} Cash</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">${Icons.svg("smartphone", "ico-13")} MTN MoMo</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">${Icons.svg("smartphone", "ico-13")} Airtel</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mobile_money" data-prompts-reference="1">${Icons.svg("smartphone", "ico-13")} MoMo</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="bank_transfer" data-prompts-reference="1">${Icons.svg("landmark", "ico-13")} Bank</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="merchant_code" data-prompts-reference="1">${Icons.svg("qrcode", "ico-13")} Pay code</button>
             ` : `
               <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">${Icons.svg("undo-2", "ico-13")} Revert to Unpaid</button>
             `}
           </div>
         </div>
+        ${!paid && (payClaimed || s.payment && (s.payment.merchant_pay_code || s.payment.payer_account)) ? `
+          <div class="odm-payment-hint">
+            ${payClaimed ? `<p><strong>Customer says they paid${s.payment.claim.channel ? ` by ${esc(channelLabel(s.payment.claim.channel))}` : ""}.</strong>${
+              s.payment.claim.reference ? ` Reference: <code>${esc(s.payment.claim.reference)}</code>` : " No reference given."
+            } · submitted ${esc(ago(s.payment.claim.at))}</p>` : ""}
+            ${s.payment.merchant_pay_code ? `<p>Merchant pay code: <code>${esc(s.payment.merchant_pay_code)}</code> — only this exact amount (${ugx(s.total)}) clears it.</p>` : ""}
+            ${s.payment.payer_account ? `<p>Customer will pay from: <strong>${esc(s.payment.payer_account)}</strong> — match this against the incoming payment message.</p>` : ""}
+            <p class="muted small">Check the bank / MoMo / merchant statement, then confirm with the matching button above. Confirming records the payment, settles partner payables and notifies the team.</p>
+          </div>` : ""}
+        ${!paid ? `
+          <div class="odm-ref-row" id="odmRefRow" hidden>
+            <input class="sel-full" id="odmRefInput" placeholder="Transaction ID / reference from the payment message" autocomplete="off" />
+            <button class="btn sm primary" id="odmRefConfirm">✓ Confirm payment received</button>
+          </div>` : ""}
+        <!-- Reconciliation trail: the gateway's own record of every attempt on
+             this order, so a payout can be matched line by line. Loaded from
+             the server when the panel opens. -->
+        <div class="odm-attempts" id="odmAttempts" hidden></div>
       </div>
 
       <div class="odm-info-block">
@@ -1338,6 +1395,56 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         printReceiptModal(s.id);
       });
     }
+
+    loadOrderPaymentTrail(s.id);
+  }
+
+  /* The gateway's own record of this order: every attempt, its reference, the
+     Flutterwave transaction id and how it ended. Staff reconcile a payout with
+     these lines; the browser list can never settle anything, so this is a view
+     only. Loaded after the panel opens so a slow network never blocks it. */
+  async function loadOrderPaymentTrail(orderId) {
+    const box = $("#odmAttempts");
+    if (!box) return;
+    let trail = null;
+    try {
+      trail = await DB.fetchOrderPaymentTrail(orderId);
+    } catch (err) {
+      return;                                  // signed out or offline: stay quiet
+    }
+    if (!trail || !$("#odmAttempts")) return;
+    const attempts = trail.attempts || [];
+    const rows = attempts.map(a => {
+      const state = a.status === "successful" ? "ok" : a.status === "failed" ? "bad" : "pend";
+      const label = a.status === "successful" ? "Settled" : a.status === "failed" ? "Declined / failed" : "Opened, not settled";
+      return `
+        <div class="odm-attempt">
+          <div class="odm-attempt-main">
+            <span class="stat-chip ${state}">${esc(label)}</span>
+            <strong>${esc(ugx(a.amount))}</strong>
+            <span class="muted small">${esc(a.channel || a.provider || "gateway")}</span>
+          </div>
+          <div class="odm-attempt-meta">
+            <span>Ref <code>${esc(a.tx_ref)}</code></span>
+            ${a.flw_transaction_id ? `<span>Flutterwave ID <code>${esc(a.flw_transaction_id)}</code></span>` : ""}
+            <span>${esc(readableDateTime(a.created_at))} · ${esc(ago(a.created_at))}</span>
+          </div>
+        </div>`;
+    }).join("");
+    const headline = trail.paid_at
+      ? `Paid ${esc(readableDateTime(trail.paid_at))}${trail.confirmed_by ? ` · confirmed by ${esc(trail.confirmed_by)}` : ""}`
+      : trail.claim && trail.claim.reference
+        ? `Customer reference on file: <code>${esc(trail.claim.reference)}</code>`
+        : "No settled payment on file yet.";
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="odm-attempts-head">
+        <span class="odm-section-label">Payment trail</span>
+        <span class="muted small">${attempts.length} gateway attempt${attempts.length === 1 ? "" : "s"}</span>
+      </div>
+      <p class="muted small odm-attempts-summary">${headline}</p>
+      ${rows || `<p class="muted small">No gateway attempts on this order — it is settled by cash, or by the merchant line with no card/wallet attempt.</p>`}
+      <p class="muted small">Match these references against the Flutterwave dashboard payout before releasing anything.</p>`;
   }
 
   /* ============================================================
@@ -4037,8 +4144,73 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const settingsView = $("#view-settings");
   ["input", "change"].forEach(event => settingsView.addEventListener(event, e => { if (e.target.closest("#storeProfileSettings")) settingsDirty = true; }));
 
+  /* What the payment gateway can actually do right now, straight from the
+     server. The console never holds keys — it only reports whether the host has
+     them, so an owner can tell "not connected" from "connected but broken"
+     without reading server logs. */
+  async function renderGatewayStatus() {
+    const badge = $("#gatewayStatusBadge"), body = $("#gatewayStatusBody");
+    if (!badge || !body) return;
+    let config = null;
+    try {
+      config = await DB.getPaymentConfig(true);
+    } catch (err) {
+      config = null;
+    }
+    const enabled = !!(config && config.enabled);
+    const mock = !!(config && config.mock);
+    const channelIds = ((config && config.channels) || []).filter(c => c.available !== false).map(c => c.id);
+    const names = { card: "Card &amp; wallet", momo: "Mobile money", bank: "Bank transfer", merchant: "Merchant pay code", cod: "Pay on delivery" };
+    const offered = channelIds.map(id => names[id] || id).join(" · ") || "—";
+
+    if (enabled && !mock) {
+      badge.textContent = "Connected";
+      badge.classList.remove("pa-badge-warn");
+      body.innerHTML = `
+        <p class="muted small">Flutterwave keys are present on the server. Shoppers can pay by card in the
+        secure Flutterwave window, and by mobile money with the approval prompt — the PIN or one-time code is
+        entered with the bank / Flutterwave, never on this storefront.</p>
+        <p class="muted small"><strong>Channels live now:</strong> ${offered}</p>
+        <p class="muted small">Webhook: keep <code>/api/payments/flutterwave/webhook</code> registered in the Flutterwave
+        dashboard with the same secret hash as the server, so payments still settle if a shopper closes the tab.</p>`;
+      return;
+    }
+    if (mock) {
+      badge.textContent = "Simulated (dev only)";
+      badge.classList.add("pa-badge-warn");
+      body.innerHTML = `
+        <p class="muted small">This server runs with <code>FLW_MOCK_MODE=1</code> and no secret key, so the gateway is
+        simulated: payments are approved instantly through the same server verification path, and <strong>no money moves</strong>.
+        There is deliberately no bank popup and no PIN prompt in this mode.</p>
+        <p class="muted small"><strong>Channels live now:</strong> ${offered}</p>
+        <p class="muted small">To take real payments, set the three variables below on the host and redeploy.
+        Never leave mock mode on a live store.</p>`;
+      return;
+    }
+    badge.textContent = "Not connected";
+    badge.classList.add("pa-badge-warn");
+    body.innerHTML = `
+      <p class="muted small"><strong>No Flutterwave keys found on the server</strong>, so card and the instant
+      mobile-money prompt are hidden from shoppers — the storefront never offers a way to pay it cannot honour,
+      which is why no payment popup appears. Shoppers still have bank transfer, the merchant pay code and the
+      mobile-money merchant line below.</p>
+      <p class="muted small"><strong>To switch it on</strong>, add these to the host's environment (Render → your
+      service → Environment) and redeploy:</p>
+      <ul class="gw-status-list">
+        <li><code>FLW_PUBLIC_KEY</code> — dashboard.flutterwave.com → Settings → APIs → Public key</li>
+        <li><code>FLW_SECRET_KEY</code> — same page, Secret key (never commit it)</li>
+        <li><code>FLW_SECRET_HASH</code> — a long random string you invent; paste the same value into the dashboard webhook</li>
+      </ul>
+      <p class="muted small">Then register the webhook URL
+      <code>https://&lt;your-domain&gt;/api/payments/flutterwave/webhook</code> in the dashboard. Full steps:
+      <code>FLUTTERWAVE_PAYMENTS.md</code>.</p>
+      <p class="muted small">Use the test keys first: card <code>5531 8866 5214 2950</code>, CVV <code>564</code>,
+      any future expiry, PIN <code>3310</code>, OTP <code>12345</code>.</p>`;
+  }
+
   function renderSettings() {
     // Background sync must not erase an owner's unfinished settings edits.
+    renderGatewayStatus();
     if (settingsDirty) { paintUnlockChip(); return; }
     const s = DB.getSettings();
     $("#setName").value = s.store_name || "";
@@ -4051,6 +4223,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#setAddress").value = s.address || "";
     $("#setScope").value = s.delivery_scope || "";
     $("#setHours").value = s.hours || "";
+    $("#setMomoName").value = s.momo_merchant_name || "";
+    $("#setMomoNumber").value = s.momo_merchant_number || "";
+    $("#setBankName").value = s.bank_name || "";
+    $("#setBankAccountName").value = s.bank_account_name || "";
+    $("#setBankAccountNumber").value = s.bank_account_number || "";
+    $("#setBankBranch").value = s.bank_branch || "";
+    $("#setBankReferenceHint").value = s.bank_reference_hint || "";
     $("#setFee").value = s.base_delivery_fee ?? 7000;
     $("#setKey").value = "";
     $("#setKey").placeholder = "Leave blank to keep current key";
@@ -4076,6 +4255,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         address: $("#setAddress").value.trim(),
         delivery_scope: $("#setScope").value.trim(),
         hours: $("#setHours").value.trim(),
+        // Pay-to details published to shoppers at checkout. Empty values
+        // simply hide the matching payment option on the storefront.
+        momo_merchant_name: $("#setMomoName").value.trim(),
+        momo_merchant_number: $("#setMomoNumber").value.trim(),
+        bank_name: $("#setBankName").value.trim(),
+        bank_account_name: $("#setBankAccountName").value.trim(),
+        bank_account_number: $("#setBankAccountNumber").value.trim(),
+        bank_branch: $("#setBankBranch").value.trim(),
+        bank_reference_hint: $("#setBankReferenceHint").value.trim(),
         base_delivery_fee: baseFee,
         boda_base_fee: baseFee
       };
@@ -4122,15 +4310,54 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     /* order pipeline */
     const btnSetPaid = t.closest("[data-set-paid]");
     if (btnSetPaid) {
+      const method = btnSetPaid.dataset.method || "cash";
+      // Money that arrives through a bank or merchant statement is matched by
+      // its reference, so those buttons open the reference field instead of
+      // settling blind. Cash on the counter needs no reference.
+      if (btnSetPaid.dataset.promptsReference) {
+        const row = $("#odmRefRow");
+        if (row) {
+          row.hidden = false;
+          row.dataset.method = method;
+          row.dataset.orderId = btnSetPaid.dataset.setPaid;
+          const input = $("#odmRefInput");
+          if (input) { input.placeholder = method === "bank_transfer"
+            ? "Bank reference / transaction ID from the deposit message"
+            : "Transaction ID from the payment message (optional for a merchant point)"; input.focus(); }
+        }
+        return;
+      }
       try {
-        const method = btnSetPaid.dataset.method || "cash";
         await DB.setPaymentStatus(btnSetPaid.dataset.setPaid, true, method, whoName);
-        toast(`${btnSetPaid.dataset.setPaid} marked as PAID (${method.toUpperCase()})`);
+        toast(`${btnSetPaid.dataset.setPaid} marked as PAID (${DB.TENDER_LABEL({ type: method })})`);
         if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
           orderDetailModal(btnSetPaid.dataset.setPaid);
         }
         renderSales();
       } catch (err) { toast(err.message, false); }
+      return;
+    }
+    const refConfirm = t.closest("#odmRefConfirm");
+    if (refConfirm) {
+      const row = $("#odmRefRow");
+      const orderId = (row && row.dataset.orderId) || "";
+      const method = (row && row.dataset.method) || "mobile_money";
+      const reference = ($("#odmRefInput") ? $("#odmRefInput").value : "").trim();
+      if (!orderId) return;
+      if (method === "bank_transfer" && !reference) {
+        toast("Enter the bank reference so this payment can be reconciled", false);
+        return;
+      }
+      refConfirm.disabled = true;
+      try {
+        await DB.setPaymentStatus(orderId, true, method, whoName, { reference });
+        toast(`${orderId} marked as PAID (${DB.TENDER_LABEL({ type: method })})`);
+        if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
+          orderDetailModal(orderId);
+        }
+        renderSales();
+      } catch (err) { toast(err.message, false); }
+      finally { refConfirm.disabled = false; }
       return;
     }
     const btnSetUnpaid = t.closest("[data-set-unpaid]");
@@ -4388,7 +4615,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (currentView === "partners") renderPartners();
     if (currentView === "staff") renderStaff();
     if (currentView === "settings") renderSettings();
-    const webPend = allSales().filter(s => s.channel === "web" && s.status === "pending").length;
+    // Same predicate the dashboard uses: a web order stays "open" until it is
+    // completed or cancelled — awaiting-payment orders are exactly the ones
+    // staff need to see in the badge.
+    const webPend = allSales().filter(isOpenWebOrder).length;
     $("#navWebBadge").textContent = webPend || "";
     $("#navStockBadge").textContent = DB.listProducts().filter(p => p.in_stock_count <= 0).length || "";
   }

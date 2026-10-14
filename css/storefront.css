@@ -649,7 +649,90 @@ body.cart-open .drawer-backdrop, .drawer-backdrop.is-active { opacity: 1; pointe
 }
 .claim-confirm-btn:hover { background: var(--rust-dark); }
 .claim-confirm-btn:disabled { background: #D1D5DB; color: #6B7280; cursor: not-allowed; }
+/* Secondary action inside the pay step (e.g. "continue browsing"). */
+.claim-confirm-btn.ghost {
+  background: transparent; color: var(--ink);
+  border: 1px solid var(--line); font-weight: 600;
+}
+.claim-confirm-btn.ghost:hover { background: var(--page); }
+
+/* ============ PAYMENT METHOD CHOOSER + PAY STEP ============ */
+.pay-method-block { margin: 12px 0 4px; }
+.pay-method-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pay-method-btn {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px;
+  background: var(--card); color: var(--ink); font: 500 12px var(--font-text);
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.pay-method-btn strong { font-size: 12.5px; font-weight: 700; }
+.pay-method-btn span { font-size: 11px; color: var(--muted); line-height: 1.35; }
+.pay-method-btn:hover { border-color: var(--rust); }
+.pay-method-btn.active { border-color: var(--ink); background: var(--page); box-shadow: inset 0 0 0 1px var(--ink); }
+.pay-method-btn.active span { color: var(--body); }
+
+.pay-step { gap: 10px; }
+.pay-step-head { text-align: center; display: flex; flex-direction: column; gap: 3px; }
+.pay-step-eyebrow { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--rust); font-weight: 800; }
+.pay-step-title { font-family: var(--font-display); font-size: 19px; font-weight: 800; margin: 0; color: var(--ink); }
+.pay-step-sub { font-size: 11.5px; color: var(--muted); margin: 0; line-height: 1.45; }
+.pay-hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 8px 0; }
+.pay-notice { font-size: 11.5px; color: var(--body); line-height: 1.5; }
+
+.pay-detail-card {
+  background: var(--page); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 13px; display: flex; flex-direction: column; gap: 6px;
+}
+.pay-detail-row { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
+.pay-detail-row span { color: var(--muted); }
+.pay-detail-row strong { color: var(--ink); text-align: right; word-break: break-word; }
+
+.pay-code-card {
+  background: #111827; border-radius: 12px; padding: 16px 18px; text-align: center;
+  display: flex; flex-direction: column; gap: 4px; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+}
+.pay-code-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #9CA3AF; font-weight: 700; }
+.pay-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 25px; font-weight: 800; color: #FFFFFF; letter-spacing: .08em;
+}
+.pay-code-amount { font-size: 11.5px; color: #D1D5DB; }
+.pay-instructions { margin: 8px 0 0; padding-left: 18px; font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+.pay-instructions li { margin-bottom: 3px; }
+.pay-inline-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+.pay-mini-btn {
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px;
+  background: var(--card); color: var(--ink); font: 700 11.5px var(--font-text);
+  cursor: pointer; text-decoration: none; text-align: center;
+}
+.pay-mini-btn:hover { border-color: var(--rust); }
+.pay-flash {
+  margin: 8px 0 0; padding: 9px 11px; border-radius: 9px;
+  background: rgba(146, 64, 14, .08); border-left: 3px solid #B45309;
+  color: #78350F; font-size: 11.5px; line-height: 1.45;
+}
+.pay-flash.ok { background: rgba(22, 163, 74, .08); border-left-color: #15803D; color: #14532D; }
+.pay-switch { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.pay-switch-label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+.pay-switch-row { display: flex; flex-wrap: wrap; gap: 7px; }
 .claim-notice-sub { font-size: 11px; color: var(--muted); text-align: center; margin-top: 7px; line-height: 1.4; }
+
+/* Instant mobile money: the prompt button is the primary action, and the
+   merchant-line instructions sit underneath it as the deliberate fallback. */
+.pay-instant {
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 13px;
+  background: var(--card); display: flex; flex-direction: column; gap: 6px;
+}
+.pay-instant .claim-confirm-btn { margin-top: 4px; }
+.pay-manual { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 9px; }
+.pay-manual summary {
+  cursor: pointer; font-size: 11.5px; font-weight: 700; color: var(--rust);
+  list-style: none; display: flex; align-items: center; gap: 6px;
+}
+.pay-manual summary::-webkit-details-marker { display: none; }
+.pay-manual summary::before { content: "＋"; font-weight: 800; }
+.pay-manual[open] summary::before { content: "－"; }
+.pay-manual > * + * { margin-top: 8px; }
 
 /* Confirmation Screen (Screenshot 2) */
 .order-confirmed-view { display: flex; flex-direction: column; gap: 12px; padding: 4px 0; }

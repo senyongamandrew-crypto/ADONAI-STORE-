@@ -83,6 +83,13 @@
     "Traditional & Occasionwear": "TRD", "Swimwear & Beachwear": "SWM"
   };
   const TENDER_TYPES  = ["cash", "mtn", "airtel"];
+  // Every tender the server can record on an order. The POS picker still
+  // offers only the counter options above, but staff confirming an online
+  // payment must not have the channel downgraded to "cash" in the local copy.
+  const RECORDED_TENDERS = TENDER_TYPES.concat([
+    "whatsapp", "flutterwave", "online", "card",
+    "mobile_money", "momo", "bank_transfer", "bank", "merchant_code", "merchant"
+  ]);
   const DISPATCH_STATUSES = ["Unfulfilled", "In Assembly", "Ready for Pickup", "Dispatched", "Completed"];
   const RIDER_STATUSES    = ["Available", "On delivery", "Offline"];
   const STAFF_ROLES = ["admin", "manager", "cashier", "rider"];
@@ -579,7 +586,10 @@
     if (t.type === "cash") return "Cash";
     if (t.type === "mtn") return "MTN MoMo";
     if (t.type === "airtel") return "Airtel Money";
-    if (t.type === "flutterwave" || t.type === "online") return "Paid online (Flutterwave)";
+    if (t.type === "flutterwave" || t.type === "online" || t.type === "card") return "Paid online (Flutterwave)";
+    if (t.type === "mobile_money" || t.type === "momo") return "Mobile money (merchant line)";
+    if (t.type === "bank_transfer" || t.type === "bank") return "Bank transfer";
+    if (t.type === "merchant_code" || t.type === "merchant") return "Merchant pay code";
     return t.type;
   }
 
@@ -975,9 +985,13 @@
         return JSON.parse(JSON.stringify(sale));
       });
     },
-    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items, lock_owner, payment_method }) {
+    async createWebOrder({ customer_name, customer_phone, delivery_type, delivery_area, delivery_address, delivery_fee, delivery_notes, items, lock_owner, payment_method, payer_account }) {
       const fee = delivery_type === "pickup" ? 0 : Number(delivery_fee != null ? delivery_fee : 7000);
-      const wantsOnlinePayment = String(payment_method || "") === "flutterwave";
+      // Any channel other than pay-on-delivery is a "collect now" intent: the
+      // server reserves the pieces, issues the per-order payment token and
+      // tells us where the money has to go.
+      const channel = String(payment_method || "").trim().toLowerCase();
+      const wantsOnlinePayment = !!channel && channel !== "cod" && channel !== "cash";
       const data = await apiRequest("/api/orders", {
         method: "POST",
         body: JSON.stringify({
@@ -991,7 +1005,7 @@
           delivery_address: String(delivery_address || "").trim(),
           delivery_fee: fee,
           delivery_notes: String(delivery_notes || "").trim(),
-          ...(wantsOnlinePayment ? { payment_method: "flutterwave" } : {}),
+          ...(wantsOnlinePayment ? { payment_method: channel, payer_account: String(payer_account || "").trim() } : {}),
           status: "unfulfilled",
           dispatch_status: "Unfulfilled"
         })
@@ -1005,7 +1019,10 @@
         assigned_rider_id: null,
         assigned_rider_name: null
       });
-      const stored = tx("sales", st => {
+      // tx() resolves with the callback's value; attaching the payment block
+      // to the Promise itself (rather than to the awaited order) silently
+      // dropped the token and made every collect-now order look unpaid.
+      const stored = await tx("sales", st => {
         (data.products || []).forEach(product => {
           const local = byId(st.products, product.id);
           if (local) Object.assign(local, product);
@@ -1015,9 +1032,9 @@
         else st.sales.push(sale);
         return JSON.parse(JSON.stringify(sale));
       });
-      // The per-order payment token authorizes online payment actions for
-      // this order. It is handed back to the caller in memory only — it is
-      // never stored in the local sales record.
+      // The per-order payment token authorizes payment actions for this order.
+      // It is handed back to the caller in memory only — it is never stored in
+      // the local sales record.
       if (data.payment) stored.payment = data.payment;
       return stored;
     },
@@ -1034,10 +1051,16 @@
       }
       return this._paymentConfigCache;
     },
-    async createFlutterwaveSession(orderId, paymentToken) {
+    async createFlutterwaveSession(orderId, paymentToken, channel) {
       const data = await apiRequest("/api/payments/flutterwave/session", {
         method: "POST",
-        body: JSON.stringify({ order_id: String(orderId || ""), payment_token: String(paymentToken || "") })
+        body: JSON.stringify({
+          order_id: String(orderId || ""),
+          payment_token: String(paymentToken || ""),
+          // Which rail to collect on: card, or momo (push prompt + PIN on the
+          // shopper's phone). Bank / merchant orders are refused by the server.
+          channel: String(channel || "")
+        })
       }, false);
       if (!data || !data.tx_ref) throw new Error((data && data.error) || "Could not start the payment session");
       return data;
@@ -1064,6 +1087,74 @@
       const data = await apiRequest("/api/payments/status?" + params.toString(), { method: "GET" }, false);
       return data || {};
     },
+    /* Change how a not-yet-paid order will be settled. The server re-posts the
+       money to the right account, so this is safe to call at any point before
+       the payment lands. */
+    async setPaymentChannel(orderId, paymentToken, paymentMethod, payerAccount) {
+      return apiRequest("/api/payments/method", {
+        method: "POST",
+        body: JSON.stringify({
+          order_id: String(orderId || ""),
+          payment_token: String(paymentToken || ""),
+          payment_method: String(paymentMethod || ""),
+          payer_account: String(payerAccount || "")
+        })
+      }, false);
+    },
+    /* Ask the system for this order's merchant pay code (idempotent). */
+    async requestMerchantPayCode(orderId, paymentToken) {
+      const data = await apiRequest("/api/payments/merchant-code", {
+        method: "POST",
+        body: JSON.stringify({ order_id: String(orderId || ""), payment_token: String(paymentToken || "") })
+      }, false);
+      if (!data || !data.merchant_pay_code) throw new Error((data && data.error) || "Could not issue a pay code");
+      return data;
+    },
+    /* The reconciliation trail for one order: every gateway attempt with its
+       reference and Flutterwave transaction id. Staff-only view data. */
+    async fetchOrderPaymentTrail(orderId) {
+      try {
+        return await apiRequest(`/api/orders/${encodeURIComponent(orderId)}/payments`, { method: "GET" }, true);
+      } catch (err) {
+        const message = (err && err.data && err.data.error) || (err && err.message) || "Could not load the payment trail";
+        const failure = new Error(message);
+        failure.status = err && err.status;
+        throw failure;
+      }
+    },
+    /* Counter lookup: which order does this merchant pay code belong to?
+       Staff-only — it exposes the customer behind the code. */
+    async findOrderByPayCode(code) {
+      try {
+        return await apiRequest("/api/payments/merchant-code/lookup", {
+          method: "POST",
+          body: JSON.stringify({ code: String(code || "").trim() })
+        }, true);
+      } catch (err) {
+        const message = (err && err.data && err.data.error) || (err && err.message) || "Could not look up that pay code";
+        const failure = new Error(message);
+        failure.status = err && err.status;
+        throw failure;
+      }
+    },
+    /* Tell the store what the shopper paid. Records a claim for staff to
+       verify — it never marks the order paid on its own. */
+    async submitPaymentClaim(orderId, paymentToken, paymentMethod, reference) {
+      try {
+        return await apiRequest("/api/payments/claim", {
+          method: "POST",
+          body: JSON.stringify({
+            order_id: String(orderId || ""),
+            payment_token: String(paymentToken || ""),
+            payment_method: String(paymentMethod || ""),
+            reference: String(reference || "")
+          })
+        }, false);
+      } catch (err) {
+        if (err && err.status && err.data) return Object.assign({ ok: false }, err.data);
+        throw err;
+      }
+    },
     /* Load the Flutterwave Inline SDK on demand (only when paying). */
     loadFlutterwaveScript() {
       if (window.FlutterwaveCheckout) return Promise.resolve(true);
@@ -1082,7 +1173,7 @@
       return tx("sales", st => {
         const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
         if (s.status === "cancelled") throw new Error("Order was cancelled");
-        s.tender = { type: TENDER_TYPES.includes(method) ? method : "cash", paid: true, confirmed_by: by || "admin" };
+        s.tender = { type: RECORDED_TENDERS.includes(method) ? method : "cash", paid: true, confirmed_by: by || "admin" };
         s.status = "completed";
         s.completed_at = new Date().toISOString();
         if (!st.ledger.some(l => l.sale_id === s.id)) {
@@ -1091,27 +1182,53 @@
         return JSON.parse(JSON.stringify(s));
       });
     },
-    setPaymentStatus(id, paid, method = "cash", by = "admin") {
-      return tx("sales", st => {
-        const s = byId(st.sales, id); if (!s) throw new Error("Order not found");
-        if (s.status === "cancelled") throw new Error("Order is cancelled");
+    /* Confirm money actually landed (mobile money, bank, merchant pay code,
+       cash) or revert that confirmation. The SERVER is the source of truth:
+       it records the payment attempt, moves the order to PAID and settles
+       partner payables. The local cache is only updated afterwards, so a
+       failed call can never leave a console showing money that never arrived. */
+    async setPaymentStatus(id, paid, method = "cash", by = "admin", options = {}) {
+      const opts = options || {};
+      let serverResult = null;
+      try {
+        serverResult = await apiRequest(`/api/orders/${encodeURIComponent(id)}/payment`, {
+          method: "POST",
+          body: JSON.stringify({
+            paid: paid ? true : false,
+            payment_method: String(method || "cash"),
+            reference: String(opts.reference || ""),
+            note: String(opts.note || "")
+          })
+        }, true);
+      } catch (err) {
+        if (!err || !err.status) throw err;               // real network failure
+        const message = (err.data && err.data.error) || err.message || "Payment status was not accepted";
+        const failure = new Error(message);
+        failure.status = err.status; failure.data = err.data;
+        throw failure;
+      }
+      const confirmedAt = new Date().toISOString();
+      const confirmedBy = by || "admin";
+      tx("sales", st => {
+        const s = byId(st.sales, id); if (!s) return;
         if (paid) {
-          const m = TENDER_TYPES.includes(method) ? method : "cash";
-          s.tender = {
-            type: m,
-            paid: true,
-            confirmed_by: by || "admin",
-            confirmed_at: new Date().toISOString()
-          };
+          const m = RECORDED_TENDERS.includes(method) ? method : "cash";
+          if (!s.tender) s.tender = {};
+          s.tender.type = m;
+          s.tender.paid = true;
+          s.tender.confirmed_by = confirmedBy;
+          s.tender.confirmed_at = confirmedAt;
+          if (s.payment) { s.payment.status = "paid"; s.payment.channel = m; }
           if (!st.ledger.some(l => l.sale_id === s.id)) {
-            logSaleEntry(st, s, by || "admin");
+            logSaleEntry(st, s, confirmedBy);
           }
         } else {
           s.tender = { type: "whatsapp", paid: false };
+          if (s.payment) s.payment.status = s.payment.channel ? "pending" : "unpaid";
           st.ledger = st.ledger.filter(l => l.sale_id !== s.id);
         }
-        return JSON.parse(JSON.stringify(s));
       });
+      return serverResult;
     },
     async updateOrderFulfillment(id, fulfillment_status, extra) {
       const data = await apiRequest("/api/orders/" + encodeURIComponent(id), {

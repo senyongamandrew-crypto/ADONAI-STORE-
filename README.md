@@ -45,7 +45,7 @@ A production-grade unified retail and e-commerce system for **Adonai Store** (Pl
 
 - **Entry Route**: `/`
 - **Features**: Live dual-inventory catalog, Brand-New / Vintage filter chips, demographic and category filters, search by title/brand/barcode, responsive shopping bag drawer, web cart reservations, and direct POS fulfillment sync.
-- **Online Payments (Flutterwave)**: Checkout offers **Pay now — MoMo & Card** (MTN MoMo, Airtel Money, Visa, Mastercard via the Flutterwave popup) alongside **Pay on delivery/pickup**. Orders are reserved while the customer pays, verified server-side before being marked paid, settled via webhook, and auto-released if unpaid within the payment window. **Setup guide: [FLUTTERWAVE_PAYMENTS.md](FLUTTERWAVE_PAYMENTS.md).**
+- **Payments at checkout**: **Card** and **mobile money** collected instantly by the gateway (the shopper approves the MoMo prompt on their own phone with their own PIN), **mobile money to the store merchant line**, **bank transfer**, and a **system-issued merchant pay code** (`ADN-XXXXXX`) — alongside **Pay on delivery/pickup** exactly as before. Confirming a collect-now order goes straight to a pay step showing the exact amount, the pay-to details or code, and a place to submit the transaction reference; reserved pieces are released automatically if the payment window lapses, and nothing is marked paid until the gateway verifies it or staff confirm the money landed. **Setup guide: [FLUTTERWAVE_PAYMENTS.md](FLUTTERWAVE_PAYMENTS.md).**
 - **Privacy & Security**: All POS links, admin navigation, and staff login prompts have been completely stripped from the storefront.
 
 ---
@@ -94,7 +94,7 @@ scroll lock is `body.pdp-lightbox-open`, applied while the full-screen zoom is o
   next-day boda; up-country hubs (Mbarara, Jinja, Gulu, Arua, Masaka, Mbale) on
   24–48h bus/courier; and free self-pickup at the store counter. The choice
   persists in `adonai-delivery-zone` and is carried into the WhatsApp message.
-- **Payment trust row** — MTN MoMo, Airtel Money and Cash on Delivery / Pickup.
+- **Payment trust row** — MTN MoMo, Airtel Money, bank transfer and Cash on Delivery / Pickup.
 
 ### Performance & SEO
 

@@ -457,6 +457,38 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .sel-full:focus { border-color: var(--ink); }
 .sel-full.err { border-color: var(--red); }
 .sel-mini { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--muted); padding: 0 8px; font-size: 12px; }
+/* Pay-to details (merchant line, bank account) shown to shoppers at checkout. */
+/* Order panel — payment trail (gateway reconciliation) */
+.odm-attempts { margin-top: 12px; border-top: 1px dashed var(--line, #E5E7EB); padding-top: 10px; }
+.odm-attempts-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.odm-attempts-summary { margin: 0 0 8px; }
+.odm-attempt {
+  border: 1px solid var(--line, #E5E7EB); border-radius: 9px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; background: var(--page, #FAFAFA);
+}
+.odm-attempt-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.odm-attempt-meta { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11px; color: var(--muted, #6B7280); }
+.odm-attempt-meta code, .odm-attempts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(17, 24, 39, .06); padding: 1px 5px; border-radius: 4px; font-size: 11px;
+}
+.stat-chip.bad { background: rgba(185, 28, 28, .12); color: #991B1B; }
+
+/* Payment gateway status card (Store Settings). Informational only — the
+   console never sees or stores the gateway keys. */
+.gw-status-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.gw-status-head h3 { margin: 2px 0 0; font-size: 15px; }
+.gw-status-list { margin: 6px 0 8px; padding-left: 20px; font-size: 11.5px; color: var(--muted, #6B7280); line-height: 1.6; }
+.gw-status-list li { margin-bottom: 3px; }
+.gw-status-list code, #gatewayStatusBody code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(17, 24, 39, .06); padding: 1px 5px; border-radius: 4px; font-size: 11px;
+}
+.pa-status-badge.pa-badge-warn { background: rgba(180, 83, 9, .12); color: #92400E; border-color: rgba(180, 83, 9, .35); }
+
+.payto-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.payto-pair .sel-full + .sel-full { margin-top: 0; }
+#setBankReferenceHint { margin-top: 8px; }
 .sku-row { display: flex; gap: 8px; align-items: center; }
 textarea.sel-full { resize: vertical; min-height: 78px; line-height: 1.5; }
 /* Flat-lay measurement capture (intake → product detail page) */
@@ -549,6 +581,23 @@ textarea.sel-full { resize: vertical; min-height: 78px; line-height: 1.5; }
 
 .odm-info-block { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--body); margin: 12px 0; }
 .odm-info-block div strong { color: var(--ink); }
+
+/* Payment confirmation aids: what the customer claims they paid, their pay
+   code, and the number the money will come from. */
+.odm-payment-hint {
+  margin-top: 12px; padding: 11px 13px; border-radius: 10px;
+  background: rgba(146, 64, 14, .06); border-left: 3px solid #B45309;
+  font-size: 12.5px; color: var(--body); line-height: 1.5;
+}
+.odm-payment-hint p { margin: 0 0 6px; }
+.odm-payment-hint p:last-child { margin-bottom: 0; }
+.odm-payment-hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #FFF; border: 1px solid var(--line); border-radius: 5px;
+  padding: 1px 6px; font-size: 12px; color: var(--ink); letter-spacing: .04em;
+}
+.odm-ref-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+.odm-ref-row .sel-full { flex: 1 1 260px; }
 
 .wa-chat-full-btn {
   background: #25D366; color: #FFF; font: 700 13px var(--font-text);
