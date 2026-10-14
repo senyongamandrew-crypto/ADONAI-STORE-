@@ -172,10 +172,11 @@ set this on Render.
 
 * Settlement: Flutterwave settles to the bank/mobile-money float linked to
   your dashboard account on its normal payout schedule.
-* In the store ledger, online payments post the sale debit to
-  **1020 Bank Account** (vs `1010 Mobile Money` for manual MoMo and
-  `1000 Cash on Hand` for cash) so you can reconcile against Flutterwave
-  payouts.
+* In the store ledger, gateway-collected payments (card, instant MoMo) post
+  the sale debit to **1020 Bank Account** — an instant-MoMo order first posts
+  to `1010 Mobile Money` with the rest of the MoMo traffic, then settlement
+  moves that debit to 1020, so the books follow the money rather than the
+  button the shopper pressed. Manual MoMo stays on `1010` and cash on `1000`.
 * Every attempt is recorded in the `payment_transactions` table (reference,
   amount, channel, Flutterwave transaction id) — visible to staff via the
   order's payment block.

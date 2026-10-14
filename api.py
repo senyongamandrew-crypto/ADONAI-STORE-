@@ -1176,6 +1176,30 @@ def settle_order_payment(session, order, verified, attempt=None, source="browser
     attempt.gateway_payload = payments.transaction_summary(verified)
     attempt.updated_at = now
 
+    # The sale was posted against the channel the shopper picked, but the money
+    # is now sitting with the gateway (which pays out to the bank), so move the
+    # debit to the settlement account instead of rewriting the original entry.
+    previous_tender = str(order.tender_type or "")
+    if previous_tender and previous_tender != payments.PROVIDER and int(order.total or 0) > 0:
+        old_code, old_name = payment_account(previous_tender)
+        new_code, new_name = payment_account(payments.PROVIDER)
+        if old_code != new_code:
+            create_journal_entry(
+                session,
+                reference=order.id,
+                source="payment_gateway_settlement",
+                description=f"Gateway settlement for {order.id}: {previous_tender} → {payments.PROVIDER}",
+                occurred_at=now,
+                staff={"id": "GATEWAY", "name": "Flutterwave settlement"},
+                lines=[
+                    {"account_code": new_code, "account_name": new_name, "debit": int(order.total or 0)},
+                    {"account_code": old_code, "account_name": old_name, "credit": int(order.total or 0)},
+                ],
+            )
+            logger.info(
+                "Gateway settlement reclassified %s: %s -> %s", order.id, previous_tender, payments.PROVIDER
+            )
+
     order.payment_status = "paid"
     order.tender_type = payments.PROVIDER
     order.payment_provider = payments.PROVIDER
