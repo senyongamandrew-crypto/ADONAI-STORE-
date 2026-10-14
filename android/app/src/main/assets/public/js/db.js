@@ -1110,6 +1110,21 @@
       if (!data || !data.merchant_pay_code) throw new Error((data && data.error) || "Could not issue a pay code");
       return data;
     },
+    /* Counter lookup: which order does this merchant pay code belong to?
+       Staff-only — it exposes the customer behind the code. */
+    async findOrderByPayCode(code) {
+      try {
+        return await apiRequest("/api/payments/merchant-code/lookup", {
+          method: "POST",
+          body: JSON.stringify({ code: String(code || "").trim() })
+        }, true);
+      } catch (err) {
+        const message = (err && err.data && err.data.error) || (err && err.message) || "Could not look up that pay code";
+        const failure = new Error(message);
+        failure.status = err && err.status;
+        throw failure;
+      }
+    },
     /* Tell the store what the shopper paid. Records a claim for staff to
        verify — it never marks the order paid on its own. */
     async submitPaymentClaim(orderId, paymentToken, paymentMethod, reference) {

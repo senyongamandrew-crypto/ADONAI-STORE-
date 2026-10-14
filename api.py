@@ -951,7 +951,13 @@ def checkout_payment_options(settings: dict) -> dict:
 
 
 def resolve_merchant_pay_code(session, order, code: str):
-    """Find an unpaid order by the merchant pay code a customer read out."""
+    """Find the order that carries a merchant pay code (settled or not).
+
+    `order` is accepted for call-site symmetry with the other payment helpers;
+    a code is always resolved against the whole table, never just one order, so
+    the counter can look a customer's code up cold. The locked row is returned
+    so a caller that settles on the spot cannot race another confirmation.
+    """
     normalized = payments.normalize_pay_code(code)
     if not normalized:
         return None
@@ -1215,7 +1221,8 @@ def settle_order_payment(session, order, verified, attempt=None, source="browser
     broadcast_event(
         "ORDER_PAID",
         f"💳 Paid online — Order #{order_number}",
-        f"{order.customer_name or 'Online shopper'} paid UGX {int(order.total or 0):,} via Flutterwave ({attempt.channel or 'online'}).",
+        f"{order.customer_name or 'Online shopper'} paid UGX {int(order.total or 0):,} by "
+        f"{payments.gateway_type_label(attempt.channel)} — settled automatically, nothing to confirm.",
         {"order_id": order.id, "amount": order.total, "reference": attempt.tx_ref, "channel": attempt.channel or ""},
         session=session,
     )
@@ -3021,6 +3028,59 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "currency": payments.FLW_CURRENCY,
                     "expires_at": order.payment_expires_at.isoformat() if order.payment_expires_at else None,
                     "instructions": merchant_pay_code_instructions(code, order, settings),
+                })
+
+        if clean_path == "/api/payments/merchant-code/lookup" and method == "POST":
+            # Counter lookup: a customer quotes their ADN- code and staff need
+            # the order behind it. Staff-only, because it exposes customer
+            # details; the code itself is not treated as a secret.
+            if not rate_limiting_disabled():
+                allowed, retry_after = _rate_limiter.check("flw.code.lookup", client_ip, 60, 60)
+                if not allowed:
+                    return json_response({
+                        "ok": False, "error": "Too many lookups. Please wait a moment.",
+                        "retry_after_seconds": retry_after,
+                    }, status=429)
+            with get_db() as session:
+                area_access = access_control.state(headers, session)
+                if not access_control.allowed("orders", area_access) and not access_control.allowed("finance", area_access):
+                    status, payload = access_control.locked_response("orders")
+                    return json_response(payload, status=status)
+                is_authed, staff_info = is_authenticated_staff(headers, body, query_params)
+                if not is_authed:
+                    return json_response({
+                        "ok": False,
+                        "error": "Unauthorized: Staff terminal authentication required to look up a pay code",
+                    }, status=401)
+                typed = clean_text(body.get("code") or body.get("merchant_pay_code") or "", 40)
+                if not payments.normalize_pay_code(typed):
+                    return json_response({
+                        "ok": False,
+                        "error": "That does not look like one of our pay codes. Codes look like ADN-XXXXXX.",
+                    }, status=400)
+                order = resolve_merchant_pay_code(session, None, typed)
+                if not order:
+                    return json_response({
+                        "ok": False,
+                        "error": "No order carries that pay code. Check the code with the customer.",
+                    }, status=404)
+                logger.info(
+                    "Pay code %s looked up by %s -> %s",
+                    payments.normalize_pay_code(typed), (staff_info or {}).get("name") or "staff", order.id,
+                )
+                return json_response({
+                    "ok": True,
+                    "order_id": order.id,
+                    "merchant_pay_code": order.merchant_pay_code or "",
+                    "amount": int(order.total or 0),
+                    "currency": payments.FLW_CURRENCY,
+                    "payment_status": order.payment_status or "unpaid",
+                    "order_status": order.status or "",
+                    "dispatch_status": order.dispatch_status or "",
+                    "customer_name": order.customer_name or "",
+                    "customer_phone": order.customer_phone or "",
+                    "settled": (order.payment_status == "paid"),
+                    "order": access_control.sanitize_sale(order.to_dict(), area_access),
                 })
 
         if clean_path == "/api/payments/claim" and method == "POST":

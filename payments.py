@@ -396,6 +396,29 @@ def verify_transaction(transaction_id) -> dict:
     }
 
 
+# Flutterwave reports the instrument it actually charged on. The raw value is
+# kept on the attempt row for reconciliation, but staff read a sentence, so map
+# the common ones to plain words.
+GATEWAY_TYPE_LABELS = {
+    "card": "card",
+    "mobilemoneyuganda": "mobile money",
+    "mobilemoney": "mobile money",
+    "mpesa": "mobile money",
+    "banktransfer": "bank transfer",
+    "bank_transfer": "bank transfer",
+    "ussd": "USSD",
+    "mock": "simulated gateway",
+}
+
+
+def gateway_type_label(payment_type) -> str:
+    """Human wording for a gateway payment type ('online' when unknown)."""
+    value = str(payment_type or "").strip().lower()
+    if not value:
+        return "online"
+    return GATEWAY_TYPE_LABELS.get(value, value.replace("_", " "))
+
+
 def transaction_summary(verified: dict, limit: int = 1500) -> str:
     """Compact JSON audit snapshot stored on the payment attempt row."""
     try:

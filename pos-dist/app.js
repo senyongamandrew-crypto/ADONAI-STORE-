@@ -24,7 +24,7 @@
      own vocabulary so staff read "Bank transfer", not a server key. */
   const CHANNEL_LABELS = {
     card: "Card / online (Flutterwave)", flutterwave: "Card / online (Flutterwave)",
-    momo: "Mobile money (merchant line)", mobile_money: "Mobile money (merchant line)",
+    momo: "Mobile money", mobile_money: "Mobile money",
     mtn: "MTN MoMo", airtel: "Airtel Money",
     bank: "Bank transfer", bank_transfer: "Bank transfer",
     merchant: "Merchant pay code", merchant_code: "Merchant pay code",
@@ -829,6 +829,28 @@
   }
 
   $("#orderSearch").addEventListener("input", e => { orderTerm = e.target.value.trim().toLowerCase(); renderSales(); });
+  /* A customer at the counter quotes their merchant pay code; this jumps
+     straight to that order so staff can take the money and settle it. */
+  const payCodeLookup = $("#orderPayCodeLookup");
+  if (payCodeLookup) payCodeLookup.addEventListener("keydown", async e => {
+    if (e.key !== "Enter") return;
+    const code = e.target.value.trim();
+    if (!code) return;
+    try {
+      const found = await DB.findOrderByPayCode(code);
+      e.target.value = "";
+      orderTerm = "";
+      const search = $("#orderSearch");
+      if (search) search.value = "";
+      await setView("sales", false);
+      orderDetailModal(found.order_id);
+      toast(found.settled
+        ? `${found.order_id} already shows as PAID — nothing else to collect`
+        : `${found.order_id} · ${ugx(found.amount)} due${found.customer_name ? " · " + found.customer_name : ""}`);
+    } catch (err) {
+      toast(err.message || "Could not look up that pay code", false);
+    }
+  });
   $("#orderSort").addEventListener("change", e => { orderSort = e.target.value; renderSales(); });
   $("#orderChannelFilter").addEventListener("change", e => { channelFilter = e.target.value; renderSales(); });
   $("#payFilterPills").addEventListener("click", e => {

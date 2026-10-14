@@ -140,7 +140,8 @@
      paymentMethod is the channel the shopper picked:
        'cod'      — pay the rider / at the counter on handoff (no prepayment)
        'card'     — Flutterwave popup, settled by the gateway
-       'momo'     — send mobile money to the store merchant line, then submit
+       'momo'     — approve the prompt on the paying phone (gateway), or send
+                    mobile money to the store merchant line and then submit
                     the transaction id; staff confirm and the order clears
        'bank'     — pay into the store bank account, submit the reference
        'merchant' — the system issues a merchant PAY CODE that the shopper (or
@@ -158,7 +159,6 @@
   let payerAccount = "";            // number/account the shopper will pay from
   let paymentDrafts = { reference: "", account: "" };
   let paymentFlash = "";            // short inline message inside the pay step
-  let paymentLastCheckedAt = 0;
 
   function channelInfo(id) {
     return (paymentConfig.channels || []).find(c => c.id === id) || null;
@@ -1352,7 +1352,6 @@
     paymentBusy = true; renderCart();
     try {
       const data = await DB.fetchPaymentStatus(orderResult.id, orderResult.paymentToken);
-      paymentLastCheckedAt = Date.now();
       orderResult.paymentStatus = data.payment_status || orderResult.paymentStatus;
       orderResult.merchantPayCode = data.merchant_pay_code || orderResult.merchantPayCode || "";
       if (data.reference) orderResult.reference = data.reference;

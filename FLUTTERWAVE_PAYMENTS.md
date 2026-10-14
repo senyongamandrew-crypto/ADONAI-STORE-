@@ -40,7 +40,12 @@ Shopper cart → [How would you like to pay?]
 4. Staff confirm      → console → Fulfillment & Orders → the order shows
                         AWAITING CONFIRMATION until someone confirms it, with the
                         reference, against the bank / MoMo statement
-                        (card settles automatically once the gateway verifies)
+                        (card and instant MoMo settle automatically once the
+                        gateway verifies)
+                        A customer who quotes an ADN- code at the counter is
+                        found by typing it into the Pay code box in the Orders
+                        toolbar — it opens that order, with the amount still to
+                        collect.
 5. Order marked PAID  → POS/admin get a notification and the books update
 6. If unpaid in time  → pieces automatically return to the rail, order cancelled
                         (30 min card, 180 min offline by default)
@@ -149,6 +154,11 @@ API anyway.
    order, then press **Send the prompt**. The simulated gateway settles the order
    through the same verification path the real one uses, so the cart ends on
    **Status: Paid** and the order shows paid in the console.
+
+**Counter pay code:** place an order on the Merchant pay code channel, then in
+the console's Fulfillment & Orders view type the `ADN-` code into the **Pay code**
+box and press Enter — the order opens ready to settle. (Staff rights required:
+the lookup shows the customer behind the code.)
 
 **Bank transfer / merchant pay code / manual MoMo (no gateway needed):**
 1. Publish the merchant line and/or bank account in Store Settings.

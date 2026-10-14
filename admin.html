@@ -195,6 +195,11 @@
             <span class="sr-only">Search orders</span>
             <input id="orderSearch" type="search" placeholder="Search order, customer, item or phone" autocomplete="off" />
           </label>
+          <label class="order-search-field" title="A customer quoting their merchant pay code (ADN-XXXXXX)">
+            <i data-icon="qrcode" data-size="16"></i>
+            <span class="sr-only">Find order by merchant pay code</span>
+            <input id="orderPayCodeLookup" type="search" placeholder="Pay code (ADN-XXXXXX)" autocomplete="off" />
+          </label>
           <label class="order-select-field">
             <span class="sr-only">Sort orders</span>
             <select id="orderSort" aria-label="Sort orders">
@@ -814,7 +819,7 @@
           <div class="field full"><label>Physical store address</label><input class="sel-full" id="setAddress" /></div>
           <div class="field full"><label>Delivery area scope</label><input class="sel-full" id="setScope" /></div>
           <div class="field full"><label>Opening hours</label><input class="sel-full" id="setHours" /></div>
-          <div class="field full payment-payto-group"><label>Mobile money merchant line<span class="fhint">Shown to shoppers who choose “Mobile Money” at checkout — a shopper cannot pay a line you do not publish</span></label>
+          <div class="field full payment-payto-group"><label>Mobile money merchant line<span class="fhint">Where shoppers send mobile money when they pay the line themselves. With your Flutterwave keys set they get an instant prompt on their own phone instead, and this line becomes the alternative they can choose</span></label>
             <div class="payto-pair">
               <input class="sel-full" id="setMomoName" placeholder="Account / merchant name (e.g. Adonai Store)" />
               <input class="sel-full" id="setMomoNumber" placeholder="Merchant number (e.g. 0758873398)" inputmode="tel" />
@@ -864,7 +869,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=7.7"></script>
+<script src="app.js?v=7.8"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */
