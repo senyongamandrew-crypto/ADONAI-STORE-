@@ -504,14 +504,23 @@ class Order(Base):
     tender_amount = Column(Integer, nullable=True)
     tender_change = Column(Integer, nullable=True)
 
-    # Online gateway payment lifecycle (Flutterwave). Web orders paid online
-    # start 'pending' and only become 'paid' after server-side verification.
-    payment_status = Column(String(20), default="unpaid", index=True)  # 'unpaid', 'pending', 'paid', 'failed'
-    payment_provider = Column(String(30), nullable=True)  # 'flutterwave', etc.
-    payment_reference = Column(String(100), nullable=True, index=True)  # latest gateway tx_ref
+    # Online / offline payment lifecycle. Web orders that are settled now
+    # (card, mobile money, bank, merchant pay code) start 'pending' and only
+    # become 'paid' after gateway verification or a staff confirmation.
+    payment_status = Column(String(20), default="unpaid", index=True)  # 'unpaid', 'pending', 'claimed', 'paid', 'failed'
+    payment_provider = Column(String(30), nullable=True)  # channel id: 'card', 'momo', 'bank', 'merchant'
+    payment_channel = Column(String(30), nullable=True)  # normalized channel the shopper chose
+    payer_account = Column(String(60), nullable=True)  # number/account the shopper said they would pay from
+    merchant_pay_code = Column(String(30), nullable=True, index=True)  # per-order code for merchant-point settlement
+    payment_reference = Column(String(100), nullable=True, index=True)  # latest gateway tx_ref / offline reference
     payment_token_hash = Column(String(128), nullable=True)  # sha256 of the per-order payment token
     paid_at = Column(DateTime, nullable=True)
     payment_expires_at = Column(DateTime, nullable=True, index=True)  # stock released when this lapses unpaid
+    # What the shopper *says* they paid. A claim is never a settlement: it
+    # only tells staff what to look for in the bank / merchant statement.
+    payment_claim_channel = Column(String(30), nullable=True)
+    payment_claim_reference = Column(String(120), nullable=True)
+    payment_claim_at = Column(DateTime, nullable=True)
 
     # Staff attribution
     cashier_id = Column(String(50), nullable=True)
@@ -553,9 +562,17 @@ class Order(Base):
             "payment": {
                 "status": self.payment_status or "unpaid",
                 "provider": self.payment_provider or "",
+                "channel": self.payment_channel or self.payment_provider or "",
+                "payer_account": self.payer_account or "",
+                "merchant_pay_code": self.merchant_pay_code or "",
                 "reference": self.payment_reference or "",
                 "paid_at": self.paid_at.isoformat() if self.paid_at else None,
                 "expires_at": self.payment_expires_at.isoformat() if self.payment_expires_at else None,
+                "claim": {
+                    "channel": self.payment_claim_channel or "",
+                    "reference": self.payment_claim_reference or "",
+                    "at": self.payment_claim_at.isoformat() if self.payment_claim_at else None,
+                } if self.payment_claim_at else None,
             },
             "cashier": {
                 "id": self.cashier_id,

@@ -814,6 +814,21 @@
           <div class="field full"><label>Physical store address</label><input class="sel-full" id="setAddress" /></div>
           <div class="field full"><label>Delivery area scope</label><input class="sel-full" id="setScope" /></div>
           <div class="field full"><label>Opening hours</label><input class="sel-full" id="setHours" /></div>
+          <div class="field full payment-payto-group"><label>Mobile money merchant line<span class="fhint">Shown to shoppers who choose “Mobile Money” at checkout — a shopper cannot pay a line you do not publish</span></label>
+            <div class="payto-pair">
+              <input class="sel-full" id="setMomoName" placeholder="Account / merchant name (e.g. Adonai Store)" />
+              <input class="sel-full" id="setMomoNumber" placeholder="Merchant number (e.g. 0758873398)" inputmode="tel" />
+            </div>
+          </div>
+          <div class="field full payment-payto-group"><label>Bank account for transfers<span class="fhint">Shown to shoppers who choose “Bank transfer”. Leave the number blank to hide the bank option entirely</span></label>
+            <div class="payto-pair">
+              <input class="sel-full" id="setBankName" placeholder="Bank name (e.g. Stanbic Bank)" />
+              <input class="sel-full" id="setBankAccountName" placeholder="Account name" />
+              <input class="sel-full" id="setBankAccountNumber" placeholder="Account number" />
+              <input class="sel-full" id="setBankBranch" placeholder="Branch (optional)" />
+            </div>
+            <input class="sel-full" id="setBankReferenceHint" placeholder="Reference to quote (optional — defaults to the order number)" />
+          </div>
           <div class="field"><label>Base delivery fee (UGX)<span class="fhint">Single source of truth · delivery zones &amp; new catalog items use it instantly</span></label><input class="sel-full" id="setFee" type="number" min="0" /></div>
           <div class="field full"><label style="display:flex;gap:10px;align-items:center;font-weight:600;cursor:pointer"><input type="checkbox" id="setFeeApplyAll" style="width:16px;height:16px;accent-color:#15803d;flex:none" /><span>Also apply this fee to all existing catalog items<span class="fhint" style="font-weight:400">overwrites each item&apos;s transport &amp; adjusts selling prices by the 50 / 50 split</span></span></label></div>
           <div class="field" data-credential-control><label>Update Admin Master Key<span class="fhint">Minimum 6 characters — leave blank to keep current key</span></label><input class="sel-full" id="setKey" placeholder="Leave blank to keep current key" /></div>
@@ -837,8 +852,8 @@
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.1"></script>
 <script src="js/notifications.js?v=2.4"></script>
-<script src="js/icons.js?v=1.1"></script>
-<script src="js/db.js?v=5.0"></script>
+<script src="js/icons.js?v=1.2"></script>
+<script src="js/db.js?v=5.4"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/intake.js?v=5.1"></script>

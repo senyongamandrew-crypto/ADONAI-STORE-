@@ -136,16 +136,43 @@
   const saveCart = () => localStorage.setItem(CART_KEY, JSON.stringify(cart));
   let orderResult = null;
 
-  /* ---------- online payment (Flutterwave) state ---------- */
-  // paymentMethod: 'cod'  = pay on delivery/pickup (order first, pay on handoff)
-  //                'flutterwave' = pay now in the Flutterwave popup before the
-  //                order is considered confirmed. Pieces stay reserved for the
-  //                payment window the server announces (default 30 minutes).
-  let paymentConfig = { enabled: false, provider: "flutterwave", currency: "UGX", payment_window_minutes: 30 };
+  /* ---------- payment state ----------
+     paymentMethod is the channel the shopper picked:
+       'cod'      — pay the rider / at the counter on handoff (no prepayment)
+       'card'     — Flutterwave popup, settled by the gateway
+       'momo'     — send mobile money to the store merchant line, then submit
+                    the transaction id; staff confirm and the order clears
+       'bank'     — pay into the store bank account, submit the reference
+       'merchant' — the system issues a merchant PAY CODE that the shopper (or
+                    whoever is paying for them) settles at a merchant point
+     Every non-cash channel reserves the pieces for the window the server
+     announces, so a one-of-one piece cannot be double-sold. */
+  const PENDING_PAYMENT_KEY = "adonai-pending-payment-v1";
+  let paymentConfig = {
+    enabled: false, provider: "flutterwave", currency: "UGX",
+    payment_window_minutes: 30, offline_window_minutes: 180,
+    channels: [], methods: ["cod"], pay_to: {}
+  };
   let paymentMethod = "cod";
   let paymentBusy = false;
+  let payerAccount = "";            // number/account the shopper will pay from
+  let paymentDrafts = { reference: "", account: "" };
+  let paymentFlash = "";            // short inline message inside the pay step
+  let paymentLastCheckedAt = 0;
+
+  function channelInfo(id) {
+    return (paymentConfig.channels || []).find(c => c.id === id) || null;
+  }
+  function channelAvailable(id) {
+    const info = channelInfo(id);
+    return !!info && info.available !== false;
+  }
+  /* Only ever allow a channel the server currently offers, so a stale cached
+     page cannot park an order on a payment route the store cannot honour. */
   function setPaymentMethod(method) {
-    paymentMethod = method === "flutterwave" && paymentConfig.enabled ? "flutterwave" : "cod";
+    const next = String(method || "").trim();
+    paymentMethod = channelAvailable(next) ? next : "cod";
+    paymentFlash = "";
     renderCart();
   }
 
@@ -652,24 +679,30 @@
 
     if (orderResult) {
       const paymentState = orderResult.paymentStatus || "unpaid";
-      const awaitingPayment = orderResult.method === "flutterwave" && paymentState === "pending";
-      const paymentFailed = orderResult.method === "flutterwave" && paymentState === "failed";
-      const heading = paymentState === "paid"
+      const settled = paymentState === "paid" || orderResult.method === "cod";
+      const heading = settled && paymentState === "paid"
         ? `Payment received — order <strong>${esc(orderResult.id)}</strong> is confirmed.`
-        : awaitingPayment
-          ? `Order <strong>${esc(orderResult.id)}</strong> is held for you — complete payment to confirm it.`
-          : paymentFailed
+        : paymentState === "claimed"
+          ? `Order <strong>${esc(orderResult.id)}</strong> — payment submitted, confirming it now.`
+          : paymentState === "failed"
             ? `Payment for <strong>${esc(orderResult.id)}</strong> was not completed.`
-            : `Held as <strong>${esc(orderResult.id)}</strong>. Your pieces are reserved off the rails.`;
+            : settled
+              ? `Held as <strong>${esc(orderResult.id)}</strong>. Your pieces are reserved off the rails.`
+              : `Order <strong>${esc(orderResult.id)}</strong> is held for you — complete payment to confirm it.`;
       const statusLine = paymentState === "paid"
         ? `<p class="wa-instruct"><strong>Status: Paid ✔</strong><br />Thank you! Your payment has been verified and your order has synced directly to our POS fulfillment dashboard. Our team will contact the phone number you supplied with confirmation and delivery updates.</p>`
-        : awaitingPayment
-          ? `<p class="wa-instruct"><strong>Status: Awaiting payment</strong><br />Your pieces are reserved for <strong>${esc(String(orderResult.paymentWindow || 30))} minutes</strong> while you pay with mobile money or card. Tap the button below to finish — unpaid orders are automatically released back onto the rail.</p>`
-          : paymentFailed
-            ? `<p class="wa-instruct"><strong>Status: Payment not completed</strong><br />No money was captured for that attempt. You can retry while your pieces are still reserved.</p>`
+        : paymentState === "claimed"
+          ? `<p class="wa-instruct"><strong>Status: Payment submitted</strong><br />We have your reference. Our team confirms it against the bank / merchant statement and your order updates automatically.</p>`
+          : paymentState === "failed"
+            ? `<p class="wa-instruct"><strong>Status: Payment not completed</strong><br />The payment window closed and the pieces went back on the rail. Place the order again to retry.</p>`
             : `<p class="wa-instruct"><strong>Status: Unfulfilled</strong><br />Your order has synced directly to our POS fulfillment dashboard. Our team will contact the phone number you supplied with confirmation and status updates.</p>`;
 
-      $("#cartBody").innerHTML = `
+      if (!settled && paymentState !== "failed") {
+        // Step 2: the shopper confirmed the order and now has to actually pay.
+        $("#cartBody").innerHTML = `<div class="order-confirmed-view pay-step">${pendingPaymentBodyHTML()}</div>`;
+        $("#cartFoot").innerHTML = pendingPaymentActionsHTML();
+      } else {
+        $("#cartBody").innerHTML = `
         <div class="order-confirmed-view">
           <div class="order-held-pill">
             ${heading}
@@ -683,16 +716,22 @@
           ${statusLine}
         </div>`;
 
-      const footButtons = [];
-      if (awaitingPayment || paymentFailed) {
-        footButtons.push(`<button class="claim-confirm-btn" id="payNowBtn" ${paymentBusy ? "disabled" : ""}>${paymentBusy ? "Opening secure payment…" : `Pay ${DB.ugx(orderResult.total)} now — MoMo & Card`}</button>`);
+        const footButtons = [];
+        if (paymentState === "pending" && orderResult.method === "card") {
+          footButtons.push(`<button class="claim-confirm-btn" id="payNowBtn" ${paymentBusy ? "disabled" : ""}>${paymentBusy ? "Opening secure payment…" : `Pay ${DB.ugx(orderResult.total)} now — Card & MoMo`}</button>`);
+        }
+        footButtons.push(`<button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`);
+        $("#cartFoot").innerHTML = footButtons.join("");
+        const payNowBtn = $("#payNowBtn");
+        if (payNowBtn) payNowBtn.addEventListener("click", () => { startFlutterwavePayment(); });
       }
-      footButtons.push(`<button class="claim-confirm-btn" id="keepShopping">Continue Browsing Catalog</button>`);
-      $("#cartFoot").innerHTML = footButtons.join("");
       const keepShoppingBtn = $("#keepShopping");
       if (keepShoppingBtn) keepShoppingBtn.addEventListener("click", () => { orderResult = null; renderCart(); closeCart(); });
-      const payNowBtn = $("#payNowBtn");
-      if (payNowBtn) payNowBtn.addEventListener("click", () => { startFlutterwavePayment(); });
+      const keepAfterPay = $("#keepShoppingAfterPay");
+      if (keepAfterPay) keepAfterPay.addEventListener("click", () => { closeCart(); });
+      const checkStatusBtn = $("#checkPaymentStatus");
+      if (checkStatusBtn) checkStatusBtn.addEventListener("click", () => { refreshPendingPayment(true); });
+      bindPayStepActions();
       return;
     }
 
@@ -730,11 +769,25 @@
           <button type="button" class="deliv-toggle-btn ${deliveryType === 'pickup' ? 'active' : ''}" id="btnDelivPickup">Store Pickup (Free)</button>
         </div>
 
-        <div class="delivery-toggle-row" ${paymentConfig.enabled ? "" : 'style="display:none"'}>
-          <button type="button" class="deliv-toggle-btn ${paymentMethod === 'flutterwave' ? 'active' : ''}" id="btnPayNow">Pay now — MoMo & Card</button>
-          <button type="button" class="deliv-toggle-btn ${paymentMethod === 'cod' ? 'active' : ''}" id="btnPayLater">Pay on ${deliveryType === 'pickup' ? 'pickup' : 'delivery'}</button>
+        <div class="pay-method-block">
+          <span class="claim-field-label">How would you like to pay?</span>
+          <div class="pay-method-grid">
+            ${(paymentConfig.channels || []).filter(c => c.available !== false).map(c => `
+              <button type="button" class="pay-method-btn ${paymentMethod === c.id ? 'active' : ''}" data-pay-method="${esc(c.id)}">
+                <strong>${esc(c.short || c.label)}</strong>
+                <span>${esc(c.id === 'cod' ? `Pay on ${deliveryType === 'pickup' ? 'pickup' : 'delivery'}` : c.blurb)}</span>
+              </button>`).join("")}
+          </div>
+          ${paymentMethod !== "cod" ? `<p class="delivery-service-note">${esc((channelInfo(paymentMethod) || {}).blurb || "")} ${
+            paymentMethod === "card"
+              ? `Your pieces stay reserved for ${esc(String(paymentConfig.payment_window_minutes || 30))} minutes while you pay.`
+              : `You will get the exact payment details and reference on the next step. Your pieces stay reserved for about ${esc(String(Math.round((paymentConfig.offline_window_minutes || 180) / 60)))} hour${Math.round((paymentConfig.offline_window_minutes || 180) / 60) === 1 ? "" : "s"}.`
+          }</p>` : ""}
+          ${paymentMethod === "momo" || paymentMethod === "merchant" ? `
+            <label class="claim-field-label" for="coPayerAccount">${paymentMethod === "merchant" ? "Paying number (optional — for whoever is paying)" : "Number you will pay from"}</label>
+            <input class="claim-input" id="coPayerAccount" inputmode="tel" autocomplete="tel"
+              placeholder="e.g. 0758873398" value="${esc(paymentDrafts.account || payerAccount)}" />` : ""}
         </div>
-        ${paymentConfig.enabled && paymentMethod === 'flutterwave' ? `<p class="delivery-service-note">Secure checkout by Flutterwave — MTN MoMo, Airtel Money, Visa & Mastercard. Your pieces stay reserved for ${esc(String(paymentConfig.payment_window_minutes || 30))} minutes while you pay.</p>` : ""}
 
         <div id="bodaDeliveryBox" ${deliveryType === 'pickup' ? 'style="display:none"' : ''}>
           <p class="delivery-service-note">Adonai Store manages confirmation, careful packaging, route coordination, customer updates, and the final handoff. A boda or courier partner is simply one part of the delivery journey.</p>
@@ -758,7 +811,13 @@
         <div class="sum-line"><span>Delivery fee:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
-      <button class="claim-confirm-btn" id="confirmOrder">${paymentMethod === "flutterwave" ? `Pay ${DB.ugx(grandTotal)} — MoMo & Card` : `Confirm order (${DB.ugx(grandTotal)})`}</button>
+      <button class="claim-confirm-btn" id="confirmOrder">${
+        paymentMethod === "cod"
+          ? `Confirm order (${DB.ugx(grandTotal)})`
+          : paymentMethod === "card"
+            ? `Pay ${DB.ugx(grandTotal)} — Card & MoMo`
+            : `Confirm order & pay ${DB.ugx(grandTotal)}`
+      }</button>
       <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
     `;
 
@@ -782,8 +841,17 @@
     if (btnPickup) btnPickup.addEventListener("click", () => { deliveryType = "pickup"; renderCart(); });
 
     const btnPayNow = $("#btnPayNow"), btnPayLater = $("#btnPayLater");
-    if (btnPayNow) btnPayNow.addEventListener("click", () => setPaymentMethod("flutterwave"));
+    if (btnPayNow) btnPayNow.addEventListener("click", () => setPaymentMethod("card"));
     if (btnPayLater) btnPayLater.addEventListener("click", () => setPaymentMethod("cod"));
+    $$("[data-pay-method]").forEach(btn => {
+      btn.addEventListener("click", () => setPaymentMethod(btn.dataset.payMethod));
+    });
+    const payerInput = $("#coPayerAccount");
+    if (payerInput) payerInput.addEventListener("input", e => {
+      // Held in a draft so a re-render of the drawer cannot wipe what was typed.
+      paymentDrafts.account = e.target.value;
+      payerAccount = e.target.value.trim();
+    });
 
     const confirmButton = $("#confirmOrder");
     if (confirmButton) confirmButton.addEventListener("click", checkout);
@@ -867,6 +935,11 @@
       const deliveryNotes = [notes, overrideAudit, locationAudit].filter(Boolean).join(" | ");
       btn.textContent = "Reserving your pieces…";
 
+      // The paying number the shopper typed for the channel they picked. It
+      // travels with the order so staff can match the incoming mobile money
+      // message to this order instead of guessing.
+      const payingNumber = (paymentMethod === "cod" ? "" : String(paymentDrafts.account || payerAccount || phone).trim());
+
       const order = await DB.createWebOrder({
         customer_name: name,
         customer_phone: phone,
@@ -876,7 +949,8 @@
         delivery_fee: deliveryFee,
         delivery_notes: deliveryNotes,
         lock_owner: webLockOwner,
-        payment_method: paymentMethod === "flutterwave" ? "flutterwave" : undefined,
+        payment_method: paymentMethod === "cod" ? undefined : paymentMethod,
+        payer_account: payingNumber,
         items: cart.map(l => ({ product_id: l.product_id, qty: l.qty }))
       });
 
@@ -884,16 +958,26 @@
         window.AdonaiAnalytics.trackWebPurchase(order);
       }
 
-      const paymentInfo = order.payment || null;
+      // Only a real payment intent carries a per-order token. `payment` exists
+      // on every order (pay-on-delivery orders report "unpaid"), so branching
+      // on its presence alone would park a paid-on-delivery order in a payment
+      // step that has nothing to pay.
+      const paymentInfo = order.payment && order.payment.token ? order.payment : null;
       orderResult = {
         id: order.id,
         total: order.total,
         status: order.dispatch_status || "Unfulfilled",
-        method: paymentInfo ? "flutterwave" : "cod",
+        method: paymentInfo ? (paymentInfo.channel || "card") : "cod",
         paymentStatus: (paymentInfo && paymentInfo.status) || "unpaid",
         paymentToken: paymentInfo ? paymentInfo.token : "",
-        paymentWindow: paymentInfo ? paymentInfo.payment_window_minutes : null
+        paymentWindow: paymentInfo ? paymentInfo.payment_window_minutes : null,
+        merchantPayCode: (paymentInfo && paymentInfo.merchant_pay_code) || "",
+        payerAccount: (paymentInfo && paymentInfo.payer_account) || payingNumber,
+        expiresAt: (paymentInfo && paymentInfo.expires_at) || null,
+        instructions: null
       };
+      payerAccount = orderResult.payerAccount || "";
+      paymentDrafts = { reference: "", account: orderResult.payerAccount };
 
       cart = [];
       saveCart();
@@ -901,9 +985,23 @@
       refreshProducts();
 
       if (paymentInfo) {
-        // The pieces are already reserved server-side — go straight into the
-        // secure Flutterwave popup so the order is confirmed in one motion.
-        startFlutterwavePayment();
+        // The pieces are reserved server-side. Card shoppers go straight into
+        // the secure popup; every offline channel lands on the pay step, which
+        // tells them exactly where to send the money and collects the
+        // transaction reference so staff can confirm it.
+        rememberPendingPayment(orderResult);
+        if (orderResult.method === "card") {
+          startFlutterwavePayment();
+        } else if (orderResult.method === "merchant" && orderResult.merchantPayCode && !orderResult.instructions) {
+          // The code is minted at checkout; the wording that explains how to
+          // use it comes from the server so both stay in step.
+          DB.requestMerchantPayCode(orderResult.id, orderResult.paymentToken).then(data => {
+            orderResult.merchantPayCode = data.merchant_pay_code || orderResult.merchantPayCode;
+            orderResult.instructions = data.instructions || null;
+            rememberPendingPayment(orderResult);
+            renderCart();
+          }).catch(() => {});
+        }
       }
     } catch (err) {
       toast(err.message || "Something went wrong — please try again");
@@ -912,9 +1010,308 @@
     }
   }
 
+  /* ---------- pending payment persistence ----------
+     A shopper who closes the tab or switches to their bank app must be able
+     to come back and finish. We remember only what is needed to resume: the
+     order id, its payment token, the channel and the amount. The token is
+     scoped to this one order by the server, so it is not a general credential.
+     Stale entries are dropped the moment the window lapses. */
+  function rememberPendingPayment(result) {
+    try {
+      if (!result || !result.paymentToken || result.paymentStatus === "paid") return;
+      localStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify({
+        id: result.id,
+        total: result.total,
+        method: result.method,
+        paymentToken: result.paymentToken,
+        paymentStatus: result.paymentStatus,
+        merchantPayCode: result.merchantPayCode || "",
+        payerAccount: result.payerAccount || "",
+        expiresAt: result.expiresAt || null,
+        window: result.paymentWindow || null
+      }));
+    } catch (e) {}
+  }
+  function forgetPendingPayment() {
+    try { localStorage.removeItem(PENDING_PAYMENT_KEY); } catch (e) {}
+  }
+  function restorePendingPayment() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(PENDING_PAYMENT_KEY) || "null"); } catch (e) { saved = null; }
+    if (!saved || !saved.id || !saved.paymentToken) { forgetPendingPayment(); return null; }
+    if (saved.expiresAt && Date.parse(saved.expiresAt) <= Date.now()) { forgetPendingPayment(); return null; }
+    return Object.assign({ status: "Unfulfilled", paymentWindow: saved.window, instructions: null }, saved);
+  }
+
+  /* ---------- offline payment step ----------
+     Card shoppers continue inside the gateway. Everyone else needs to be told
+     where the money goes and then hand back the transaction reference; that is
+     all a claim is. Nothing here can settle an order — the server only marks
+     an order paid after the gateway verifies a charge or staff confirm the
+     money landed. */
+  const PAY_STATUS_COPY = {
+    pending: "Waiting for your payment",
+    claimed: "Payment submitted — confirming with the bank / merchant",
+    paid: "Payment received",
+    failed: "Payment window closed"
+  };
+
+  function payToCardHTML(channel) {
+    const payTo = paymentConfig.pay_to || {};
+    if (channel === "momo") {
+      const rows = [
+        ["Send to", payTo.momo_name || payTo.store_name || "Adonai Store"],
+        ["Merchant number", payTo.momo_number || "—"],
+        ["Amount", DB.ugx(orderResult.total)],
+        ["Reference", orderResult.id]
+      ];
+      return `<div class="pay-detail-card">${rows.map(([k, v]) => `
+        <div class="pay-detail-row"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("")}
+      </div>`;
+    }
+    if (channel === "bank") {
+      const rows = [
+        ["Bank", payTo.bank_name || "—"],
+        ["Account name", payTo.bank_account_name || payTo.store_name || "Adonai Store"],
+        ["Account number", payTo.bank_account_number || "—"],
+        ["Branch", payTo.bank_branch || "—"],
+        ["Amount", DB.ugx(orderResult.total)],
+        ["Reference", payTo.bank_reference_hint || orderResult.id]
+      ].filter(([, v]) => v !== "—");
+      return `<div class="pay-detail-card">${rows.map(([k, v]) => `
+        <div class="pay-detail-row"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("")}
+      </div>`;
+    }
+    return "";
+  }
+
+  function payCodeCardHTML() {
+    const code = orderResult && orderResult.merchantPayCode;
+    if (!code) {
+      return `<button type="button" class="claim-confirm-btn" id="requestPayCode">Generate my merchant pay code</button>
+        <p class="pay-hint">Use this when someone else is paying for you, or when you would rather pay at a merchant point.</p>`;
+    }
+    const lines = (orderResult.instructions && orderResult.instructions.lines) || [];
+    const wa = String((paymentConfig.pay_to || {}).whatsapp || "").replace(/\D/g, "");
+    const shareText = `${S.store_name || "Adonai Store"} pay code ${code} — ${DB.ugx(orderResult.total)} for order ${orderResult.id}. Please pay this exact amount and keep the transaction ID.`;
+    return `
+      <div class="pay-code-card">
+        <span class="pay-code-label">Your merchant pay code</span>
+        <strong class="pay-code">${esc(code)}</strong>
+        <span class="pay-code-amount">${DB.ugx(orderResult.total)} · order ${esc(orderResult.id)}</span>
+      </div>
+      ${lines.length ? `<ul class="pay-instructions">${lines.map(line => `<li>${esc(line)}</li>`).join("")}</ul>` : ""}
+      <div class="pay-inline-actions">
+        <button type="button" class="pay-mini-btn" id="copyPayCode" data-code="${esc(code)}">Copy code</button>
+        ${wa ? `<a class="pay-mini-btn" target="_blank" rel="noopener" href="https://wa.me/${esc(wa)}?text=${encodeURIComponent(shareText)}">Send on WhatsApp</a>` : ""}
+      </div>`;
+  }
+
+  function payReferenceFormHTML(channel, referenceLabel, buttonLabel) {
+    const submitted = orderResult.paymentStatus === "claimed";
+    const claim = orderResult.claim || null;
+    if (submitted) {
+      return `<p class="pay-flash ok">✔ Reference ${esc((claim && claim.reference) || paymentDrafts.reference || "")} sent. Our team confirms it and your order updates automatically — you can close this page.</p>`;
+    }
+    return `
+      <label class="claim-field-label" for="payRefInput">${esc(referenceLabel)}</label>
+      <input class="claim-input" id="payRefInput" autocomplete="off" placeholder="${esc(referenceLabel)}" value="${esc(paymentDrafts.reference)}" />
+      <button type="button" class="claim-confirm-btn" id="submitPaymentClaim" data-channel="${esc(channel)}" ${paymentBusy ? "disabled" : ""}>
+        ${esc(paymentBusy ? "Submitting…" : buttonLabel)}
+      </button>`;
+  }
+
+  function pendingPaymentBodyHTML() {
+    const channel = orderResult.method;
+    const info = channelInfo(channel);
+    const label = (info && info.label) || "Payment";
+    const header = `
+      <div class="pay-step-head">
+        <span class="pay-step-eyebrow">Step 2 of 2 · Complete payment</span>
+        <h3 class="pay-step-title">${esc(label)}</h3>
+        <p class="pay-step-sub">${esc((info && info.blurb) || "")}</p>
+      </div>
+      <div class="total-due-card">
+        <span class="due-lbl">AMOUNT TO PAY</span>
+        <span class="due-val">${DB.ugx(orderResult.total)}</span>
+        <span class="due-lbl">ORDER ${esc(orderResult.id)}</span>
+      </div>`;
+
+    let body = "";
+    if (channel === "card") {
+      body = `<p class="wa-instruct">Your pieces are reserved. Pay with Visa, Mastercard, MTN MoMo or Airtel Money in the secure window — you will approve with your PIN or one-time code there.</p>`;
+    } else if (channel === "momo") {
+      body = `${payToCardHTML("momo")}
+        <p class="pay-hint">Send the exact amount to the merchant number above, using order ${esc(orderResult.id)} as the reason. Then paste the transaction ID from your MoMo confirmation message below.</p>
+        ${payReferenceFormHTML("momo", "MoMo transaction ID", "I have paid — submit transaction ID")}`;
+    } else if (channel === "bank") {
+      body = `${payToCardHTML("bank")}
+        <p class="pay-hint">Transfer the exact amount and keep the reference. Then paste the reference or transaction ID below so we can confirm it against the statement.</p>
+        ${payReferenceFormHTML("bank", "Bank reference / transaction ID", "I have paid — submit reference")}`;
+    } else if (channel === "merchant") {
+      body = `${payCodeCardHTML()}
+        ${payReferenceFormHTML("merchant", "Transaction ID from the merchant point (optional)", "I have paid — submit for confirmation")}`;
+    }
+
+    const others = (paymentConfig.channels || []).filter(c =>
+      c.available !== false && c.id !== channel && c.id !== "cod");
+    const switcher = others.length ? `
+      <div class="pay-switch">
+        <span class="pay-switch-label">Prefer another way to pay?</span>
+        <div class="pay-switch-row">
+          ${others.map(c => `<button type="button" class="pay-mini-btn" data-switch-channel="${esc(c.id)}">${esc(c.short || c.label)}</button>`).join("")}
+          <button type="button" class="pay-mini-btn" data-switch-channel="cod">Pay on delivery instead</button>
+        </div>
+      </div>` : "";
+
+    const flash = paymentFlash ? `<p class="pay-flash">${esc(paymentFlash)}</p>` : "";
+    const status = orderResult.paymentStatus === "claimed"
+      ? `<p class="pay-flash ok">Your reference is with the team now. Nothing else is needed from you.</p>`
+      : `<p class="pay-hint">Reserved for you${orderResult.paymentWindow ? ` for about ${esc(String(orderResult.paymentWindow))} minutes` : ""}. Unpaid orders release their pieces automatically.</p>`;
+
+    return `${header}${body}${flash}${status}${switcher}`;
+  }
+
+  function pendingPaymentActionsHTML() {
+    return `
+      <button type="button" class="claim-confirm-btn" id="checkPaymentStatus" ${paymentBusy ? "disabled" : ""}>
+        ${paymentBusy ? "Checking…" : "Check payment status"}
+      </button>
+      <button type="button" class="claim-confirm-btn ghost" id="keepShoppingAfterPay">Continue browsing — I will finish later</button>`;
+  }
+
+  /* Buttons rendered inside the pay step. Bound after every render because
+     the step is re-rendered on each state change. */
+  function bindPayStepActions() {
+    const codeBtn = $("#requestPayCode");
+    if (codeBtn) codeBtn.addEventListener("click", () => { requestPayCode(); });
+    const copyBtn = $("#copyPayCode");
+    if (copyBtn) copyBtn.addEventListener("click", async () => {
+      const code = copyBtn.dataset.code || "";
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(code);
+          toast(`Pay code ${code} copied`);
+        } else {
+          toast(`Your pay code is ${code}`);
+        }
+      } catch (e) { toast(`Your pay code is ${code}`); }
+    });
+    const switchButtons = $$("[data-switch-channel]");
+    switchButtons.forEach(btn => btn.addEventListener("click", () => { switchPaymentChannel(btn.dataset.switchChannel); }));
+    const refInput = $("#payRefInput");
+    if (refInput) refInput.addEventListener("input", e => { paymentDrafts.reference = e.target.value; });
+    const submitBtn = $("#submitPaymentClaim");
+    if (submitBtn) submitBtn.addEventListener("click", () => { submitPaymentClaim(submitBtn.dataset.channel); });
+  }
+
+  async function requestPayCode() {
+    if (!orderResult || !orderResult.paymentToken || paymentBusy) return;
+    paymentBusy = true; renderCart();
+    try {
+      const data = await DB.requestMerchantPayCode(orderResult.id, orderResult.paymentToken);
+      orderResult.merchantPayCode = data.merchant_pay_code;
+      orderResult.instructions = data.instructions || null;
+      if (data.expires_at) orderResult.expiresAt = data.expires_at;
+      paymentFlash = "Show this code at any merchant point, or send it to whoever is paying for you.";
+      rememberPendingPayment(orderResult);
+    } catch (err) {
+      paymentFlash = err.message || "Could not issue a pay code — please try again.";
+    } finally {
+      paymentBusy = false; renderCart();
+    }
+  }
+
+  async function switchPaymentChannel(channel) {
+    if (!orderResult || !orderResult.paymentToken || paymentBusy) return;
+    paymentBusy = true; paymentFlash = ""; renderCart();
+    try {
+      const data = await DB.setPaymentChannel(
+        orderResult.id, orderResult.paymentToken, channel, paymentDrafts.account || payerAccount || ""
+      );
+      orderResult.method = data.channel || channel;
+      orderResult.merchantPayCode = data.merchant_pay_code || orderResult.merchantPayCode;
+      if (data.expires_at) orderResult.expiresAt = data.expires_at;
+      orderResult.paymentStatus = "pending";
+      orderResult.claim = null;
+      if (channel === "card") {
+        paymentBusy = false; renderCart();
+        return startFlutterwavePayment();
+      }
+    } catch (err) {
+      paymentFlash = err.message || "That payment option could not be selected.";
+    } finally {
+      paymentBusy = false; renderCart();
+    }
+  }
+
+  async function submitPaymentClaim(channel) {
+    if (!orderResult || !orderResult.paymentToken || paymentBusy) return;
+    const reference = String(paymentDrafts.reference || "").trim();
+    if (channel !== "merchant" && !reference) {
+      paymentFlash = channel === "bank"
+        ? "Enter the bank reference or transaction ID from your payment message."
+        : "Enter the transaction ID from your MoMo confirmation message.";
+      return renderCart();
+    }
+    paymentBusy = true; paymentFlash = ""; renderCart();
+    try {
+      const data = await DB.submitPaymentClaim(orderResult.id, orderResult.paymentToken, channel, reference);
+      if (data && data.ok === false && data.error) {
+        paymentFlash = data.error;
+      } else {
+        orderResult.paymentStatus = (data && data.payment_status) || "claimed";
+        orderResult.claim = { channel, reference, at: new Date().toISOString() };
+        paymentFlash = "";
+        toast("Payment submitted — our team confirms it shortly");
+      }
+      rememberPendingPayment(orderResult);
+    } catch (err) {
+      paymentFlash = err.message || "Could not submit that reference — please try again.";
+    } finally {
+      paymentBusy = false; renderCart();
+    }
+  }
+
+  /* Reconcile with the server. This is the only place the pay step learns that
+     the money arrived, so a stale tab can never show "paid" on its own. */
+  async function refreshPendingPayment(notify) {
+    if (!orderResult || !orderResult.paymentToken) return false;
+    paymentBusy = true; renderCart();
+    try {
+      const data = await DB.fetchPaymentStatus(orderResult.id, orderResult.paymentToken);
+      paymentLastCheckedAt = Date.now();
+      orderResult.paymentStatus = data.payment_status || orderResult.paymentStatus;
+      orderResult.merchantPayCode = data.merchant_pay_code || orderResult.merchantPayCode || "";
+      if (data.reference) orderResult.reference = data.reference;
+      if (data.paid_at) orderResult.paidAt = data.paid_at;
+      if (data.expires_at) orderResult.expiresAt = data.expires_at;
+      if (data.payment_status === "paid") {
+        forgetPendingPayment();
+        if (notify) toast("Payment received — your order is confirmed ✔");
+      } else if (data.payment_status === "failed") {
+        forgetPendingPayment();
+        if (notify) toast("The payment window closed — please order again", false);
+      } else if (notify) {
+        paymentFlash = data.payment_status === "claimed"
+          ? "Your reference is with our team. The order updates the moment it is confirmed."
+          : "No payment recorded yet. Once you pay, this updates automatically.";
+      }
+    } catch (err) {
+      if (notify) paymentFlash = err.message || "Could not check the payment status right now.";
+    } finally {
+      paymentBusy = false; renderCart();
+    }
+    return orderResult.paymentStatus === "paid";
+  }
+
   /* ---------- Flutterwave Inline popup orchestration ---------- */
   async function startFlutterwavePayment() {
-    if (!orderResult || orderResult.method !== "flutterwave" || !orderResult.paymentToken) return;
+    if (!orderResult || !orderResult.paymentToken) return;
+    // The gateway only settles the card channel. Anything else is confirmed by
+    // staff against the bank / merchant statement, and must never be parked in
+    // the popup where a shopper would pay twice.
+    if (orderResult.method !== "card") return;
     if (paymentBusy) return;
     paymentBusy = true;
     renderCart();
@@ -994,6 +1391,7 @@
       );
       if (result && result.payment_status === "paid") {
         orderResult.paymentStatus = "paid";
+        forgetPendingPayment();
       } else {
         const settled = await pollPaymentCompletion(true);
         if (!settled && result && result.error) toast(result.error);
@@ -1014,13 +1412,22 @@
         const statusData = await DB.fetchPaymentStatus(orderResult.id, orderResult.paymentToken);
         if (statusData.payment_status === "paid") {
           orderResult.paymentStatus = "paid";
+          orderResult.reference = statusData.reference || orderResult.reference;
+          forgetPendingPayment();
           renderCart();
           return true;
         }
         if (statusData.payment_status === "failed") {
           orderResult.paymentStatus = "failed";
+          forgetPendingPayment();
           renderCart();
           return false;
+        }
+        if (statusData.payment_status === "claimed") {
+          orderResult.paymentStatus = "claimed";
+          orderResult.claim = statusData.claim || orderResult.claim;
+          rememberPendingPayment(orderResult);
+          renderCart();
         }
       } catch (err) { /* transient network hiccup — keep polling */ }
       await new Promise(resolve => setTimeout(resolve, 2500));
@@ -1065,14 +1472,37 @@
   refreshProducts();
   renderCart();
 
-  // Discover whether online payment is offered (keys configured server-side).
-  // When disabled, the "Pay now" toggle simply never renders.
+  // Discover which payment routes this store can actually honour. The server
+  // only offers a channel once its details are published (gateway keys for
+  // card, a merchant line for MoMo, a bank account for transfers), so the
+  // storefront can never advertise a way to pay that would leave money in
+  // limbo.
   DB.getPaymentConfig().then(config => {
-    const wasEnabled = paymentConfig.enabled;
+    const previous = JSON.stringify(paymentConfig.methods || []);
     paymentConfig = Object.assign(paymentConfig, config || {});
-    if (!paymentConfig.enabled && paymentMethod === "flutterwave") paymentMethod = "cod";
-    if (paymentConfig.enabled !== wasEnabled) renderCart();
+    if (!channelAvailable(paymentMethod)) paymentMethod = "cod";
+    if (JSON.stringify(paymentConfig.methods || []) !== previous) renderCart();
   }).catch(() => {});
+
+  // A shopper who closed the tab mid-payment resumes exactly where they left
+  // off: the order, its amount and the channel all come back, so the money
+  // they may already have sent is never orphaned in a forgotten order.
+  (function resumePendingPayment() {
+    const saved = restorePendingPayment();
+    if (!saved) return;
+    orderResult = saved;
+    DB.fetchPaymentStatus(orderResult.id, orderResult.paymentToken).then(status => {
+      if (!status || !status.payment_status) return;
+      orderResult.paymentStatus = status.payment_status;
+      orderResult.merchantPayCode = status.merchant_pay_code || orderResult.merchantPayCode;
+      orderResult.claim = status.claim || orderResult.claim;
+      if (status.payment_status === "paid") forgetPendingPayment();
+      else if (status.payment_status === "failed") { forgetPendingPayment(); orderResult = null; }
+      else rememberPendingPayment(orderResult);
+      renderCart();
+    }).catch(() => { renderCart(); });
+    openCart();
+  })();
 
   // "Checkout now" from a Product Detail Page lands on /?cart=1 — open the
   // bag drawer straight away so the shopper keeps their momentum.

@@ -208,7 +208,7 @@ def apply_additive_schema_migrations():
             ("partner_payable_amount", "INTEGER NOT NULL DEFAULT 0"),
         ],
         "orders": [
-            # Online payment lifecycle (Flutterwave). Existing orders keep
+            # Online / offline payment lifecycle. Existing orders keep
             # 'unpaid' — exactly their historical cash-on-delivery meaning.
             ("payment_status", "VARCHAR(20) NOT NULL DEFAULT 'unpaid'"),
             ("payment_provider", "VARCHAR(30)"),
@@ -216,6 +216,14 @@ def apply_additive_schema_migrations():
             ("payment_token_hash", "VARCHAR(128)"),
             ("paid_at", "TIMESTAMP"),
             ("payment_expires_at", "TIMESTAMP"),
+            # Payment channel + shopper-declared details for the offline
+            # routes (mobile money, bank transfer, merchant pay code).
+            ("payment_channel", "VARCHAR(30)"),
+            ("payer_account", "VARCHAR(60)"),
+            ("merchant_pay_code", "VARCHAR(30)"),
+            ("payment_claim_channel", "VARCHAR(30)"),
+            ("payment_claim_reference", "VARCHAR(120)"),
+            ("payment_claim_at", "TIMESTAMP"),
             # Order-list lifecycle: when the order was dispatched, and when staff removed it from the Orders list.
             ("dispatched_at", "TIMESTAMP"),
             ("list_archived_at", "TIMESTAMP"),
@@ -357,6 +365,8 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_orders_payment_status ON orders(payment_status)",
             "CREATE INDEX IF NOT EXISTS ix_orders_payment_reference ON orders(payment_reference)",
             "CREATE INDEX IF NOT EXISTS ix_orders_payment_expires_at ON orders(payment_expires_at)",
+            # Merchant pay codes are looked up by the code the shopper reads out.
+            "CREATE INDEX IF NOT EXISTS ix_orders_merchant_pay_code ON orders(merchant_pay_code)",
         ):
             run_isolated(statement, "additive index")
 

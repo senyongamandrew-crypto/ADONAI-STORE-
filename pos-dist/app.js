@@ -20,6 +20,17 @@
   if (accessNotice) accessNotice.hidden = !pinFree;
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const ugx = DB.ugx;
+  /* Payment channel labels used by the order panel. Kept beside the console's
+     own vocabulary so staff read "Bank transfer", not a server key. */
+  const CHANNEL_LABELS = {
+    card: "Card / online (Flutterwave)", flutterwave: "Card / online (Flutterwave)",
+    momo: "Mobile money (merchant line)", mobile_money: "Mobile money (merchant line)",
+    mtn: "MTN MoMo", airtel: "Airtel Money",
+    bank: "Bank transfer", bank_transfer: "Bank transfer",
+    merchant: "Merchant pay code", merchant_code: "Merchant pay code",
+    cod: "Pay on delivery / pickup", cash: "Cash"
+  };
+  const channelLabel = value => CHANNEL_LABELS[String(value || "").toLowerCase()] || String(value || "—");
   const AV_PALETTE = ["#111827", "#1F2937", "#16A34A", "#15803D", "#166534", "#374151", "#22C55E", "#0B1120"];
   const avColor = name => AV_PALETTE[(String(name).split("").reduce((a, c) => a + c.charCodeAt(0), 0)) % AV_PALETTE.length];
   const initials = name => String(name || "OA").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -1194,6 +1205,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!s) return toast("Order not found", false);
     const riders = DB.listRiders();
     const paid = isSalePaid(s);
+    // A customer-declared payment is not a payment. Staff see it as an action
+    // item: check the statement, then confirm or leave it alone.
+    const payClaimed = !paid && !!(s.payment && (s.payment.status === "claimed" || (s.payment.claim && s.payment.claim.reference)));
     const subtotal = s.subtotal || (s.total - (s.delivery_fee || 0));
     const locationStr = s.delivery_area ? `${s.delivery_area}${s.delivery_address ? " - " + s.delivery_address : ""}` : (s.delivery_address || "Kampala Road Store");
 
@@ -1246,19 +1260,36 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
           <div>
             <span style="font-weight:700">Payment:</span>
-            <span class="stat-chip ${paid ? 'ok' : 'pend'}" style="margin-left:6px">${paid ? 'PAID' : 'UNPAID'}</span>
+            <span class="stat-chip ${paid ? 'ok' : payClaimed ? 'pend' : 'pend'}" style="margin-left:6px">${
+              paid ? 'PAID' : payClaimed ? 'AWAITING CONFIRMATION' : 'UNPAID'}</span>
             ${paid ? `<span class="muted small" style="margin-left:6px">(${esc(DB.TENDER_LABEL(s.tender))})</span>` : ''}
+            ${!paid && s.payment && s.payment.channel ? `<span class="muted small" style="margin-left:6px">(${esc(channelLabel(s.payment.channel))})</span>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             ${!paid ? `
               <button class="btn sm primary" data-set-paid="${esc(s.id)}" data-method="cash">${Icons.svg("banknote", "ico-13")} Cash</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mtn">${Icons.svg("smartphone", "ico-13")} MTN MoMo</button>
-              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="airtel">${Icons.svg("smartphone", "ico-13")} Airtel</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="mobile_money" data-prompts-reference="1">${Icons.svg("smartphone", "ico-13")} MoMo</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="bank_transfer" data-prompts-reference="1">${Icons.svg("landmark", "ico-13")} Bank</button>
+              <button class="btn sm" data-set-paid="${esc(s.id)}" data-method="merchant_code" data-prompts-reference="1">${Icons.svg("qrcode", "ico-13")} Pay code</button>
             ` : `
               <button class="btn sm ghost" data-set-unpaid="${esc(s.id)}">${Icons.svg("undo-2", "ico-13")} Revert to Unpaid</button>
             `}
           </div>
         </div>
+        ${!paid && (payClaimed || s.payment && (s.payment.merchant_pay_code || s.payment.payer_account)) ? `
+          <div class="odm-payment-hint">
+            ${payClaimed ? `<p><strong>Customer says they paid${s.payment.claim.channel ? ` by ${esc(channelLabel(s.payment.claim.channel))}` : ""}.</strong>${
+              s.payment.claim.reference ? ` Reference: <code>${esc(s.payment.claim.reference)}</code>` : " No reference given."
+            } · submitted ${esc(ago(s.payment.claim.at))}</p>` : ""}
+            ${s.payment.merchant_pay_code ? `<p>Merchant pay code: <code>${esc(s.payment.merchant_pay_code)}</code> — only this exact amount (${ugx(s.total)}) clears it.</p>` : ""}
+            ${s.payment.payer_account ? `<p>Customer will pay from: <strong>${esc(s.payment.payer_account)}</strong> — match this against the incoming payment message.</p>` : ""}
+            <p class="muted small">Check the bank / MoMo / merchant statement, then confirm with the matching button above. Confirming records the payment, settles partner payables and notifies the team.</p>
+          </div>` : ""}
+        ${!paid ? `
+          <div class="odm-ref-row" id="odmRefRow" hidden>
+            <input class="sel-full" id="odmRefInput" placeholder="Transaction ID / reference from the payment message" autocomplete="off" />
+            <button class="btn sm primary" id="odmRefConfirm">✓ Confirm payment received</button>
+          </div>` : ""}
       </div>
 
       <div class="odm-info-block">
@@ -4051,6 +4082,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#setAddress").value = s.address || "";
     $("#setScope").value = s.delivery_scope || "";
     $("#setHours").value = s.hours || "";
+    $("#setMomoName").value = s.momo_merchant_name || "";
+    $("#setMomoNumber").value = s.momo_merchant_number || "";
+    $("#setBankName").value = s.bank_name || "";
+    $("#setBankAccountName").value = s.bank_account_name || "";
+    $("#setBankAccountNumber").value = s.bank_account_number || "";
+    $("#setBankBranch").value = s.bank_branch || "";
+    $("#setBankReferenceHint").value = s.bank_reference_hint || "";
     $("#setFee").value = s.base_delivery_fee ?? 7000;
     $("#setKey").value = "";
     $("#setKey").placeholder = "Leave blank to keep current key";
@@ -4076,6 +4114,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         address: $("#setAddress").value.trim(),
         delivery_scope: $("#setScope").value.trim(),
         hours: $("#setHours").value.trim(),
+        // Pay-to details published to shoppers at checkout. Empty values
+        // simply hide the matching payment option on the storefront.
+        momo_merchant_name: $("#setMomoName").value.trim(),
+        momo_merchant_number: $("#setMomoNumber").value.trim(),
+        bank_name: $("#setBankName").value.trim(),
+        bank_account_name: $("#setBankAccountName").value.trim(),
+        bank_account_number: $("#setBankAccountNumber").value.trim(),
+        bank_branch: $("#setBankBranch").value.trim(),
+        bank_reference_hint: $("#setBankReferenceHint").value.trim(),
         base_delivery_fee: baseFee,
         boda_base_fee: baseFee
       };
@@ -4122,15 +4169,54 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     /* order pipeline */
     const btnSetPaid = t.closest("[data-set-paid]");
     if (btnSetPaid) {
+      const method = btnSetPaid.dataset.method || "cash";
+      // Money that arrives through a bank or merchant statement is matched by
+      // its reference, so those buttons open the reference field instead of
+      // settling blind. Cash on the counter needs no reference.
+      if (btnSetPaid.dataset.promptsReference) {
+        const row = $("#odmRefRow");
+        if (row) {
+          row.hidden = false;
+          row.dataset.method = method;
+          row.dataset.orderId = btnSetPaid.dataset.setPaid;
+          const input = $("#odmRefInput");
+          if (input) { input.placeholder = method === "bank_transfer"
+            ? "Bank reference / transaction ID from the deposit message"
+            : "Transaction ID from the payment message (optional for a merchant point)"; input.focus(); }
+        }
+        return;
+      }
       try {
-        const method = btnSetPaid.dataset.method || "cash";
         await DB.setPaymentStatus(btnSetPaid.dataset.setPaid, true, method, whoName);
-        toast(`${btnSetPaid.dataset.setPaid} marked as PAID (${method.toUpperCase()})`);
+        toast(`${btnSetPaid.dataset.setPaid} marked as PAID (${DB.TENDER_LABEL({ type: method })})`);
         if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
           orderDetailModal(btnSetPaid.dataset.setPaid);
         }
         renderSales();
       } catch (err) { toast(err.message, false); }
+      return;
+    }
+    const refConfirm = t.closest("#odmRefConfirm");
+    if (refConfirm) {
+      const row = $("#odmRefRow");
+      const orderId = (row && row.dataset.orderId) || "";
+      const method = (row && row.dataset.method) || "mobile_money";
+      const reference = ($("#odmRefInput") ? $("#odmRefInput").value : "").trim();
+      if (!orderId) return;
+      if (method === "bank_transfer" && !reference) {
+        toast("Enter the bank reference so this payment can be reconciled", false);
+        return;
+      }
+      refConfirm.disabled = true;
+      try {
+        await DB.setPaymentStatus(orderId, true, method, whoName, { reference });
+        toast(`${orderId} marked as PAID (${DB.TENDER_LABEL({ type: method })})`);
+        if ($("#modalBox") && $("#modalBox").children.length && $("#modalBox").querySelector(".odm-head")) {
+          orderDetailModal(orderId);
+        }
+        renderSales();
+      } catch (err) { toast(err.message, false); }
+      finally { refConfirm.disabled = false; }
       return;
     }
     const btnSetUnpaid = t.closest("[data-set-unpaid]");
