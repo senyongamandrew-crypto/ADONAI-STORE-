@@ -177,7 +177,7 @@ set this on Render.
 | No Card option at checkout | `FLW_PUBLIC_KEY`/`FLW_SECRET_KEY` not set, or site not redeployed |
 | No Mobile money / Bank option | The pay-to details are not published — Admin → Store Settings → Mobile money merchant line / Bank account for transfers |
 | Customer says they paid but the order is not paid | Check Fulfillment & Orders: the order reads **AWAITING CONFIRMATION** until staff confirm the reference against the statement |
-| Popup opens, payment succeeds, order stays "Awaiting payment" | Webhook not configured — but the browser verify should still settle it. Check Render logs for `Payment settle refused` (amount/currency mismatch) |
+| Popup opens, card payment succeeds, order stays unpaid | Webhook not configured — but the browser verify should still settle it. Check Render logs for `Payment settle refused` (amount/currency mismatch) |
 | Webhook returns 401 | `FLW_SECRET_HASH` in Render ≠ secret hash in the Flutterwave dashboard |
 | Order cancelled & item back on sale | Shopper didn't pay within `FLW_PAYMENT_TTL_MINUTES` — normal behavior |
 | Popup blocked by CSP in old deploys | The site now sends an updated Content-Security-Policy allowing `checkout.flutterwave.com`; hard-refresh (Ctrl+F5) |
