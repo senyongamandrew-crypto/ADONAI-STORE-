@@ -1145,7 +1145,14 @@
 
     let body = "";
     if (channel === "card") {
-      body = `<p class="wa-instruct">Your pieces are reserved. Pay with Visa, Mastercard, MTN MoMo or Airtel Money in the secure window — you will approve with your PIN or one-time code there.</p>`;
+      // In simulated mode there is deliberately no bank window and no PIN
+      // prompt — say so, rather than letting a tester think it is broken.
+      const simulated = paymentConfig.mock
+        ? `<p class="pay-flash">Simulated gateway (development): this server has no Flutterwave keys, so the payment is approved
+           instantly through the same server check the real gateway uses. No bank window opens and no PIN is asked for here —
+           that is expected. A live store collects both inside Flutterwave's own window.</p>`
+        : "";
+      body = `<p class="wa-instruct">Your pieces are reserved. Pay with Visa, Mastercard, MTN MoMo or Airtel Money in the secure window — you will approve with your PIN or one-time code there.</p>${simulated}`;
     } else if (channel === "momo") {
       const payTo = paymentConfig.pay_to || {};
       const manual = !!payTo.momo_number;
@@ -1163,6 +1170,7 @@
               ${paymentBusy ? "Sending the prompt…" : `Send the prompt — pay ${DB.ugx(orderResult.total)}`}
             </button>
             <p class="pay-hint">Approve the prompt that arrives on that phone and confirm it with your MoMo PIN. Your PIN is only ever entered on your own phone.</p>
+            ${paymentConfig.mock ? `<p class="pay-flash">Simulated gateway (development): no prompt is really sent and no money moves — the order settles through the server check so the flow can be tested end to end.</p>` : ""}
           </div>
           ${manual ? `
             <details class="pay-manual">

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.6" />
+<link rel="stylesheet" href="styles.css?v=7.7" />
 <link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/dispatch.css?v=1.0" />
 <link rel="stylesheet" href="css/notifications.css?v=2.4" />
@@ -807,6 +807,17 @@
         <div id="posPasswordSettings" aria-live="polite"><p class="muted small">Loading password settings…</p></div>
       </section>
 
+      <div class="card" id="gatewayStatusCard" style="max-width:860px">
+        <div class="gw-status-head">
+          <div>
+            <p class="pa-eyebrow">PAYMENT GATEWAY</p>
+            <h3>Flutterwave — card &amp; instant mobile money</h3>
+          </div>
+          <span class="pa-status-badge" id="gatewayStatusBadge">Checking…</span>
+        </div>
+        <div id="gatewayStatusBody" aria-live="polite"><p class="muted small">Checking how the gateway is configured…</p></div>
+      </div>
+
       <div class="card" id="storeProfileSettings" style="max-width:860px">
         <div class="fgrid">
           <div class="field full"><label>Store name</label><input class="sel-full" id="setName" /></div>
@@ -869,7 +880,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=7.8"></script>
+<script src="app.js?v=7.9"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

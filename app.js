@@ -4090,8 +4090,73 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   const settingsView = $("#view-settings");
   ["input", "change"].forEach(event => settingsView.addEventListener(event, e => { if (e.target.closest("#storeProfileSettings")) settingsDirty = true; }));
 
+  /* What the payment gateway can actually do right now, straight from the
+     server. The console never holds keys — it only reports whether the host has
+     them, so an owner can tell "not connected" from "connected but broken"
+     without reading server logs. */
+  async function renderGatewayStatus() {
+    const badge = $("#gatewayStatusBadge"), body = $("#gatewayStatusBody");
+    if (!badge || !body) return;
+    let config = null;
+    try {
+      config = await DB.getPaymentConfig(true);
+    } catch (err) {
+      config = null;
+    }
+    const enabled = !!(config && config.enabled);
+    const mock = !!(config && config.mock);
+    const channelIds = ((config && config.channels) || []).filter(c => c.available !== false).map(c => c.id);
+    const names = { card: "Card &amp; wallet", momo: "Mobile money", bank: "Bank transfer", merchant: "Merchant pay code", cod: "Pay on delivery" };
+    const offered = channelIds.map(id => names[id] || id).join(" · ") || "—";
+
+    if (enabled && !mock) {
+      badge.textContent = "Connected";
+      badge.classList.remove("pa-badge-warn");
+      body.innerHTML = `
+        <p class="muted small">Flutterwave keys are present on the server. Shoppers can pay by card in the
+        secure Flutterwave window, and by mobile money with the approval prompt — the PIN or one-time code is
+        entered with the bank / Flutterwave, never on this storefront.</p>
+        <p class="muted small"><strong>Channels live now:</strong> ${offered}</p>
+        <p class="muted small">Webhook: keep <code>/api/payments/flutterwave/webhook</code> registered in the Flutterwave
+        dashboard with the same secret hash as the server, so payments still settle if a shopper closes the tab.</p>`;
+      return;
+    }
+    if (mock) {
+      badge.textContent = "Simulated (dev only)";
+      badge.classList.add("pa-badge-warn");
+      body.innerHTML = `
+        <p class="muted small">This server runs with <code>FLW_MOCK_MODE=1</code> and no secret key, so the gateway is
+        simulated: payments are approved instantly through the same server verification path, and <strong>no money moves</strong>.
+        There is deliberately no bank popup and no PIN prompt in this mode.</p>
+        <p class="muted small"><strong>Channels live now:</strong> ${offered}</p>
+        <p class="muted small">To take real payments, set the three variables below on the host and redeploy.
+        Never leave mock mode on a live store.</p>`;
+      return;
+    }
+    badge.textContent = "Not connected";
+    badge.classList.add("pa-badge-warn");
+    body.innerHTML = `
+      <p class="muted small"><strong>No Flutterwave keys found on the server</strong>, so card and the instant
+      mobile-money prompt are hidden from shoppers — the storefront never offers a way to pay it cannot honour,
+      which is why no payment popup appears. Shoppers still have bank transfer, the merchant pay code and the
+      mobile-money merchant line below.</p>
+      <p class="muted small"><strong>To switch it on</strong>, add these to the host's environment (Render → your
+      service → Environment) and redeploy:</p>
+      <ul class="gw-status-list">
+        <li><code>FLW_PUBLIC_KEY</code> — dashboard.flutterwave.com → Settings → APIs → Public key</li>
+        <li><code>FLW_SECRET_KEY</code> — same page, Secret key (never commit it)</li>
+        <li><code>FLW_SECRET_HASH</code> — a long random string you invent; paste the same value into the dashboard webhook</li>
+      </ul>
+      <p class="muted small">Then register the webhook URL
+      <code>https://&lt;your-domain&gt;/api/payments/flutterwave/webhook</code> in the dashboard. Full steps:
+      <code>FLUTTERWAVE_PAYMENTS.md</code>.</p>
+      <p class="muted small">Use the test keys first: card <code>5531 8866 5214 2950</code>, CVV <code>564</code>,
+      any future expiry, PIN <code>3310</code>, OTP <code>12345</code>.</p>`;
+  }
+
   function renderSettings() {
     // Background sync must not erase an owner's unfinished settings edits.
+    renderGatewayStatus();
     if (settingsDirty) { paintUnlockChip(); return; }
     const s = DB.getSettings();
     $("#setName").value = s.store_name || "";

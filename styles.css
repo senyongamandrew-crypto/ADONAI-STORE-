@@ -458,6 +458,18 @@ code { background: var(--tint); padding: 2px 7px; border-radius: 6px; font-size:
 .sel-full.err { border-color: var(--red); }
 .sel-mini { border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--muted); padding: 0 8px; font-size: 12px; }
 /* Pay-to details (merchant line, bank account) shown to shoppers at checkout. */
+/* Payment gateway status card (Store Settings). Informational only — the
+   console never sees or stores the gateway keys. */
+.gw-status-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.gw-status-head h3 { margin: 2px 0 0; font-size: 15px; }
+.gw-status-list { margin: 6px 0 8px; padding-left: 20px; font-size: 11.5px; color: var(--muted, #6B7280); line-height: 1.6; }
+.gw-status-list li { margin-bottom: 3px; }
+.gw-status-list code, #gatewayStatusBody code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: rgba(17, 24, 39, .06); padding: 1px 5px; border-radius: 4px; font-size: 11px;
+}
+.pa-status-badge.pa-badge-warn { background: rgba(180, 83, 9, .12); color: #92400E; border-color: rgba(180, 83, 9, .35); }
+
 .payto-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
 .payto-pair .sel-full + .sel-full { margin-top: 0; }
 #setBankReferenceHint { margin-top: 8px; }
