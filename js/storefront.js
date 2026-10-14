@@ -24,6 +24,20 @@
     tag: svg(`<path d="M12.6 2.6 21 11a1.4 1.4 0 0 1 0 2l-8 8a1.4 1.4 0 0 1-2 0L2.6 12.6A2 2 0 0 1 2 11.2V4a2 2 0 0 1 2-2h7.2a2 2 0 0 1 1.4.6Z"/><circle cx="7" cy="7" r="1.4"/>`),
     message: svg(`<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.6 8.6 0 0 1-3.8-.9L3 21l1.9-5.7A8.4 8.4 0 1 1 21 11.5Z"/>`)
   };
+  ICONS["Boots"] = ICONS.Shoes;
+  ICONS["Sandals"] = ICONS.Shoes;
+  ICONS["Activewear & Sportswear"] = ICONS["Tops & Shirts"];
+  ICONS["Suits & Formalwear"] = ICONS["Outerwear & Jackets"];
+  ICONS["Underwear & Sleepwear"] = ICONS["Tops & Shirts"];
+  ICONS["Bags & Handbags"] = ICONS.Accessories;
+  ICONS["Necklaces & Chains"] = svg(`<path d="M4 4c1 7 4 12 8 16 4-4 7-9 8-16"/><circle cx="12" cy="17" r="2"/>`);
+  ICONS["Bracelets & Bangles"] = svg(`<ellipse cx="12" cy="12" rx="8" ry="10"/><ellipse cx="12" cy="12" rx="5.5" ry="8"/>`);
+  ICONS["Rings & Earrings"] = svg(`<circle cx="9" cy="13" r="5"/><circle cx="17" cy="8" r="2.5"/><path d="M17 10.5v4"/>`);
+  ICONS["Watches"] = svg(`<rect x="7" y="6" width="10" height="12" rx="3"/><path d="M9 2h6M9 22h6M12 9v3l2 1"/>`);
+  ICONS["Eyewear & Sunglasses"] = svg(`<path d="M3 7h2l2 9h3l2-6 2 6h3l2-9h2"/><path d="M7 8h4m2 0h4"/>`);
+  ICONS["Hats, Scarves & Belts"] = ICONS.Accessories;
+  ICONS["Traditional & Occasionwear"] = ICONS["Dresses & Skirts"];
+  ICONS["Swimwear & Beachwear"] = ICONS["Tops & Shirts"];
   const catIcon = c => ICONS[c] || ICONS.tag;
 
   /* ---------- toast ---------- */
@@ -355,7 +369,7 @@
       <div class="pmedia">
         <span class="grade-badge" style="--grade:${grade.color}">${esc(grade.short)}</span>
         ${disc > 0 ? `<span class="discount-badge">${disc}% OFF</span>` : ""}
-        <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE"}</span>
+        <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.is_consignment ? "PARTNER · VINTAGE" : (p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE")}</span>
         ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
         ${dots}
         ${p.video && p.video.url ? '<span class="media-video-badge"><svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10" aria-hidden="true"><path d="M8 5v14l12-7z"/></svg>Video</span>' : ""}
@@ -690,6 +704,7 @@
           <div class="line-details">
             <div class="line-title">${esc(p.name)}</div>
             <div class="line-sku">${esc(p.sku || p.barcode_id || p.id)}</div>
+            ${p.is_consignment ? '<div class="line-source-tag">Partner consignment · one-of-one</div>' : ""}
             <div class="line-price-meta">Size: ${esc(p.size && p.size !== "-" ? p.size : "Standard")} · ${DB.ugx(price)}</div>
           </div>
           <button class="line-remove-btn" data-rm="${esc(p.id)}" aria-label="Remove item">✕</button>

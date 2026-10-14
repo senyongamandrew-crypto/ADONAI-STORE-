@@ -21,6 +21,8 @@ const { window } = dom;
 
 let renderFromSync = null;
 let stockLotRequests = 0;
+let partnerChoiceRequests = 0;
+const partnerChoices = [{ id: "PARTNER-TEST-1", name: "Demo Consignment Partner", default_commission_rate: 7.5 }];
 const stockLots = [{
   id: "LOT-TEST-1",
   lot_code: "BALE-TEST-1",
@@ -47,7 +49,7 @@ window.Auth = {
 };
 window.DB = {
   DEMOGRAPHICS: ["Men", "Women", "Children", "Unisex"],
-  CATEGORIES: ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear"],
+  CATEGORIES: ["Outerwear & Jackets", "Tops & Shirts", "Dresses & Skirts", "Pants & Jeans", "Shoes", "Accessories", "Children Wear", "Boots", "Sandals", "Activewear & Sportswear", "Suits & Formalwear", "Underwear & Sleepwear", "Bags & Handbags", "Necklaces & Chains", "Bracelets & Bangles", "Rings & Earrings", "Watches", "Eyewear & Sunglasses", "Hats, Scarves & Belts", "Traditional & Occasionwear", "Swimwear & Beachwear"],
   CONDITIONS: ["Grade A — Excellent"],
   ROLE_LABELS: {},
   ugx: value => `UGX ${value}`,
@@ -64,6 +66,11 @@ window.DB = {
     if (pathName !== "stock-lots") throw new Error(`Unexpected finance request: ${pathName}`);
     stockLotRequests++;
     return { stock_lots: stockLots };
+  },
+  consignmentRequest: async pathName => {
+    if (pathName !== "partners/choices") throw new Error(`Unexpected consignment request: ${pathName}`);
+    partnerChoiceRequests++;
+    return { partners: partnerChoices };
   },
   addProduct: async values => ({ id: "PRD-TEST-1", name: values.name, sku: values.sku })
 };
@@ -96,6 +103,14 @@ async function main() {
     assert.strictEqual(doc.querySelector("#inItemCondition").value, "BRAND_NEW");
     assert.strictEqual(doc.querySelector("#inQty").readOnly, false);
     assert.strictEqual(doc.querySelector("#inSizeVariantsField").hidden, false);
+    const intakeCategories = Array.from(doc.querySelector("#inCat").options).map(option => option.textContent);
+    for (const name of ["Boots", "Sandals", "Bags & Handbags", "Necklaces & Chains", "Bracelets & Bangles", "Eyewear & Sunglasses", "Swimwear & Beachwear"]) {
+      assert.ok(intakeCategories.includes(name), `Catalog Intake should offer ${name}`);
+    }
+    const groupSelect = doc.querySelector("#inGroup");
+    groupSelect.value = "Jewelry";
+    groupSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.strictEqual(doc.querySelector("#inCat").value, "Necklaces & Chains", "category groups should provide an easy jewelry shortcut");
     const lot = doc.querySelector("#inStockLot");
     const grade = doc.querySelector("#inLotGrade");
     assert.strictEqual(stockLotRequests, 1, "intake should fetch registered lots once on first open");
@@ -136,7 +151,31 @@ async function main() {
     assert.strictEqual(sell.value, "31500", "a successful save refresh must keep the deliberate retail price");
     assert.strictEqual(stockLotRequests, 2, "saving should perform one intentional lot refresh");
 
-    console.log("✓ intake lot and tier choices survive background sync and explicit refresh");
+    const source = doc.querySelector("#inInventorySource");
+    source.value = "partner";
+    source.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await pause();
+    const partnerSelect = doc.querySelector("#inConsignmentPartner");
+    assert.strictEqual(doc.querySelector("#consignmentIntakeFields").hidden, false, "partner source must reveal the consignment fields");
+    assert.strictEqual(doc.querySelector("#partnerMediaRule").hidden, false, "partner source must show the required-media guidance");
+    assert.strictEqual(doc.querySelector("#inQty").readOnly, true, "consignment intake must stay one-of-one");
+    assert.ok(Array.from(partnerSelect.options).some(option => option.value === partnerChoices[0].id), "active partner should be selectable in Catalog Intake");
+    partnerSelect.value = partnerChoices[0].id;
+    partnerSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
+    assert.match(doc.querySelector("#inConsignmentRateHint").textContent, /Demo Consignment Partner.*7\.50%/, "the selected partner's commission default should be explained");
+    assert.strictEqual(partnerChoiceRequests, 1, "active partner choices should load once for intake");
+
+    const profileShortcut = doc.createElement("button");
+    profileShortcut.type = "button";
+    profileShortcut.dataset.partnerIntake = partnerChoices[0].id;
+    doc.querySelector("#view-partners").appendChild(profileShortcut);
+    profileShortcut.click();
+    await pause();
+    assert.strictEqual(doc.querySelector("#inInventorySource").value, "partner", "partner profile shortcut should open partner-owned intake");
+    assert.strictEqual(partnerSelect.value, partnerChoices[0].id, "partner profile shortcut should preselect that supplier");
+    assert.match(window.location.search, /consignment_partner_id=PARTNER-TEST-1/, "partner intake route should survive a page refresh");
+
+    console.log("✓ intake selections survive sync; partner source and profile shortcut open the right catalog flow");
   } finally {
     window.close();
   }

@@ -34,7 +34,7 @@
   var DISPLAY_KEY = "adonai.ui.display-size";
   var DISPLAY_SIZES = ["compact", "standard", "large"];
   var DISPLAY_SCALES = { compact: 0.86, standard: 1, large: 1.15 };
-  var displaySize = "standard";
+  var displaySize = "compact";
 
   function normalizeDisplaySize(value) {
     value = String(value == null ? "" : value).trim().toLowerCase();
@@ -77,7 +77,7 @@
   }
 
   function applyDisplaySize(value, persist) {
-    var next = normalizeDisplaySize(value) || "standard";
+    var next = normalizeDisplaySize(value) || "compact";
     displaySize = next;
     if (fitDisabled()) doc.removeAttribute("data-display-size");
     else doc.setAttribute("data-display-size", next);
@@ -98,7 +98,7 @@
     disabled: function () { return fitDisabled(); },
     scale: function () { return DISPLAY_SCALES[displaySize]; },
     set: function (value) { applyDisplaySize(value, true); return displaySize; },
-    reset: function () { applyDisplaySize("standard", true); return displaySize; }
+    reset: function () { applyDisplaySize("compact", true); return displaySize; }
   };
 
   /* Delegated so the control works on every shell without per-page code. */
@@ -163,8 +163,8 @@
   }
 
   /* Boot: URL override (?display=large) wins for the current load, then the
-     saved per-device choice, then Standard. */
-  applyDisplaySize(queryDisplaySize() || storedDisplaySize() || "standard", false);
+     saved per-device choice, then the Compact default. */
+  applyDisplaySize(queryDisplaySize() || storedDisplaySize() || "compact", false);
 
   apply();
   window.addEventListener("resize", scheduled, { passive: true });

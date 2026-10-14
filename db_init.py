@@ -35,50 +35,6 @@ def hash_pin(pin: str) -> str:
     return pbkdf2_hash_pin(pin)
 
 
-# PostgreSQL guards for partner consignment. Mirrors migrations/20261012_consignment_partner_intake.sql
-# so databases built or booted by the app get the same constraints and append-only
-# triggers as databases where the explicit migration was run. Every statement is
-# idempotent and runs inside its own savepoint (see run_isolated).
-CONSIGNMENT_POSTGRES_GUARDS = (
-    """DO $$ BEGIN
-      ALTER TABLE financial_stock_lots ADD CONSTRAINT fk_stock_lot_supplier
-        FOREIGN KEY (supplier_id) REFERENCES consignment_suppliers(id);
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
-    """DO $$ BEGIN
-      ALTER TABLE products ADD CONSTRAINT fk_products_supplier
-        FOREIGN KEY (supplier_id) REFERENCES consignment_suppliers(id);
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
-    """DO $$ BEGIN
-      ALTER TABLE financial_stock_lots ADD CONSTRAINT ck_stock_lot_type
-        CHECK (lot_type IN ('OWNED_BALE', 'PARTNER_CONSIGNMENT'));
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
-    """DO $$ BEGIN
-      ALTER TABLE financial_stock_lots ADD CONSTRAINT ck_stock_lot_supplier_matches_type
-        CHECK ((lot_type = 'PARTNER_CONSIGNMENT' AND supplier_id IS NOT NULL)
-            OR (lot_type = 'OWNED_BALE' AND supplier_id IS NULL));
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$;""",
-    """CREATE OR REPLACE FUNCTION consignment_block_settlement_change() RETURNS trigger AS $$
-    BEGIN
-      RAISE EXCEPTION '% on % is not allowed: consignment settlement records are append-only', TG_OP, TG_TABLE_NAME
-        USING ERRCODE = 'restrict_violation';
-    END;
-    $$ LANGUAGE plpgsql;""",
-    "DROP TRIGGER IF EXISTS trg_consignment_splits_immutable ON consignment_sales_splits",
-    """CREATE TRIGGER trg_consignment_splits_immutable
-      BEFORE UPDATE OR DELETE ON consignment_sales_splits
-      FOR EACH ROW EXECUTE FUNCTION consignment_block_settlement_change()""",
-    "DROP TRIGGER IF EXISTS trg_consignment_paid_payouts_immutable ON consignment_payouts",
-    """CREATE TRIGGER trg_consignment_paid_payouts_immutable
-      BEFORE UPDATE OR DELETE ON consignment_payouts
-      FOR EACH ROW WHEN (OLD.status = 'PAID')
-      EXECUTE FUNCTION consignment_block_settlement_change()""",
-    "DROP TRIGGER IF EXISTS trg_consignment_payouts_no_delete ON consignment_payouts",
-    """CREATE TRIGGER trg_consignment_payouts_no_delete
-      BEFORE DELETE ON consignment_payouts
-      FOR EACH ROW EXECUTE FUNCTION consignment_block_settlement_change()""",
-)
-
-
 def _postgres_column_types(connection, table_name: str) -> dict[str, str]:
     """Return PostgreSQL type names for a table's real (non-dropped) columns.
 
@@ -236,23 +192,20 @@ def apply_additive_schema_migrations():
             ("flaw_photo_index", "INTEGER DEFAULT -1"),
             ("care_notes", "TEXT"),
             ("staff_notes", "TEXT"),
-            # Partner consignment: consignment pieces carry no Adonai cost.
-            ("is_consignment", "BOOLEAN NOT NULL DEFAULT FALSE"),
-            ("supplier_id", "VARCHAR(64)"),
-            ("consignment_reference_value", "INTEGER NOT NULL DEFAULT 0"),
-        ],
-        "financial_stock_lots": [
-            # Partner consignment lots. Existing rows are owned bales.
-            ("lot_type", "VARCHAR(30) NOT NULL DEFAULT 'OWNED_BALE'"),
-            ("supplier_id", "VARCHAR(64)"),
-            ("agreement_ref", "VARCHAR(80)"),
-            ("return_by_date", "TIMESTAMP WITHOUT TIME ZONE"),
+            ("consignment_partner_id", "VARCHAR(50)"),
+            ("commission_rate", "NUMERIC(5,2)"),
         ],
         "order_items": [
             ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
             ("quantity_type", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
             ("unit_cost", "INTEGER NOT NULL DEFAULT 0"),
             ("category", "VARCHAR(100)"),
+            ("consignment_partner_id", "VARCHAR(50)"),
+            ("partner_name_snapshot", "VARCHAR(160)"),
+            ("commission_rate_snapshot", "NUMERIC(5,2)"),
+            ("consignment_gross_amount", "INTEGER NOT NULL DEFAULT 0"),
+            ("consignment_commission_amount", "INTEGER NOT NULL DEFAULT 0"),
+            ("partner_payable_amount", "INTEGER NOT NULL DEFAULT 0"),
         ],
         "orders": [
             # Online payment lifecycle (Flutterwave). Existing orders keep
@@ -362,10 +315,6 @@ def apply_additive_schema_migrations():
             "inventory_status refresh",
         )
         if IS_POSTGRES:
-            # Partner consignment guards (append-only settlement records, lot/supplier coherence).
-            for guard_sql in CONSIGNMENT_POSTGRES_GUARDS:
-                run_isolated(guard_sql, "consignment guard")
-        if IS_POSTGRES:
             # PostgreSQL aborts the WHOLE transaction on any failed statement,
             # so "run it and ignore the 'already exists' error" is unsafe here.
             # On every redeploy the first ADD CONSTRAINT raised DuplicateObject,
@@ -399,7 +348,9 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_products_lot_grade_id ON products(lot_grade_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
             "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
+            "CREATE INDEX IF NOT EXISTS ix_products_consignment_partner_id ON products(consignment_partner_id)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
+            "CREATE INDEX IF NOT EXISTS ix_order_items_consignment_partner_id ON order_items(consignment_partner_id)",
             # Payment-columns indexes for databases whose orders table predates
             # the online-checkout feature (create_all only builds indexes for
             # tables it creates in that pass).
@@ -513,8 +464,22 @@ def seed_categories(session):
         ("Dresses & Skirts", "DRS", 3, "Silk slip dresses, Kitenge wraps, and pleated midi skirts."),
         ("Pants & Jeans", "PNT", 4, "High-waist Levi's denim, pleated chinos, and tailored trousers."),
         ("Shoes", "SHO", 5, "Leather Chelsea boots, retro sneakers, and Italian loafers."),
-        ("Accessories", "ACC", 6, "Leather belts, canvas field totes, silk scarves, and caps."),
-        ("Children Wear", "CHD", 7, "Quality vintage denim and jackets for children.")
+        ("Accessories", "ACC", 6, "Bags, belts, hats, scarves, jewelry, sunglasses and other outfit accessories."),
+        ("Children Wear", "CHD", 7, "Quality clothing, footwear and accessories for children."),
+        ("Sandals", "SND", 8, "Leather sandals, slides and crafted warm-weather footwear."),
+        ("Boots", "BTS", 9, "Ankle boots, Chelsea boots, work boots and other styles."),
+        ("Activewear & Sportswear", "ACT", 10, "Training clothes, leggings, sports tops and athleisure."),
+        ("Suits & Formalwear", "SUI", 11, "Suits, formal jackets, business wear and occasion tailoring."),
+        ("Underwear & Sleepwear", "SLP", 12, "Underwear, nightwear, robes and comfortable lounge sets."),
+        ("Bags & Handbags", "BAG", 13, "Handbags, backpacks, totes, clutches and travel bags."),
+        ("Necklaces & Chains", "NCK", 14, "Necklaces, chains, pendants and layered fashion jewelry."),
+        ("Bracelets & Bangles", "BRB", 15, "Bracelets, bangles, cuffs and other wrist jewelry."),
+        ("Rings & Earrings", "JWL", 16, "Rings, earrings, studs and statement jewelry."),
+        ("Watches", "WCH", 17, "Wristwatches and fashion timepieces."),
+        ("Eyewear & Sunglasses", "EYE", 18, "Everyday glasses, fashion frames and sunglasses."),
+        ("Hats, Scarves & Belts", "HSB", 19, "Headwear, scarves, belts and finishing accessories."),
+        ("Traditional & Occasionwear", "TRD", 20, "Kitenge, cultural prints, celebration wear and special-occasion fashion."),
+        ("Swimwear & Beachwear", "SWM", 21, "Swimwear, beach cover-ups and warm-weather resort pieces.")
     ]
     for name, code, order, desc in cats:
         cat_id = f"CAT-{code}"

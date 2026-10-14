@@ -59,8 +59,8 @@ body, button, input, select, textarea {
 
 /* ---- 2. One fluid type scale for every screen ---- */
 :root {
-  /* User density multiplier: .86 (Compact) | 1 (Standard) | 1.15 (Large) */
-  --ui-font-scale: 1;
+  /* User density multiplier: .86 (Compact default) | 1 (Standard) | 1.15 (Large) */
+  --ui-font-scale: .86;
 
   --fs-hero:    calc(clamp(20px,   2.05vmin + 13.6px,  32px) * var(--ui-font-scale)); /* register / page hero */
   --fs-hero-xl: calc(clamp(23px,   1.39vmin + 19.0px,  34px) * var(--ui-font-scale)); /* suite gate hero */
@@ -83,56 +83,68 @@ body, button, input, select, textarea {
 
   /* ==================================================================
      DISPLAY SIZE CONTROL (Compact / Standard / Large)
-     Dark-sidebar friendly; mirrors the emerald active language used by
-     the navigation items on both shells.
+     Kept in Store Settings, outside the main navigation menu.
      ================================================================== */
   .ds-panel {
-    margin: 10px 0 4px;
-    padding: 11px 12px 12px;
-    border: 1px solid rgba(255, 255, 255, .1);
-    border-radius: 12px;
-    background: rgba(255, 255, 255, .04);
+    max-width: 860px;
+    margin: 0 0 16px;
+    padding: 18px 20px;
+    border: 1px solid #E3E9E5;
+    border-radius: 14px;
+    background: #FFFFFF;
+    box-shadow: 0 5px 18px rgba(15, 23, 42, .045);
   }
   .ds-panel-head {
     display: flex;
     align-items: center;
-    gap: 7px;
-    margin-bottom: 9px;
-    color: #94A3B8;
-    font-size: var(--fs-micro);
-    font-weight: 800;
-    letter-spacing: .13em;
-    text-transform: uppercase;
+    gap: 10px;
+    color: #111827;
   }
-  .ds-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+  .ds-panel-head i { color: #15803D; }
+  .ds-panel-head h2 { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -.01em; }
+  .ds-copy {
+    margin: 5px 0 0;
+    max-width: 620px;
+    color: #64748B;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .ds-options { display: grid; grid-template-columns: repeat(3, minmax(0, 140px)); gap: 8px; margin-top: 14px; }
   .ds-opt {
-    min-height: 40px;
-    padding: 0 4px;
-    border: 1px solid rgba(255, 255, 255, .12);
+    min-height: 42px;
+    padding: 0 14px;
+    border: 1px solid #D5DED8;
     border-radius: 9px;
-    background: rgba(255, 255, 255, .05);
-    color: #E2E8F0;
+    background: #F9FBF9;
+    color: #374151;
     font-family: var(--font-text, "Plus Jakarta Sans", system-ui, sans-serif);
-    font-size: var(--fs-micro);
-    font-weight: 800;
-    letter-spacing: .02em;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .01em;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    transition: border-color .16s ease, background-color .16s ease, color .16s ease;
   }
-  .ds-opt:hover { border-color: rgba(34, 197, 94, .55); color: #fff; }
+  .ds-opt:hover { border-color: #86C59A; background: #F0FDF4; color: #166534; }
   .ds-opt.is-active,
   .ds-opt[aria-pressed="true"] {
-    border-color: #22C55E;
-    background: #22C55E;
-    color: #052E16;
+    border-color: #16A34A;
+    background: #DCFCE7;
+    color: #14532D;
+    box-shadow: inset 0 0 0 1px #16A34A;
   }
-  .ds-opt:focus-visible { outline: 3px solid rgba(34, 197, 94, .55); outline-offset: 2px; }
+  .ds-opt:focus-visible { outline: 3px solid rgba(22, 163, 74, .3); outline-offset: 2px; }
   .ds-hint {
-    margin: 8px 0 0;
-    color: #94A3B8;
-    font-size: var(--fs-micro);
+    margin: 10px 0 0;
+    color: #64748B;
+    font-size: 11.5px;
     font-weight: 600;
     line-height: 1.5;
+  }
+  @media (max-width: 480px) {
+    .ds-panel { padding: 16px; }
+    .ds-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .ds-opt { padding: 0 6px; }
   }
 
   /* ==================================================================

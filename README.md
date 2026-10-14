@@ -250,6 +250,15 @@ Endpoints: `POST/GET /api/finance/stock-lots` (graded creation accepts a `grades
 
 Every request in the console is protected by a 30-second network timeout with a **Try again** action, so workspaces never hang on a silent connection.
 
+### Dynamic Source B consignment
+The Admin **Consignment Partners** workspace is Finance-protected. It supports partner profiles, region/source filters, item and payout history, sales-volume/turnover rankings, and idempotent partial or full payouts. New partner records default to a 5% store commission; an item can inherit the partner rate or save a custom 0–100% rate. Catalog intake remains Source A / store-owned by default. To list partner stock, create or open a partner and choose **Add consignment item**; that opens **Catalog Intake** with partner ownership enabled and the selected partner prefilled. The manual path is **Catalog Intake → Inventory source → Partner-supplied · consignment → Which partner supplied it?**. Source B pieces require an active partner, one available PRE-LOVED item, at least one photo, and a managed 15–20 second garment video.
+
+The shared fashion taxonomy now covers apparel, outerwear and tailoring, shoes, boots and sandals, active/sportswear, underwear and sleepwear, bags and handbags, necklaces/chains, bracelets/bangles, rings/earrings, watches, eyewear/sunglasses, hats/scarves/belts, traditional/occasionwear, swim/beachwear and children's wear. Catalog Intake, the public storefront filters and the POS register all use the same expanded category list; existing product categories remain supported.
+
+Partner sales use the same catalog, stock locks, storefront, and POS checkout as store-owned products. Sale-time order-item snapshots preserve the partner, rate, gross, store commission, and amount owed; the checkout transaction decrements stock and posts account 4200 (Store Commission Income) plus account 2100 (Consignment Payables), without store COGS. Unverified online checkouts sit in account 2110 until payment verification. Payouts debit partner payables and credit the selected cash, mobile-money, or bank account, with an immutable destination snapshot and unique idempotency key. Cancellation/expiry reversals and sale/payout history remain auditable.
+
+Schema: `migrations/20261013_dynamic_consignment.sql` (run after the financial-ledger migration on PostgreSQL; the application also installs additive columns/tables on startup). Regression suite: `.venv/bin/python -m unittest discover -s tests -p test_consignment.py -v`.
+
 ---
 
 ## 4c. Optional admin-managed area passwords
@@ -300,9 +309,18 @@ Settings workflow.
 The bell on the cashier register and operations console shows the latest
 **100 store activities**, including completed POS checkouts, online orders and
 customer notes, payments/expiry, low stock, catalog intake/edit/removal,
-fulfillment changes, expenses, stock lots, markdowns/write-offs and published
-store settings. Click an entry to open its relevant workspace.
+fulfillment changes, rider roster/profile and availability changes, pairing-code
+issuance/phone pairing or revocation, rider duty start/stop, delivery assignment
+and rider-reported progress, expenses, stock lots, markdowns/write-offs and
+published store settings. Click an entry to open its relevant workspace; rider
+and delivery alerts open Dispatch. GPS fixes never generate per-point alerts.
+Pairing-code alerts do not contain the code, and rider/dispatch event details
+follow the protected Orders area.
 
+- Each notification has a right-side **three-dot menu** to mark that item
+  read/unread or remove it from this device. There are no selection checkboxes;
+  removing a row locally does not erase the durable server history. **Mark all
+  as read** remains available in the drawer header.
 - The **unread badge** updates independently of navigation-tab counts. Opening
   the drawer or choosing **Mark all as read** marks the currently received
   event IDs as read. New events in the same second are still unread; read state
@@ -738,10 +756,11 @@ for. Three fixes ship together in `css/adaptive-display.css` + `js/adaptive.js`:
   classifies the device from the short side (`data-device="phone"` for a landscape
   phone) and publishes `data-viewport`, so the compact layout is no longer skipped
   just because the phone is sideways.
-- **A Display size control, saved per device.** `Menu → Display size` in the POS and
-  the same panel in the Admin sidebar offer **Compact / Standard / Large**. The
-  choice is stored as `adonai.ui.display-size` and published as `--ui-font-scale`,
-  so the register can be tuned to the phone in hand without rebuilding the APK.
+- **Compact default, with a per-device setting.** The staff shells now start at
+  **Compact** (`--ui-font-scale: 0.86`). **Compact / Standard / Large** lives in
+  **Admin Suite → Store Settings → Display size**, not in the POS or Admin main
+  menus. A saved selection is kept in `adonai.ui.display-size` for that device and
+  applies to both cashier and Admin pages without rebuilding the APK.
   `?display=compact|standard|large` previews a density for one load without saving,
   and `?fit=off` renders the shell exactly as it looked *before* this layer existed —
   the before/after switch used by the preview harness and by support calls.

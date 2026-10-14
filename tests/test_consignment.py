@@ -1,366 +1,378 @@
-#!/usr/bin/env python3
-"""End-to-end coverage for partner consignment (intake → checkout split → payout).
-
-Boots the real API handler in-process against a throwaway SQLite database and
-walks the controls the Bale Costs panel depends on:
-
-1. Pure rules: 5% split reconciles exactly; media standard; payout account formats.
-2. Supplier onboarding: starts PENDING_KYC; the creator cannot verify their own file.
-3. Consignment intake: refused without a verified partner or a compliant media set,
-   and a refused intake leaves nothing behind (no lot, no garments).
-4. Storefront boundary: public catalogue exposes no supplier or partner fields.
-5. Checkout split: a consignment line posts partner payable (2100) + commission (4200),
-   the journal balances, and the split row reconciles to the line total.
-6. Payouts: only fulfilled sales are payable; idempotent requests; dual approval
-   above the threshold; payment reference required and unique; reconciliation holds.
-
-Run from the repository root:  python3 tests/test_consignment.py
+"""Regression coverage for Source B dynamic consignment inventory.
+Run: python -m unittest discover -s tests -p test_consignment.py -v
 """
+from datetime import datetime
 import json
 import os
+from pathlib import Path
 import sys
 import tempfile
-import uuid
-from datetime import datetime
+import unittest
 
-# --- Environment must be pinned BEFORE importing the app modules -----------
-_TMP_DB = os.path.join(tempfile.mkdtemp(prefix="adonai-consignment-test-"), "consignment.db")
-# TEST_DATABASE_URL lets the same suite run against PostgreSQL (a fresh database per run).
-os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_TMP_DB}"
-os.environ["STORE_MASTER_KEY"] = "test-master-key-consignment"
-os.environ["ADONAI_REQUIRE_STAFF_AUTH"] = "1"
-os.environ["JWT_SECRET"] = "test-jwt-secret-consignment"
-os.environ["ADONAI_RATE_LIMIT_DISABLED"] = "1"
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO_ROOT)
-os.chdir(REPO_ROOT)
-
-from db_init import init_db  # noqa: E402
-import consignment  # noqa: E402
-import api  # noqa: E402
-from api import handle_api_request, create_jwt_token  # noqa: E402
-from database import get_db  # noqa: E402
-from models import ProductMedia, Order, ConsignmentSalesSplit, Product  # noqa: E402
-from sqlalchemy import func  # noqa: E402
-
-PASSED = []
-FAILED = []
-NO_AUTH = object()
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+_TEMP = tempfile.TemporaryDirectory(prefix="adonai-consignment-tests-")
+os.environ.update({
+    "DATABASE_URL": "sqlite:///" + str(Path(_TEMP.name) / "consignment.db"),
+    "ADONAI_REQUIRE_STAFF_AUTH": "0",
+    "ADONAI_RATE_LIMIT_DISABLED": "1",
+    "ADONAI_SEED_DEMO_CATALOG": "0",
+    "ADONAI_SEED_DEMO_USERS": "0",
+})
+import database
+database.IS_POSTGRES = False
+from database import get_db
+from db_init import init_db
+from models import (
+    AccountingJournalEntry, AccountingJournalLine, ConsignmentPartner,
+    ConsignmentPayout, Inventory, InventoryLock, LedgerEntry, NotificationEvent,
+    Order, OrderItem, Product, ProductMedia, StoreSetting,
+)
+import access_control
+import api
 
 
-def token_for(staff_id, name, role):
-    return {"authorization": "Bearer " + create_jwt_token({"id": staff_id, "name": name, "role": role}, 3600)}
+PHOTO = "data:image/jpeg;base64,YWJj"
 
 
-MGR1 = token_for("MGR-1", "Manager One", "manager")
-MGR2 = token_for("MGR-2", "Manager Two", "manager")
-CASHIER = token_for("CSH-1", "Cashier", "cashier")
+class ConsignmentTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        assert init_db(), "Isolated consignment schema failed to initialize"
 
-
-def call(method, path, body=None, headers=None, query=None):
-    status, _ctype, payload = handle_api_request(
-        method,
-        path,
-        query or {},
-        json.dumps(body or {}).encode("utf-8"),
-        {} if headers is NO_AUTH else (headers or MGR1),
-        client_addr="127.0.0.1",
-    )
-    text = payload.decode("utf-8")
-    try:
-        return status, json.loads(text)
-    except ValueError:
-        return status, {"raw": text}
-
-
-def check(label, condition, detail=""):
-    if condition:
-        PASSED.append(label)
-        print(f"  PASS  {label}")
-    else:
-        FAILED.append(label)
-        print(f"  FAIL  {label}  {detail}")
-
-
-def add_media(kind, uploader, duration=None):
-    """Create a durable media asset the way the upload endpoint would (unattached)."""
-    asset_id = uuid.uuid4().hex
-    with get_db() as session:
-        session.add(ProductMedia(
-            id=asset_id,
-            product_id=None,
-            kind=kind,
-            mime_type="image/jpeg" if kind == "image" else "video/mp4",
-            filename=f"{asset_id}.{'jpg' if kind == 'image' else 'mp4'}",
-            byte_length=1024,
-            width=800,
-            height=1000,
-            duration=duration,
-            data=b"x",
-            uploaded_by=uploader,
-            created_at=datetime.utcnow(),
-        ))
-    return asset_id
-
-
-def compliant_item(name, price, photos=5, video_seconds=12.0, uploader="MGR-1"):
-    images = [f"/api/media/{add_media('image', uploader)}" for _ in range(photos)]
-    video = add_media("video", uploader, duration=video_seconds) if video_seconds is not None else ""
-    return {
-        "name": name,
-        "brand": "Partner Brand",
-        "category": "Outerwear & Jackets",
-        "size": "M",
-        "selling_price": price,
-        "reference_value": int(price * 0.6),
-        "images": images,
-        "video_id": video,
-    }
-
-
-def supplier_payload(name, channel="MOBILE_MONEY", account="0770123456"):
-    return {
-        "partner_name": name,
-        "business_name": f"{name} Trading",
-        "phone_whatsapp": "+256770123456",
-        "identity_reference": "CM9800123456789",
-        "payout_channel": channel,
-        "payout_account": account,
-    }
-
-
-def main():
-    print("\n[1] Pure rules")
-    check("5% commission on UGX 80,000 is 4,000 and partner gets 76,000",
-          consignment.split_sale_line(80_000) == (4_000, 76_000))
-    commission, partner = consignment.split_sale_line(12_345)
-    check("odd amounts reconcile exactly (half-up commission)", commission + partner == 12_345 and commission == 617)
-    commission, partner = consignment.split_sale_line(12_350)
-    check("half-shilling rounds up and still reconciles", commission == 618 and commission + partner == 12_350)
-    check("media: 5 photos and a 12s video are compliant", consignment.validate_media(5, 12.0) == [])
-    check("media: 4 photos are refused", any("at least 5" in p for p in consignment.validate_media(4, 12.0)))
-    check("media: 7 photos are refused", any("at most 6" in p for p in consignment.validate_media(7, 12.0)))
-    check("media: video over 15s is refused", any("15 seconds" in p for p in consignment.validate_media(5, 20.0)))
-    check("media: missing video is refused", any("required" in p for p in consignment.validate_media(5, None)))
-    check("mobile money accepts +256 form and normalises", consignment.validate_payout_account("MOBILE_MONEY", "+256770123456") == "0770123456")
-    try:
-        consignment.validate_payout_account("MOBILE_MONEY", "12345")
-        check("mobile money rejects a short number", False)
-    except ValueError:
-        check("mobile money rejects a short number", True)
-    check("masking shows only the last three characters", consignment.mask_account("0770123456") == "•••••••456")
-
-    print("\n[2] Supplier onboarding and KYC")
-    status, data = call("POST", "/api/finance/consignment/suppliers", supplier_payload("Derek Corrections"))
-    check("supplier created", status == 201, f"{status} {data}")
-    supplier = data.get("supplier", {})
-    check("new supplier starts PENDING_KYC", supplier.get("kyc_status") == "PENDING_KYC")
-    check("supplier response masks the payout account", supplier.get("payout_account", "").endswith("456") and "0770" not in supplier.get("payout_account", ""))
-    supplier_id = supplier.get("id")
-    status, data = call("POST", f"/api/finance/consignment/suppliers/{supplier_id}/verify", {}, MGR1)
-    check("creator cannot verify their own supplier file", status == 403, f"{status} {data}")
-    status, data = call("POST", "/api/finance/consignment/suppliers", {**supplier_payload("Bad Account"), "payout_account": "x"})
-    check("invalid payout account is rejected at onboarding", status == 400)
-    status, data = call("POST", f"/api/finance/consignment/suppliers/{supplier_id}/verify", {}, MGR2)
-    check("a second manager verifies KYC", status == 200 and data.get("supplier", {}).get("kyc_status") == "VERIFIED", f"{status} {data}")
-
-    print("\n[3] Intake gates")
-    status, data = call("POST", "/api/finance/consignment/lots", {"supplier_id": supplier_id, "description": "Test bale", "agreement_ref": "AGR-1", "items": [compliant_item("Gate test", 50_000)]}, CASHIER)
-    check("staff cannot attach another staff member's uploads to consignment intake", status == 400 and "another staff member" in data.get("error", ""), f"{status} {data}")
-    unverified = call("POST", "/api/finance/consignment/suppliers", supplier_payload("Unverified Partner"), MGR1)[1]["supplier"]["id"]
-    status, data = call("POST", "/api/finance/consignment/lots", {"supplier_id": unverified, "description": "x", "agreement_ref": "AGR-X", "items": [compliant_item("Blocked", 40_000)]}, MGR1)
-    check("unverified partner cannot receive stock", status == 409, f"{status} {data}")
-    status, data = call("POST", "/api/finance/consignment/lots", {"supplier_id": supplier_id, "description": "x", "agreement_ref": "", "items": [compliant_item("No agreement", 40_000)]}, MGR1)
-    check("agreement reference is mandatory", status == 400)
-    status, data = call("POST", "/api/finance/consignment/lots", {
-        "supplier_id": supplier_id, "description": "Atomic test", "agreement_ref": "AGR-2", "lot_code": "CON-ATOMIC-1",
-        "items": [compliant_item("Good one", 45_000), compliant_item("Only four photos", 45_000, photos=4)],
-    }, MGR1)
-    check("a non-compliant garment refuses the whole intake", status == 400 and "media standard" in data.get("error", ""), f"{status} {data}")
-    with get_db() as session:
-        leftover = session.query(Product).filter(Product.name.in_(["Good one", "Only four photos"])).count()
-    check("a refused intake leaves no garments behind", leftover == 0, f"found {leftover}")
-
-    print("\n[4] Compliant intake")
-    lot_body = {
-        "supplier_id": supplier_id, "description": "Mixed denim consignment", "agreement_ref": "AGR-2026-001",
-        "lot_code": "CON-TEST-001",
-        "items": [compliant_item("Indigo Denim Jacket", 80_000), compliant_item("Olive Field Jacket", 50_000)],
-    }
-    status, data = call("POST", "/api/finance/consignment/lots", lot_body, MGR1)
-    check("compliant consignment lot registers", status == 201, f"{status} {data}")
-    lot = data.get("lot", {})
-    check("lot is typed PARTNER_CONSIGNMENT with zero upfront cost", lot.get("lot_type") == "PARTNER_CONSIGNMENT" and lot.get("total_landed_cost") == 0)
-    with get_db() as session:
-        rows = session.query(Product).filter(Product.stock_lot_id == lot.get("id")).all()
-        products = [{"id": p.id, "name": p.name, "ok": bool(p.is_consignment and p.supplier_id == supplier_id and int(p.cost_price or 0) == 0 and int(p.total_transport_cost or 0) == 0)} for p in rows]
-    check("garments are consignment items with zero Adonai cost and no transport", len(products) == 2 and all(p["ok"] for p in products))
-    indigo_id = next((p["id"] for p in products if p["name"] == "Indigo Denim Jacket"), None)
-    olive_id = next((p["id"] for p in products if p["name"] == "Olive Field Jacket"), None)
-
-    print("\n[5] Storefront boundary")
-    status, data = call("GET", "/api/products", {}, NO_AUTH)
-    text = json.dumps(data)
-    check("public catalogue lists consignment garments", status == 200 and "Indigo Denim Jacket" in text)
-    check("public catalogue exposes no supplier identity or consignment fields",
-          supplier_id not in text and "Derek" not in text and "supplier_id" not in text and "consignment_reference_value" not in text and "CM9800123456789" not in text)
-
-    print("\n[6] Checkout split")
-    status, data = call("POST", "/api/orders", {"channel": "web", "items": [{"product_id": indigo_id, "qty": 2}], "delivery_type": "pickup", "customer_name": "Qty Test"}, NO_AUTH)
-    check("a consignment piece cannot be sold in quantity 2", status == 409, f"{status} {data}")
-    with get_db() as session:
-        still_available = session.query(Product).filter_by(id=indigo_id).first().in_stock_count
-    check("the refused quantity-2 order did not touch stock", still_available == 1, f"stock={still_available}")
-
-    status, data = call("POST", "/api/orders", {"channel": "web", "items": [{"product_id": indigo_id, "qty": 1}, {"product_id": olive_id, "qty": 1}], "delivery_type": "pickup", "customer_name": "Consignment Buyer", "customer_phone": "+256700000111"}, NO_AUTH)
-    check("web checkout of two consignment pieces succeeds", status in (200, 201), f"{status} {data}")
-    order_id = (data.get("order") or {}).get("id") or data.get("order_id") or data.get("id")
-    with get_db() as session:
-        splits = session.query(ConsignmentSalesSplit).filter_by(order_id=order_id).all()
-        split_totals = sorted((s.line_total, s.commission_amount, s.partner_share) for s in splits)
-        journal_id = splits[0].journal_entry_id if splits else None
-    check("two split rows are written, one per consignment line", len(splits) == 2, f"{len(splits)}")
-    check("each split reconciles to its line total", all(line == com + part for line, com, part in split_totals))
-    check("split amounts: 80,000 → 4,000 / 76,000 and 50,000 → 2,500 / 47,500",
-          split_totals == sorted([(80_000, 4_000, 76_000), (50_000, 2_500, 47_500)]), f"{split_totals}")
-    with get_db() as session:
-        from models import AccountingJournalLine
-        lines = session.query(AccountingJournalLine).filter_by(journal_entry_id=journal_id).all()
-        debit = sum(int(l.debit or 0) for l in lines)
-        credit = sum(int(l.credit or 0) for l in lines)
-        p2100 = sum(int(l.credit or 0) - int(l.debit or 0) for l in lines if l.account_code == "2100")
-        c4200 = sum(int(l.credit or 0) for l in lines if l.account_code == "4200")
-    check("the sale journal balances", debit == credit and debit > 0, f"dr={debit} cr={credit}")
-    check("partner payable (2100) is credited with the partner shares", p2100 == 76_000 + 47_500)
-    check("commission revenue (4200) is credited with the commission only", c4200 == 4_000 + 2_500)
-
-    # Simulate staff fulfilment of the web order (status completed) through the ledger.
-    with get_db() as session:
-        session.query(Order).filter_by(id=order_id).update({"status": "completed"})
-
-    print("\n[7] Payouts")
-    status, data = call("GET", "/api/finance/consignment/overview", {}, CASHIER)
-    check("cashier cannot open the cash-share dashboard", status == 403)
-    status, data = call("GET", "/api/finance/consignment/overview", {}, MGR1)
-    check("overview loads for a manager", status == 200, f"{status} {data}")
-    sup_row = next((s for s in data.get("suppliers", []) if s["id"] == supplier_id), {})
-    check("fulfilled partner share is 123,500 (76,000 + 47,500)", sup_row.get("eligible") == 76_000 + 47_500, f"{sup_row}")
-    check("nothing has been paid yet, so payable now is 123,500", sup_row.get("payable_now") == 76_000 + 47_500, f"{sup_row}")
-    check("balance matches the journal for account 2100", data.get("reconciliation", {}).get("partner_payable", {}).get("balanced") is True, f"{data.get('reconciliation')}")
-    check("commission matches the journal for account 4200", data.get("reconciliation", {}).get("commission", {}).get("balanced") is True)
-
-    payable_now = sup_row.get("payable_now", 0)
-    status, data = call("POST", "/api/finance/consignment/payouts", {"supplier_id": supplier_id, "amount": payable_now + 1, "idempotency_key": "pay-over-1"}, MGR1)
-    check("payout above the payable balance is refused", status == 409, f"{status} {data}")
-    status, data = call("POST", "/api/finance/consignment/payouts", {"supplier_id": supplier_id, "amount": 40_000, "idempotency_key": "pay-key-1"}, MGR1)
-    check("valid payout request is recorded as REQUESTED", status == 201 and data.get("payout", {}).get("status") == "REQUESTED", f"{status} {data}")
-    payout_id = data.get("payout", {}).get("id")
-    status, again = call("POST", "/api/finance/consignment/payouts", {"supplier_id": supplier_id, "amount": 40_000, "idempotency_key": "pay-key-1"}, MGR1)
-    check("repeating the same request key does not create a second payout",
-          status == 200 and again.get("status") == "existing" and again.get("payout", {}).get("id") == payout_id)
-    status, data = call("POST", f"/api/finance/consignment/payouts/{payout_id}/pay", {"payment_reference": "MM-REF-1"}, MGR2)
-    check("cannot pay before approval", status == 409)
-    status, data = call("POST", f"/api/finance/consignment/payouts/{payout_id}/approve", {}, MGR1)
-    check("small payouts may be approved by the requester's manager", status == 200 and data.get("payout", {}).get("status") == "APPROVED", f"{status} {data}")
-    status, data = call("POST", f"/api/finance/consignment/payouts/{payout_id}/pay", {"payment_reference": "x"}, MGR2)
-    check("a payment reference is required", status == 400)
-    status, data = call("POST", f"/api/finance/consignment/payouts/{payout_id}/pay", {"payment_reference": "MM-REF-1"}, MGR2)
-    check("payment recorded with a reference", status == 200 and data.get("payout", {}).get("status") == "PAID", f"{status} {data}")
-
-    # Dual approval above the threshold: a separate high-value sale.
-    big = compliant_item("Heritage Leather Coat", 400_000)
-    status, data = call("POST", "/api/finance/consignment/lots", {"supplier_id": supplier_id, "description": "Premium", "agreement_ref": "AGR-3", "lot_code": "CON-TEST-002", "items": [big]}, MGR1)
-    big_id = data.get("product_ids", [None])[0]
-    status, data = call("POST", "/api/orders", {"channel": "web", "items": [{"product_id": big_id, "qty": 1}], "delivery_type": "pickup", "customer_name": "Big Buyer"}, NO_AUTH)
-    big_order = (data.get("order") or {}).get("id") or data.get("order_id") or data.get("id")
-    with get_db() as session:
-        session.query(Order).filter_by(id=big_order).update({"status": "completed"})
-    status, data = call("POST", "/api/finance/consignment/payouts", {"supplier_id": supplier_id, "amount": 350_000, "idempotency_key": "pay-big-1"}, MGR1)
-    big_payout = data.get("payout", {}).get("id")
-    check("a high-value payout can be requested", status == 201, f"{status} {data}")
-    status, data = call("POST", f"/api/finance/consignment/payouts/{big_payout}/approve", {}, MGR1)
-    check("requester cannot self-approve a payout at or above the threshold", status == 403, f"{status} {data}")
-    status, data = call("POST", f"/api/finance/consignment/payouts/{big_payout}/approve", {}, MGR2)
-    check("a second manager approves the high-value payout", status == 200, f"{status} {data}")
-    status, data = call("POST", f"/api/finance/consignment/payouts/{big_payout}/pay", {"payment_reference": "MM-REF-1"}, MGR2)
-    check("a reused payment reference is refused", status == 409, f"{status} {data}")
-    status, data = call("POST", f"/api/finance/consignment/payouts/{big_payout}/pay", {"payment_reference": "MM-REF-BIG"}, MGR2)
-    check("high-value payment recorded", status == 200 and data.get("payout", {}).get("status") == "PAID", f"{status} {data}")
-
-    status, data = call("GET", "/api/finance/consignment/overview", {}, MGR1)
-    recon = data.get("reconciliation", {}).get("partner_payable", {})
-    check("after payouts the 2100 journal still equals the expected payable", recon.get("balanced") is True, f"{recon}")
-    kpi = data.get("kpis", {})
-    check("paid-out KPI reflects both PAID payouts", kpi.get("paid_out") == 40_000 + 350_000, f"{kpi}")
-
-    print("\n[8] Transport cannot leak onto consignment pieces")
-    status, data = call("POST", "/api/finance/consignment/lots", {
-        "supplier_id": supplier_id, "description": "Transport probe", "agreement_ref": "AGR-4",
-        "lot_code": "CON-TRANSPORT-1", "items": [compliant_item("Transport probe jacket", 40_000)],
-    }, MGR1)
-    check("transport probe consignment lot registers", status == 201, f"{status} {data}")
-    with get_db() as session:
-        probe_id = session.query(Product).filter(Product.name == "Transport probe jacket").one().id
-    # A routine System Parameters change with the catalogue roll-out must not put transport on consignment stock.
-    ADMIN = token_for("ADM-1", "Store Admin", "admin")
-    status, data = call("POST", "/api/settings", {"settings": {"base_delivery_fee": "5000"}, "apply_base_fee_to_catalog": True}, ADMIN)
-    check("base delivery fee change with catalogue roll-out is accepted", status == 200, f"{status} {data}")
-    with get_db() as session:
-        probe_transport = int(session.query(Product).filter_by(id=probe_id).one().total_transport_cost or 0)
-    check("consignment piece keeps zero transport after the roll-out", probe_transport == 0, f"transport={probe_transport}")
-    status, data = call("POST", "/api/orders", {
-        "channel": "web", "items": [{"product_id": probe_id, "qty": 1}],
-        "delivery_type": "pickup", "customer_name": "Transport Probe",
-    }, NO_AUTH)
-    check("web checkout of a consignment piece still succeeds after the roll-out", status in (200, 201), f"{status} {data}")
-    probe_order = (data.get("order") or {}).get("id") or data.get("order_id") or data.get("id")
-    with get_db() as session:
-        probe_split = session.query(ConsignmentSalesSplit).filter_by(order_id=probe_order).first()
-        probe_journal = probe_split.journal_entry_id if probe_split else None
-    if probe_journal:
+    def setUp(self):
         with get_db() as session:
-            from models import AccountingJournalLine
-            plines = session.query(AccountingJournalLine).filter_by(journal_entry_id=probe_journal).all()
-            pdr = sum(int(l.debit or 0) for l in plines)
-            pcr = sum(int(l.credit or 0) for l in plines)
-        check("the probe sale journal balances", pdr == pcr and pdr > 0, f"dr={pdr} cr={pcr}")
-    else:
-        check("the probe sale journal balances", False, "no split row was written for the probe sale")
+            for model in (OrderItem, ConsignmentPayout, InventoryLock, Inventory, ProductMedia,
+                          Order, Product, ConsignmentPartner, LedgerEntry,
+                          AccountingJournalLine, AccountingJournalEntry, NotificationEvent):
+                session.query(model).delete(synchronize_session=False)
+            session.query(StoreSetting).filter_by(key=access_control.POLICY_KEY).delete()
 
-    print("\n[9] Register dashboard counts only Adonai revenue")
-    today = datetime.now(api.KAMPALA_TZ).date().isoformat()
-    status, _ctype, payload = handle_api_request("GET", "/api/finance/dashboard", {"date": [today]}, b"{}", MGR1, client_addr="127.0.0.1")
-    data = json.loads(payload.decode("utf-8"))
-    m = data.get("metrics", {})
-    with get_db() as session:
-        start_utc, end_utc, _ = api.date_bounds_utc(today)
-        day_orders = session.query(Order).filter(
-            Order.created_at >= start_utc, Order.created_at < end_utc,
-            ~Order.status.in_(["cancelled", "void"]),
-        ).all()
-        day_ids = [o.id for o in day_orders]
-        gross_db = sum(int(o.total or 0) for o in day_orders)
-        partner_db = int(session.query(func.coalesce(func.sum(ConsignmentSalesSplit.partner_share), 0)).filter(ConsignmentSalesSplit.order_id.in_(day_ids)).scalar() or 0) if day_ids else 0
-    check("dashboard loads for today", status == 200 and data.get("ok") is True, f"{status} {data}")
-    check("gross sales still reflect what customers paid", m.get("gross_sales") == gross_db, f"{m.get('gross_sales')} vs {gross_db}")
-    check("partner share is reported separately", m.get("partner_share") == partner_db and partner_db > 0, f"{m.get('partner_share')} vs {partner_db}")
-    check("Adonai revenue excludes the partner share", m.get("adonai_revenue") == gross_db - partner_db, f"{m.get('adonai_revenue')}")
-    check("gross profit is Adonai revenue less COGS (partner share is not profit)", m.get("gross_profit") == m.get("adonai_revenue") - m.get("cogs"), f"{m}")
-    cat_sales = sum(int(r.get("sales", 0)) for r in data.get("category_profitability", []))
-    check("category sales add up to Adonai revenue", cat_sales == m.get("adonai_revenue"), f"{cat_sales} vs {m.get('adonai_revenue')}")
+    def raw(self, method, path, body=None, headers=None, query_params=None):
+        encoded = json.dumps(body).encode("utf-8") if body is not None else b""
+        return api.handle_api_request(method, path, query_params or {}, encoded, headers=headers or {}, client_addr="consignment-tests")
 
-    print("\n" + "=" * 60)
-    print(f"  {len(PASSED)} passed, {len(FAILED)} failed")
-    if FAILED:
-        print("  Failed checks:")
-        for label in FAILED:
-            print(f"   - {label}")
-        return 1
-    print("  All consignment checks passed.")
-    return 0
+    def request(self, method, path, body=None, headers=None, query_params=None):
+        result = self.raw(method, path, body, headers, query_params)
+        try:
+            data = json.loads(result[2])
+        except (TypeError, json.JSONDecodeError):
+            data = {}
+        return result[0], data
+
+    def create_partner(self, **extra):
+        payload = {
+            "name": "Kampala Vintage Supply", "phone": "+256700111222",
+            "whatsapp": "+256700111222", "address": "Kampala Central",
+            "payout_provider": "MTN MoMo", "payout_account_name": "Vintage Supply",
+            "payout_account": "256700111222", "region": "Central",
+            "supply_source": "Kampala bale market",
+        }
+        payload.update(extra)
+        status, data = self.request("POST", "/api/consignment/partners", payload)
+        self.assertEqual(status, 201, data)
+        return data["partner"]
+
+    def add_video(self, suffix="a", duration=18.0):
+        asset_id = (suffix * 32)[:32]
+        with get_db() as session:
+            session.add(ProductMedia(
+                id=asset_id, product_id=None, kind="video", mime_type="video/mp4",
+                filename="garment.mp4", byte_length=10, width=480, height=640,
+                duration=duration, data=b"test-video", uploaded_by="OPEN-TERMINAL",
+            ))
+        return asset_id
+
+    def intake_consignment(self, partner_id, *, product_id=None, sku=None, video_id=None, **extra):
+        body = {
+            "id": product_id or "CONS-ITEM-1",
+            "sku": sku or "CONS-SKU-1",
+            "barcode_id": (sku or "CONS-SKU-1") + "-1OF1",
+            "name": "Vintage denim jacket",
+            "brand": "Curated",
+            "demographic": "Women",
+            "category": "Outerwear & Jackets",
+            "size": "M",
+            "inventory_source": "partner",
+            "consignment_partner_id": partner_id,
+            "item_condition": "PRE_LOVED",
+            "quantity_type": "PRE_LOVED",
+            "in_stock_count": 1,
+            "cost_price": 0,
+            "base_price": 50000,
+            "total_transport_cost": 0,
+            "image_url": PHOTO,
+            "images": [PHOTO],
+            "video_id": video_id or self.add_video(),
+            "video_duration": 18,
+        }
+        body.update(extra)
+        return self.request("POST", "/api/products", body)
+
+    def test_partner_default_rate_intake_validation_and_ownership_protections(self):
+        partner = self.create_partner()
+        self.assertEqual(partner["default_commission_rate"], 5.0)
+        status, choices = self.request("GET", "/api/consignment/partners/choices")
+        self.assertEqual(status, 200)
+        self.assertEqual([row["id"] for row in choices["partners"]], [partner["id"]])
+
+        clip_id = self.add_video("b")
+        status, missing_photo = self.request("POST", "/api/products", {
+            "name": "No-photo item", "inventory_source": "partner",
+            "consignment_partner_id": partner["id"], "base_price": 50000,
+            "in_stock_count": 1, "video_id": clip_id,
+        })
+        self.assertEqual(status, 400)
+        self.assertIn("photo", missing_photo["error"].lower())
+
+        too_short = self.add_video("c", duration=14.99)
+        status, invalid_video = self.intake_consignment(partner["id"], product_id="CONS-BAD-VIDEO", video_id=too_short)
+        self.assertEqual(status, 400)
+        self.assertIn("15 to 20", invalid_video["error"])
+
+        status, created = self.intake_consignment(partner["id"], video_id=clip_id)
+        self.assertEqual(status, 201, created)
+        product = created["product"]
+        self.assertTrue(product["is_consignment"])
+        self.assertEqual(product["item_condition"], "PRE_LOVED")
+        self.assertEqual(product["quantity_type"], "PRE_LOVED")
+        self.assertEqual(product["in_stock_count"], 1)
+        self.assertEqual(product["base_price"], 50000)
+        self.assertEqual(product["total_transport_cost"], 0)
+        self.assertEqual(product["cost_price"], 0)
+        self.assertEqual(product["video"]["duration"], 18.0)
+
+        for payload in (
+            {"consignment_partner_id": "OTHER"},
+            {"item_condition": "BRAND_NEW"},
+            {"in_stock_count": 2},
+            {"cost_price": 1000},
+        ):
+            status, error = self.request("PATCH", "/api/products/" + product["id"], payload)
+            self.assertEqual(status, 400, (payload, error))
+        status, error = self.request("DELETE", "/api/products/" + product["id"], {"mode": "permanent"})
+        self.assertEqual(status, 409, error)
+
+    def test_pos_sale_snapshots_commission_stock_and_idempotent_payout(self):
+        partner = self.create_partner(default_commission_rate=5)
+        status, created = self.intake_consignment(partner["id"])
+        self.assertEqual(status, 201, created)
+        product_id = created["product"]["id"]
+
+        status, rate = self.request("PATCH", f"/api/consignment/products/{product_id}/commission", {"commission_rate": 12.5})
+        self.assertEqual(status, 200, rate)
+        self.assertEqual(rate["effective_commission_rate"], 12.5)
+
+        owner = "REGISTER-CONS-1"
+        status, acquired = self.request("POST", f"/api/inventory-locks/{product_id}/acquire", {
+            "product_id": product_id, "lock_owner": owner, "quantity": 1,
+        })
+        self.assertEqual(status, 200, acquired)
+        status, sale = self.request("POST", "/api/orders", {
+            "id": "CONS-SALE-001", "channel": "pos", "lock_owner": owner,
+            "items": [{"product_id": product_id, "qty": 1}],
+            "tender": {"type": "cash", "tendered": 50000, "change": 0},
+            "cashier": {"id": "CASHIER-1", "name": "Cashier"},
+        })
+        self.assertEqual(status, 201, sale)
+
+        with get_db() as session:
+            product = session.get(Product, product_id)
+            order = session.get(Order, "CONS-SALE-001")
+            item = session.query(OrderItem).filter_by(order_id=order.id).one()
+            self.assertEqual(product.in_stock_count, 0)
+            self.assertEqual(item.consignment_partner_id, partner["id"])
+            self.assertEqual(item.partner_name_snapshot, partner["name"])
+            self.assertEqual(float(item.commission_rate_snapshot), 12.5)
+            self.assertEqual(item.consignment_gross_amount, 50000)
+            self.assertEqual(item.consignment_commission_amount, 6250)
+            self.assertEqual(item.partner_payable_amount, 43750)
+            self.assertEqual(item.unit_cost, 0)
+            entry = session.query(AccountingJournalEntry).filter_by(reference=order.id, source="pos_sale").one()
+            lines = session.query(AccountingJournalLine).filter_by(journal_entry_id=entry.id).all()
+            credits = {line.account_code: line.credit for line in lines if line.credit}
+            self.assertEqual(credits["4200"], 6250)
+            self.assertEqual(credits["2100"], 43750)
+            self.assertNotIn("5000", {line.account_code for line in lines})
+
+        # Later profile and rate edits never rewrite the captured sale split.
+        self.request("PATCH", f"/api/consignment/products/{product_id}/commission", {"commission_rate": 1})
+        self.request("PATCH", f"/api/consignment/partners/{partner['id']}", {"default_commission_rate": 30})
+        with get_db() as session:
+            item = session.query(OrderItem).filter_by(order_id="CONS-SALE-001").one()
+            self.assertEqual(float(item.commission_rate_snapshot), 12.5)
+            self.assertEqual(item.consignment_commission_amount, 6250)
+            self.assertEqual(item.partner_payable_amount, 43750)
+
+        payout = {"amount": 10000, "payment_method": "mobile_money", "idempotency_key": "payout-once"}
+        status, first = self.request("POST", f"/api/consignment/partners/{partner['id']}/payouts", payout)
+        self.assertEqual(status, 201, first)
+        self.assertEqual(first["payable_balance"], 33750)
+        status, replay = self.request("POST", f"/api/consignment/partners/{partner['id']}/payouts", payout)
+        self.assertEqual(status, 200, replay)
+        self.assertTrue(replay["idempotent_replay"])
+        self.assertEqual(replay["payable_balance"], 33750)
+        status, too_much = self.request("POST", f"/api/consignment/partners/{partner['id']}/payouts", {
+            "amount": 40000, "payment_method": "cash", "idempotency_key": "too-much",
+        })
+        self.assertEqual(status, 409, too_much)
+
+        status, detail = self.request("GET", f"/api/consignment/partners/{partner['id']}")
+        self.assertEqual(status, 200, detail)
+        self.assertTrue(detail["partner"]["active"])
+        self.assertEqual(detail["metrics"]["submitted"], 1)
+        self.assertEqual(detail["metrics"]["active_inventory"], 0)
+        self.assertEqual(detail["metrics"]["gross_revenue"], 50000)
+        self.assertEqual(detail["metrics"]["commission_earned"], 6250)
+        self.assertEqual(detail["items"][0]["gross_revenue"], 50000)
+        self.assertEqual(detail["items"][0]["commission_earned"], 6250)
+        self.assertEqual(detail["metrics"]["payable_earned"], 43750)
+        self.assertEqual(detail["metrics"]["payable_balance"], 33750)
+        self.assertEqual(len(detail["payouts"]), 1)
+
+        status, overview = self.request("GET", "/api/consignment/dashboard")
+        self.assertEqual(status, 200, overview)
+        self.assertEqual(overview["summary"]["active_partners"], 1)
+        self.assertEqual(overview["summary"]["payouts_total"], 10000)
+        self.assertEqual(overview["recent_payouts"][0]["partner_name"], partner["name"])
+        filtered_status, filtered = self.request("GET", "/api/consignment/dashboard", query_params={"region": ["Northern"]})
+        self.assertEqual(filtered_status, 200, filtered)
+        self.assertEqual(filtered["summary"]["partners"], 0)
+        self.assertEqual(filtered["recent_payouts"], [])
+
+        status, finance = self.request("GET", "/api/finance/dashboard")
+        self.assertEqual(status, 200, finance)
+        self.assertEqual(finance["metrics"]["gross_profit"], 6250)
+        self.assertEqual(finance["metrics"]["consignment_payables"], 43750)
+
+        # Finance-locked staff can see the sale line, never its partner identity
+        # or settlement amounts; cashier catalog still keeps the minimal badge.
+        with get_db() as session:
+            session.add(StoreSetting(key=access_control.POLICY_KEY, value=json.dumps(["finance"])))
+        status, history = self.request("GET", "/api/orders")
+        self.assertEqual(status, 200)
+        sale_item = history["orders"][0]["items"][0]
+        for private_key in ("consignment_partner_id", "partner_name_snapshot", "commission_rate_snapshot",
+                            "consignment_gross_amount", "consignment_commission_amount", "partner_payable_amount"):
+            self.assertNotIn(private_key, sale_item)
+        status, catalog = self.request("GET", "/api/products/" + product_id)
+        self.assertEqual(status, 200)
+        self.assertTrue(catalog["product"]["is_consignment"])
+
+    def test_mixed_partner_checkout_posts_partner_scoped_payable_lines(self):
+        partner_a = self.create_partner(name="Partner A", default_commission_rate=5)
+        partner_b = self.create_partner(name="Partner B", default_commission_rate=20, region="Eastern")
+        status, item_a = self.intake_consignment(
+            partner_a["id"], product_id="CONS-MIX-A", sku="CONS-MIX-SKU-A", video_id=self.add_video("d"))
+        self.assertEqual(status, 201, item_a)
+        status, item_b = self.intake_consignment(
+            partner_b["id"], product_id="CONS-MIX-B", sku="CONS-MIX-SKU-B", video_id=self.add_video("e"))
+        self.assertEqual(status, 201, item_b)
+        product_a, product_b = item_a["product"]["id"], item_b["product"]["id"]
+        owner = "REGISTER-MIXED-CONS"
+        for product_id in (product_a, product_b):
+            status, _ = self.request("POST", f"/api/inventory-locks/{product_id}/acquire", {
+                "product_id": product_id, "lock_owner": owner, "quantity": 1,
+            })
+            self.assertEqual(status, 200)
+        status, sale = self.request("POST", "/api/orders", {
+            "id": "CONS-MIXED-SALE", "channel": "pos", "lock_owner": owner,
+            "items": [{"product_id": product_a, "qty": 1}, {"product_id": product_b, "qty": 1}],
+            "tender": {"type": "cash", "tendered": 100000, "change": 0},
+        })
+        self.assertEqual(status, 201, sale)
+        with get_db() as session:
+            entry = session.query(AccountingJournalEntry).filter_by(reference="CONS-MIXED-SALE", source="pos_sale").one()
+            payable_lines = session.query(AccountingJournalLine).filter_by(
+                journal_entry_id=entry.id, account_code="2100").all()
+            by_memo = {line.memo: line.credit for line in payable_lines}
+            self.assertEqual(len(payable_lines), 2)
+            self.assertEqual(by_memo[f"Partner: Partner A ({partner_a['id']})"], 47500)
+            self.assertEqual(by_memo[f"Partner: Partner B ({partner_b['id']})"], 40000)
+            commission_lines = session.query(AccountingJournalLine).filter_by(
+                journal_entry_id=entry.id, account_code="4200").all()
+            self.assertEqual({line.memo: line.credit for line in commission_lines}, {
+                f"Partner: Partner A ({partner_a['id']})": 2500,
+                f"Partner: Partner B ({partner_b['id']})": 10000,
+            })
+        status, dashboard = self.request("GET", "/api/consignment/dashboard")
+        self.assertEqual(status, 200, dashboard)
+        self.assertEqual(dashboard["summary"]["payable_balance"], 87500)
+        self.assertEqual(dashboard["summary"]["inventory_turnover_pct"], 100.0)
+        status, eastern = self.request("GET", "/api/consignment/dashboard", query_params={"region": ["Eastern"]})
+        self.assertEqual(status, 200, eastern)
+        self.assertEqual([row["id"] for row in eastern["partners"]], [partner_b["id"]])
+        self.assertEqual(eastern["summary"]["payable_balance"], 40000)
+
+    def test_cancel_reversals_restore_consignment_stock_once(self):
+        partner = self.create_partner()
+        status, created = self.intake_consignment(partner["id"])
+        self.assertEqual(status, 201, created)
+        product_id = created["product"]["id"]
+        status, sale = self.request("POST", "/api/orders", {
+            "id": "CONS-CANCEL-001", "channel": "web", "delivery_type": "pickup",
+            "items": [{"product_id": product_id, "qty": 1}],
+        })
+        self.assertEqual(status, 201, sale)
+        status, cancelled = self.request("PATCH", "/api/orders/CONS-CANCEL-001", {"fulfillment_status": "Cancelled"})
+        self.assertEqual(status, 200, cancelled)
+        self.assertEqual(cancelled["stock_restored_units"], 1)
+        status, replay = self.request("PATCH", "/api/orders/CONS-CANCEL-001", {"fulfillment_status": "Cancelled"})
+        self.assertEqual(status, 200, replay)
+        self.assertEqual(replay["stock_restored_units"], 0)
+        with get_db() as session:
+            self.assertEqual(session.get(Product, product_id).in_stock_count, 1)
+            originals = session.query(AccountingJournalEntry).filter_by(reference="CONS-CANCEL-001", source="web_sale").count()
+            reversals = session.query(AccountingJournalEntry).filter_by(source="consignment_cancellation_reversal").count()
+            self.assertEqual(originals, 1)
+            self.assertEqual(reversals, 1)
+            self.assertEqual(session.query(ConsignmentPayout).count(), 0)
+
+    def test_online_pending_reclassification_and_reversals_are_idempotent(self):
+        partner = self.create_partner()
+        now = datetime.utcnow()
+        with get_db() as session:
+            pending_order = Order(
+                id="CONS-ONLINE-001", channel="web", status="unfulfilled",
+                dispatch_status="Unfulfilled", subtotal=50000, total=50000,
+                tender_type="flutterwave", payment_status="pending", created_at=now,
+            )
+            session.add(pending_order)
+            session.flush()
+            item = OrderItem(
+                id="CONS-ONLINE-ITEM", order_id=pending_order.id, name="Online partner item",
+                unit_price=50000, unit_cost=0, category="Outerwear", qty=1, line_total=50000,
+                consignment_partner_id=partner["id"], partner_name_snapshot=partner["name"],
+                commission_rate_snapshot=5, consignment_gross_amount=50000,
+                consignment_commission_amount=2500, partner_payable_amount=47500,
+            )
+            session.add(item)
+            session.flush()
+            sale_lines = api.sale_journal_lines(50000, 0, "flutterwave", 0, 50000, 2500, 47500, consignment_pending=True)
+            api.create_journal_entry(session, reference=pending_order.id, source="web_sale",
+                description="Pending online consignment sale", occurred_at=now, staff={}, lines=sale_lines)
+            session.flush()
+            pending_lines = session.query(AccountingJournalLine).join(AccountingJournalEntry).filter(
+                AccountingJournalEntry.reference == pending_order.id,
+                AccountingJournalEntry.source == "web_sale",
+            ).all()
+            self.assertEqual(sum(line.credit for line in pending_lines if line.account_code == "2110"), 50000)
+
+            pending_order.payment_status = "paid"
+            posted = api.post_pending_consignment_settlement(session, pending_order, {"id": "WEB", "name": "Online"}, now)
+            replay = api.post_pending_consignment_settlement(session, pending_order, {"id": "WEB", "name": "Online"}, now)
+            self.assertEqual(posted.id, replay.id)
+            settled = session.query(AccountingJournalLine).filter_by(journal_entry_id=posted.id).all()
+            credits = {line.account_code: line.credit for line in settled if line.credit}
+            self.assertEqual(credits["4200"], 2500)
+            self.assertEqual(credits["2100"], 47500)
+            first_reversals = api.reverse_consignment_order_journals(session, pending_order, reason="Test cancellation", occurred_at=now)
+            second_reversals = api.reverse_consignment_order_journals(session, pending_order, reason="Retry cancellation", occurred_at=now)
+            self.assertEqual(len(first_reversals), 2)
+            self.assertEqual(second_reversals, [])
+            self.assertEqual(session.query(AccountingJournalEntry).filter_by(
+                source="consignment_cancellation_reversal").count(), 2)
 
 
 if __name__ == "__main__":
-    init_db()
-    sys.exit(main())
+    unittest.main()

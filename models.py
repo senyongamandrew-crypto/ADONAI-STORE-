@@ -164,6 +164,59 @@ class Category(Base):
         }
 
 
+class ConsignmentPartner(Base):
+    """A supply partner whose catalog items are sold on consignment."""
+    __tablename__ = "consignment_partners"
+
+    id = Column(String(50), primary_key=True)
+    name = Column(String(160), nullable=False, index=True)
+    phone = Column(String(50), nullable=True)
+    whatsapp = Column(String(50), nullable=True)
+    email = Column(String(160), nullable=True)
+    address = Column(Text, nullable=True)
+    payout_provider = Column(String(60), nullable=True)
+    payout_account_name = Column(String(120), nullable=True)
+    payout_account = Column(String(100), nullable=True)
+    default_commission_rate = Column(Numeric(5, 2), nullable=False, default=5.00)
+    region = Column(String(100), nullable=True, index=True)
+    supply_source = Column(String(120), nullable=True, index=True)
+    notes = Column(Text, nullable=True)
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by_id = Column(String(50), nullable=True)
+    created_by_name = Column(String(100), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("default_commission_rate >= 0 AND default_commission_rate <= 100", name="ck_consignment_partner_rate"),
+    )
+
+    products = relationship("Product", back_populates="consignment_partner")
+    payouts = relationship("ConsignmentPayout", back_populates="partner")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "phone": self.phone or "",
+            "whatsapp": self.whatsapp or "",
+            "email": self.email or "",
+            "address": self.address or "",
+            "payout_provider": self.payout_provider or "",
+            "payout_account_name": self.payout_account_name or "",
+            "payout_account": self.payout_account or "",
+            "default_commission_rate": float(self.default_commission_rate or 0),
+            "region": self.region or "",
+            "supply_source": self.supply_source or "",
+            "notes": self.notes or "",
+            "active": bool(self.active),
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_by_id": self.created_by_id or "",
+            "created_by_name": self.created_by_name or "",
+        }
+
+
 class Product(Base):
     __tablename__ = "products"
 
@@ -228,15 +281,18 @@ class Product(Base):
     # Additive financial-ledger fields.  These are also installed safely by the
     # Render migration for databases that already contain the products table.
     stock_lot_id = Column(String(64), nullable=True, index=True)
+    # Null ownership preserves the Source A store-owned inventory workflow.
+    # Consignment pieces are always unique/pre-loved; a null item rate inherits
+    # the partner's current default until a sale snapshots the applied rate.
+    consignment_partner_id = Column(
+        String(50), ForeignKey("consignment_partners.id", ondelete="RESTRICT", name="fk_products_consignment_partner"),
+        nullable=True, index=True,
+    )
+    commission_rate = Column(Numeric(5, 2), nullable=True)
     # Grade tier inside the lot. When set, `cost_price` is the tier-locked unit
     # COGS — the server recomputes it from the lot's landed investment and the
     # tier's cost weight, so manual entry can never drift from the bale books.
     lot_grade_id = Column(String(64), nullable=True, index=True)
-    # Partner consignment. A consignment piece is owned by a supplier, carries
-    # zero cost to Adonai (cost_price stays 0) and is split at checkout.
-    is_consignment = Column(Boolean, default=False, nullable=False, index=True)
-    supplier_id = Column(String(64), ForeignKey("consignment_suppliers.id"), nullable=True, index=True)
-    consignment_reference_value = Column(Integer, default=0, nullable=False)
     inventory_status = Column(String(30), default="AVAILABLE", nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -244,10 +300,12 @@ class Product(Base):
     # Relationships
     inventory_items = relationship("Inventory", back_populates="product", cascade="all, delete-orphan")
     media_assets = relationship("ProductMedia", back_populates="product", cascade="all, delete-orphan", lazy="selectin")
+    consignment_partner = relationship("ConsignmentPartner", back_populates="products")
 
     __table_args__ = (
         Index("idx_product_search", "demographic", "category", "in_stock_count"),
         Index("idx_product_price_stock", "selling_price", "in_stock_count"),
+        CheckConstraint("commission_rate IS NULL OR (commission_rate >= 0 AND commission_rate <= 100)", name="ck_product_commission_rate"),
     )
 
     @property
@@ -348,6 +406,7 @@ class Product(Base):
             "stock_lot_id": self.stock_lot_id or "",
             "lot_grade_id": self.lot_grade_id or "",
             "inventory_status": self.inventory_status or "AVAILABLE",
+            "is_consignment": bool(self.consignment_partner_id),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
@@ -536,6 +595,16 @@ class OrderItem(Base):
     category = Column(String(100), nullable=True, index=True)
     qty = Column(Integer, default=1)
     line_total = Column(Integer, nullable=False)
+    # Immutable sale-time snapshots: partner edits and catalog repricing never
+    # change what the store earned or owes for an earlier order.
+    consignment_partner_id = Column(
+        String(50), ForeignKey("consignment_partners.id", ondelete="SET NULL", name="fk_order_items_consignment_partner"), nullable=True, index=True
+    )
+    partner_name_snapshot = Column(String(160), nullable=True)
+    commission_rate_snapshot = Column(Numeric(5, 2), nullable=True)
+    consignment_gross_amount = Column(Integer, nullable=False, default=0)
+    consignment_commission_amount = Column(Integer, nullable=False, default=0)
+    partner_payable_amount = Column(Integer, nullable=False, default=0)
 
     order = relationship("Order", back_populates="items")
 
@@ -551,7 +620,14 @@ class OrderItem(Base):
             "unit_cost": self.unit_cost or 0,
             "category": self.category or "Uncategorised",
             "qty": self.qty,
-            "line_total": self.line_total
+            "line_total": self.line_total,
+            "is_consignment": bool(self.consignment_partner_id),
+            "consignment_partner_id": self.consignment_partner_id or "",
+            "partner_name_snapshot": self.partner_name_snapshot or "",
+            "commission_rate_snapshot": float(self.commission_rate_snapshot) if self.commission_rate_snapshot is not None else None,
+            "consignment_gross_amount": int(self.consignment_gross_amount or 0),
+            "consignment_commission_amount": int(self.consignment_commission_amount or 0),
+            "partner_payable_amount": int(self.partner_payable_amount or 0),
         }
 
 
@@ -771,6 +847,46 @@ class AccountingJournalLine(Base):
         }
 
 
+class ConsignmentPayout(Base):
+    """Immutable partner settlement; every payout also has a journal entry."""
+    # Use a distinct table from the superseded Bale Costs payout workflow so
+    # deployments that previously booted its schema can safely adopt Source B.
+    __tablename__ = "consignment_partner_payouts"
+
+    id = Column(String(64), primary_key=True)
+    partner_id = Column(String(50), ForeignKey("consignment_partners.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount = Column(Integer, nullable=False)
+    payment_method = Column(String(30), nullable=False)
+    destination_snapshot = Column(String(180), nullable=True)
+    reference = Column(String(120), nullable=True)
+    notes = Column(Text, nullable=True)
+    idempotency_key = Column(String(120), nullable=False, unique=True)
+    journal_entry_id = Column(String(64), ForeignKey("accounting_journal_entries.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    created_by_id = Column(String(50), nullable=True)
+    created_by_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (CheckConstraint("amount > 0", name="ck_consignment_payout_amount"),)
+
+    partner = relationship("ConsignmentPartner", back_populates="payouts")
+    journal_entry = relationship("AccountingJournalEntry")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "partner_id": self.partner_id,
+            "amount": int(self.amount or 0),
+            "payment_method": self.payment_method or "cash",
+            "destination_snapshot": self.destination_snapshot or "",
+            "reference": self.reference or "",
+            "notes": self.notes or "",
+            "journal_entry_id": self.journal_entry_id,
+            "created_by_id": self.created_by_id or "",
+            "created_by_name": self.created_by_name or "",
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class ExpenseRecord(Base):
     __tablename__ = "financial_expenses"
 
@@ -836,12 +952,6 @@ class StockLot(Base):
     created_by_id = Column(String(50), nullable=True)
     created_by_name = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    # Partner consignment: OWNED_BALE lots post acquisition cost to inventory;
-    # PARTNER_CONSIGNMENT lots post nothing upfront and are linked to a supplier.
-    lot_type = Column(String(30), default="OWNED_BALE", nullable=False, index=True)
-    supplier_id = Column(String(64), ForeignKey("consignment_suppliers.id"), nullable=True, index=True)
-    agreement_ref = Column(String(80), nullable=True)
-    return_by_date = Column(DateTime, nullable=True)
 
     grades = relationship(
         "LotGrade",
@@ -854,12 +964,6 @@ class StockLot(Base):
         CheckConstraint("acquisition_cost >= 0", name="ck_stock_lot_acquisition_nonnegative"),
         CheckConstraint("shipping_cost >= 0", name="ck_stock_lot_shipping_nonnegative"),
         CheckConstraint("item_count > 0", name="ck_stock_lot_items_positive"),
-        CheckConstraint("lot_type IN ('OWNED_BALE', 'PARTNER_CONSIGNMENT')", name="ck_stock_lot_type"),
-        CheckConstraint(
-            "(lot_type = 'PARTNER_CONSIGNMENT' AND supplier_id IS NOT NULL) OR "
-            "(lot_type = 'OWNED_BALE' AND supplier_id IS NULL)",
-            name="ck_stock_lot_supplier_matches_type",
-        ),
     )
 
     def to_dict(self, include_grades: bool = False):
@@ -880,129 +984,10 @@ class StockLot(Base):
             "acquired_at": self.acquired_at.isoformat() + "Z" if self.acquired_at else None,
             "journal_entry_id": self.journal_entry_id or "",
             "created_by_name": self.created_by_name or "",
-            "lot_type": self.lot_type or "OWNED_BALE",
-            "supplier_id": self.supplier_id or "",
-            "agreement_ref": self.agreement_ref or "",
-            "return_by_date": self.return_by_date.isoformat() + "Z" if self.return_by_date else None,
         }
         if include_grades:
             data["grades"] = [grade.to_dict() for grade in (self.grades or [])]
         return data
-
-
-# ---------------------------------------------------------------------------
-# Partner consignment ledger (internal POS only; never returned by public catalog)
-# ---------------------------------------------------------------------------
-class ConsignmentSupplier(Base):
-    __tablename__ = "consignment_suppliers"
-
-    id = Column(String(64), primary_key=True)
-    partner_name = Column(String(150), nullable=False)
-    business_name = Column(String(150), nullable=True)
-    phone_whatsapp = Column(String(30), nullable=False)
-    identity_reference = Column(String(120), nullable=False)  # NIN or business registration; masked on read
-    payout_channel = Column(String(30), nullable=False)
-    payout_account = Column(String(120), nullable=True)       # masked on read
-    kyc_status = Column(String(20), default="PENDING_KYC", nullable=False, index=True)
-    kyc_verified_by_id = Column(String(64), nullable=True)
-    kyc_verified_at = Column(DateTime, nullable=True)
-    created_by_id = Column(String(64), nullable=True)
-    created_by_name = Column(String(100), nullable=True)
-    default_commission_rate = Column(Numeric(5, 4), default=0.05, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        CheckConstraint("kyc_status IN ('PENDING_KYC', 'VERIFIED')", name="ck_supplier_kyc_status"),
-        CheckConstraint("payout_channel IN ('MOBILE_MONEY', 'MERCHANT_CODE', 'BANK_ACCOUNT', 'CASH')", name="ck_supplier_payout_channel"),
-        CheckConstraint("default_commission_rate = 0.05", name="ck_supplier_commission_locked"),
-    )
-
-    def to_dict(self):
-        from consignment import mask_account
-        return {
-            "id": self.id,
-            "partner_name": self.partner_name,
-            "business_name": self.business_name or "",
-            "phone_whatsapp": self.phone_whatsapp,
-            "identity_reference": mask_account(self.identity_reference),
-            "payout_channel": self.payout_channel,
-            "payout_account": mask_account(self.payout_account or ""),
-            "kyc_status": self.kyc_status,
-            "kyc_verified_by_name": "",
-            "commission_rate": float(self.default_commission_rate or 0.05),
-            "is_active": bool(self.is_active),
-        }
-
-
-class ConsignmentSalesSplit(Base):
-    """One row per consignment sale line: the commission/partner split that was posted."""
-    __tablename__ = "consignment_sales_splits"
-
-    id = Column(String(64), primary_key=True)
-    order_id = Column(String(64), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, index=True)
-    order_item_id = Column(String(64), nullable=False, unique=True)
-    supplier_id = Column(String(64), ForeignKey("consignment_suppliers.id"), nullable=False, index=True)
-    product_id = Column(String(50), nullable=False, index=True)
-    line_total = Column(Integer, nullable=False)
-    commission_amount = Column(Integer, nullable=False)
-    partner_share = Column(Integer, nullable=False)
-    commission_rate = Column(Numeric(5, 4), nullable=False)
-    journal_entry_id = Column(String(64), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-    __table_args__ = (
-        CheckConstraint("line_total >= 0", name="ck_split_line_nonnegative"),
-        CheckConstraint("commission_amount >= 0 AND partner_share >= 0", name="ck_split_parts_nonnegative"),
-        CheckConstraint("commission_amount + partner_share = line_total", name="ck_split_reconciles"),
-    )
-
-
-class ConsignmentPayout(Base):
-    __tablename__ = "consignment_payouts"
-
-    id = Column(String(64), primary_key=True)
-    supplier_id = Column(String(64), ForeignKey("consignment_suppliers.id"), nullable=False, index=True)
-    amount = Column(Integer, nullable=False)
-    channel = Column(String(30), nullable=False)
-    account_snapshot = Column(String(120), nullable=True)     # account at time of request (masked on read)
-    status = Column(String(20), default="REQUESTED", nullable=False, index=True)
-    idempotency_key = Column(String(80), nullable=False, unique=True)
-    requested_by_id = Column(String(64), nullable=True)
-    requested_by_name = Column(String(100), nullable=True)
-    approved_by_id = Column(String(64), nullable=True)
-    approved_by_name = Column(String(100), nullable=True)
-    paid_by_id = Column(String(64), nullable=True)
-    paid_by_name = Column(String(100), nullable=True)
-    payment_reference = Column(String(120), nullable=True, unique=True)
-    journal_entry_id = Column(String(64), nullable=True)
-    note = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    paid_at = Column(DateTime, nullable=True)
-
-    __table_args__ = (
-        CheckConstraint("amount > 0", name="ck_payout_amount_positive"),
-        CheckConstraint("status IN ('REQUESTED', 'APPROVED', 'PAID', 'REJECTED')", name="ck_payout_status"),
-        CheckConstraint("status <> 'PAID' OR payment_reference IS NOT NULL", name="ck_payout_paid_has_reference"),
-    )
-
-    def to_dict(self):
-        from consignment import mask_account
-        return {
-            "id": self.id,
-            "supplier_id": self.supplier_id,
-            "amount": self.amount,
-            "channel": self.channel,
-            "account": mask_account(self.account_snapshot or ""),
-            "status": self.status,
-            "requested_by_name": self.requested_by_name or "",
-            "approved_by_name": self.approved_by_name or "",
-            "paid_by_name": self.paid_by_name or "",
-            "payment_reference": self.payment_reference or "",
-            "created_at": self.created_at.isoformat() + "Z" if self.created_at else None,
-            "paid_at": self.paid_at.isoformat() + "Z" if self.paid_at else None,
-            "note": self.note or "",
-        }
 
 
 class LotGrade(Base):

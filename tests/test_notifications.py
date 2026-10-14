@@ -274,6 +274,33 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("Private customer name", json.dumps(detailed))
         self.assertEqual(self.request("GET", "/api/orders")[0], 403, "bell summaries must not unlock order history")
 
+    def test_delivery_and_rider_events_are_orders_protected_in_history_and_stream(self):
+        self.protect(["orders"])
+        event_types = [
+            "DELIVERY_ASSIGNED", "DELIVERY_PROGRESS", "RIDER_ADDED", "RIDER_UPDATED",
+            "RIDER_STATUS_UPDATED", "RIDER_ARCHIVED", "RIDER_PAIRING_CODE_ISSUED",
+            "RIDER_PHONE_PAIRED", "RIDER_PHONE_REVOKED", "RIDER_DUTY_STARTED", "RIDER_DUTY_STOPPED",
+        ]
+        for event_type in event_types:
+            self.assertEqual(access_control.NOTIFICATION_AREAS.get(event_type), "orders")
+            notifications.broadcast_event(event_type, "Private partner name", "Private phone +256700111222",
+                                          {"rider_id": "RIDER-SECRET", "rider_name": "Private partner",
+                                           "phone": "+256700111222", "order_id": "ORDER-SECRET"})
+        locked = self.history()
+        self.assertEqual({event["type"] for event in locked}, set(event_types))
+        self.assertTrue(all(event["protected"] and event["area"] == "orders" and event["payload"] == {} for event in locked))
+        hidden_json = json.dumps(locked)
+        for secret in ["Private partner", "+256700111222", "RIDER-SECRET", "ORDER-SECRET"]:
+            self.assertNotIn(secret, hidden_json)
+        self.assertTrue(all(event["title"] == "New delivery activity" for event in locked))
+        frame = ("data: " + json.dumps(notifications.broadcast_event(
+            "RIDER_UPDATED", "Private partner name", "Private phone +256700111222",
+            {"rider_id": "RIDER-SECRET", "phone": "+256700111222"})) + "\n\n").encode()
+        hidden_frame = json.loads(access_control.filter_stream_frame(frame, {"id": "UNLOCKED-STAFF"})[6:])
+        self.assertTrue(hidden_frame["protected"])
+        self.assertEqual(hidden_frame["payload"], {})
+        self.assertNotIn("+256700111222", json.dumps(hidden_frame))
+
     def test_stream_area_grants_are_kept_and_revocation_is_immediate(self):
         owner = self.protect(["orders"])
         event = notifications.broadcast_event("NEW_MESSAGE", "Private customer name", "Private note", {"order_id": "SECRET-ORDER", "message": "Private note"})

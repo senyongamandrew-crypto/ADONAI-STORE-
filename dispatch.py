@@ -53,6 +53,18 @@ def digest(value): return hashlib.sha256(value.encode()).hexdigest()
 def uid(prefix): return prefix + "-" + uuid.uuid4().hex
 
 
+def notify_rider(session, event_type, title, message, rider, **details):
+    """Attach rider and delivery bell activity to the business transaction.
+
+    Never include device credentials, phone numbers, pairing codes, or GPS fixes.
+    """
+    allowed_details = {"status", "changed_fields", "order_id", "fulfillment_status",
+                       "delivery_progress", "rider_status"}
+    payload = {"rider_id": rider.id, "rider_name": rider.name}
+    payload.update({key: value for key, value in details.items() if key in allowed_details})
+    return broadcast_event(event_type, title, message, payload, session=session)
+
+
 def text(value, maximum, field, required=False):
     if not isinstance(value, str): fail(f"{field} must be text.")
     value = " ".join(value.split())
@@ -231,6 +243,7 @@ def assign(session, order, rider_id, staff_name, outbox=None):
     rider = validate_assignment(session, order, rider_id)
     if order.rider_id == rider.id and order.dispatch_status == "Dispatched": return rider
     previous = order.rider_id
+    old_status = rider.status
     order.rider_id = rider.id; order.rider_name = rider.name; order.dispatch_status = "Dispatched"; order.status = "processing"; order.updated_at = now()
     if order.dispatched_at is None: order.dispatched_at = now()
     rider.status = "On delivery"
@@ -238,12 +251,21 @@ def assign(session, order, rider_id, staff_name, outbox=None):
     if outbox is not None:
         outbox.append({"event_id": event.id, "order_id": order.id, "rider_id": rider.id, "rider_name": rider.name,
                        "to": whatsapp_number(rider.phone), "message": rider_message(order, rider)})
+    released = None
     if previous and previous != rider.id:
         old = session.get(Rider, previous)
         other_jobs = session.query(Order).filter(Order.rider_id==previous,Order.id!=order.id,Order.dispatch_status=="Dispatched",Order.status.notin_(["cancelled","completed"])).count()
-        if old and old.status == "On delivery" and not other_jobs: old.status = "Available"
-    broadcast_event("ORDER_UPDATED", f"Order {order.id} dispatched", f"Assigned to {rider.name}",
-                    {"order_id":order.id,"fulfillment_status":"Dispatched","rider_id":rider.id},session=session)
+        if old and old.status == "On delivery" and not other_jobs:
+            old.status = "Available"
+            released = old
+    assigned_message = f"Assigned to {rider.name}"
+    if old_status != rider.status:
+        assigned_message += f" · now {rider.status}"
+    notify_rider(session, "DELIVERY_ASSIGNED", f"Order {order.id} dispatched", assigned_message, rider,
+                 order_id=order.id, fulfillment_status="Dispatched", rider_status=rider.status)
+    if released:
+        notify_rider(session, "RIDER_STATUS_UPDATED", "Partner availability changed",
+                     f"{released.name} is now {released.status}.", released, status=released.status)
     return rider
 
 
@@ -306,7 +328,10 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
         rider = Rider(id=uid("RDR"),name=text(body.get("name",""),100,"Rider name",True),phone=text(body.get("phone",""),50,"Phone",True),
                       vehicle=text(body.get("vehicle","Motorbike (Boda)"),100,"Vehicle"),vehicle_plate=text(body.get("plate",""),50,"Vehicle plate"),
                       zone=text(body.get("zone",""),100,"Service zone"),status="Available",archived=False)
-        session.add(rider);session.flush();return response({"ok":True,"rider":rider.to_dict()},201)
+        session.add(rider);session.flush()
+        notify_rider(session, "RIDER_ADDED", "Delivery partner added", f"{rider.name} was added to the active roster.", rider,
+                     status=rider.status)
+        return response({"ok":True,"rider":rider.to_dict()},201)
     if re.fullmatch(r"/api/riders/[^/]+",path) and method in {"PATCH","DELETE"}:
         rider = rider_by_id(session,path.rsplit("/",1)[1],True)
         if method=="DELETE":
@@ -315,26 +340,56 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             rider.archived=True;rider.status="Offline"
             device=session.query(RiderDevice).filter_by(rider_id=rider.id).first()
             if device: device.revoked=True;device.sharing=False;device.latitude=None;device.longitude=None
-            session.query(RiderPairing).filter_by(rider_id=rider.id).delete();return response({"ok":True})
+            session.query(RiderPairing).filter_by(rider_id=rider.id).delete()
+            notify_rider(session, "RIDER_ARCHIVED", "Delivery partner archived",
+                         f"{rider.name} was removed from the active roster.", rider)
+            return response({"ok":True})
+        changed_fields=[]
         for key,maximum in [("name",100),("phone",50),("vehicle",100),("zone",100),("plate",50)]:
-            if key in body: setattr(rider,"vehicle_plate" if key=="plate" else key,text(body[key],maximum,key,key in {"name","phone"}))
+            if key in body:
+                attribute="vehicle_plate" if key=="plate" else key
+                value=text(body[key],maximum,key,key in {"name","phone"})
+                if getattr(rider,attribute)!=value:
+                    setattr(rider,attribute,value)
+                    changed_fields.append(key)
+        status_changed=False
         if "status" in body:
             if body["status"] not in RIDER_STATES: fail("Choose Available, On delivery or Offline.")
             if body["status"]=="Offline" and session.query(Order).filter_by(rider_id=rider.id,dispatch_status="Dispatched").filter(Order.status.notin_(["cancelled","completed"])).count():
                 fail("Reassign this rider's active jobs before marking Offline.",409)
-            rider.status=body["status"]
+            if rider.status!=body["status"]:
+                rider.status=body["status"]
+                status_changed=True
+        if status_changed and not changed_fields:
+            notify_rider(session, "RIDER_STATUS_UPDATED", "Partner availability changed",
+                         f"{rider.name} is now {rider.status}.", rider, status=rider.status)
+        elif changed_fields or status_changed:
+            fields=changed_fields + (["availability"] if status_changed else [])
+            message=f"{rider.name}'s profile changed: {', '.join(fields)}."
+            if status_changed:
+                message+=f" Availability is now {rider.status}."
+            notify_rider(session, "RIDER_UPDATED", "Partner profile updated", message, rider,
+                         changed_fields=fields, status=rider.status)
         session.flush();return response({"ok":True,"rider":rider.to_dict()})
     match=re.fullmatch(r"/api/dispatch/riders/([^/]+)/(pair|revoke)",path)
     if match and method=="POST":
         require_gps_access(session,headers,staff,staff_required); rider=rider_by_id(session,match[1],True)
         if match[2]=="revoke":
             device=session.query(RiderDevice).filter_by(rider_id=rider.id).with_for_update().first()
+            pairing_query=session.query(RiderPairing).filter_by(rider_id=rider.id)
+            had_access=bool((device and not device.revoked) or pairing_query.first())
             if device: device.revoked=True;device.sharing=False;device.latitude=None;device.longitude=None;device.fix_at=None;device.received_at=None
-            session.query(RiderPairing).filter_by(rider_id=rider.id).delete();return response({"ok":True})
+            pairing_query.delete(synchronize_session=False)
+            if had_access:
+                notify_rider(session, "RIDER_PHONE_REVOKED", "Partner phone access revoked",
+                             f"{rider.name}'s paired phone access was revoked.", rider)
+            return response({"ok":True})
         code=base64.b32encode(secrets.token_bytes(7)).decode()[:10]
         row=session.get(RiderPairing,rider.id)
         if not row: row=RiderPairing(rider_id=rider.id);session.add(row)
         row.code_hash=digest(code);row.expires_at=now()+timedelta(minutes=10);row.issued_by=str((staff or {}).get("name","Dispatcher"))[:100]
+        notify_rider(session, "RIDER_PAIRING_CODE_ISSUED", "Partner pairing code issued",
+                     f"A phone-pairing code was generated for {rider.name}; it expires in 10 minutes.", rider)
         return response({"ok":True,"code":code[:5]+"-"+code[5:],"expires_at":iso(row.expires_at),"rider":rider.to_dict()},201)
     match=re.fullmatch(r"/api/dispatch/orders/([^/]+)/assign",path)
     if match and method=="POST":
@@ -356,6 +411,8 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
         device.label=label;device.token_hash=digest(token);device.expires_at=now()+SESSION_LIFE;device.revoked=False;device.sharing=False
         device.duty_until=None;device.latitude=None;device.longitude=None;device.accuracy=None;device.fix_at=None;device.received_at=None;device.sequence=0;device.paired_at=now()
         session.delete(pairing);session.flush()
+        notify_rider(session, "RIDER_PHONE_PAIRED", "Partner phone paired",
+                     f"{rider.name}'s phone was paired. Location sharing stays off until a duty starts.", rider)
         return response({"ok":True,"session_token":token,"rider":rider.to_dict(),"device_id":device.id,"expires_at":iso(device.expires_at)},201)
     if path.startswith("/api/rider/"):
         device,rider=device_from_request(session,headers);prune_points(session)
@@ -366,12 +423,22 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
                 if event.order_id not in latest: latest[event.order_id]=event
             return response({"ok":True,"rider":rider.to_dict(),"tracking":live_state(device),"orders":[order_brief(o,latest.get(o.id)) for o in jobs],"server_time":iso(now())})
         if path=="/api/rider/duty/stop" and method=="POST":
-            device.sharing=False;device.duty_until=None;return response({"ok":True,"tracking":live_state(device)})
+            was_active=bool(device.sharing and device.duty_until and device.duty_until>now())
+            device.sharing=False;device.duty_until=None
+            if was_active:
+                notify_rider(session, "RIDER_DUTY_STOPPED", "Rider duty stopped",
+                             f"{rider.name} stopped sharing location.", rider)
+            return response({"ok":True,"tracking":live_state(device)})
         if path=="/api/rider/duty/start" and method=="POST":
             if body.get("consent") is not True: fail("Explicit permission to share GPS during this duty is required.")
             if not policy_active(session,staff_required): fail("Location monitoring is not protected. Ask your dispatcher.",403,"TRACKING_PRIVACY_SETUP")
-            if not device.sharing or not device.duty_until or device.duty_until<=now(): device.duty_until=now()+DUTY_LIFE
-            device.sharing=True;return response({"ok":True,"tracking":live_state(device),"duty_until":iso(device.duty_until)})
+            was_active=bool(device.sharing and device.duty_until and device.duty_until>now())
+            if not was_active: device.duty_until=now()+DUTY_LIFE
+            device.sharing=True
+            if not was_active:
+                notify_rider(session, "RIDER_DUTY_STARTED", "Rider duty started",
+                             f"{rider.name} started a duty. Location sharing is on until stopped or the duty expires.", rider)
+            return response({"ok":True,"tracking":live_state(device),"duty_until":iso(device.duty_until)})
         if path=="/api/rider/location" and method=="POST":
             if not policy_active(session,staff_required): fail("Location monitoring is not protected.",403)
             if not device.sharing or not device.duty_until or device.duty_until<=now(): fail("GPS sharing is stopped or the 12-hour duty ended. Start a new duty explicitly.",409)
@@ -407,12 +474,16 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             received=text(body.get("received_by",""),100,"Recipient name",stage=="delivered")
             if stage=="issue" and not note: fail("Describe the delivery problem for dispatch.")
             event=add_event(session,order,rider,stage,device,note,received)
+            previous_rider_status=rider.status
             if stage=="delivered":
                 order.dispatch_status="Completed";order.status="completed";order.updated_at=now()
                 if order.dispatched_at is None: order.dispatched_at=now()
                 others=session.query(Order).filter(Order.rider_id==rider.id,Order.id!=order.id,Order.dispatch_status=="Dispatched",Order.status.notin_(["cancelled","completed"])).count()
                 if not others and rider.status=="On delivery": rider.status="Available"
-            broadcast_event("ORDER_UPDATED",f"Delivery {order.id}: {stage}",f"{rider.name} reported {stage}" + (f" · received by {received}" if received else ""),
-                            {"order_id":order.id,"rider_id":rider.id,"delivery_progress":stage,"fulfillment_status":order.dispatch_status},session=session)
+            progress_message=f"{rider.name} reported {stage}" + (f" · received by {received}" if received else "")
+            if rider.status!=previous_rider_status: progress_message+=f" · now {rider.status}"
+            notify_rider(session, "DELIVERY_PROGRESS", f"Delivery {order.id}: {stage}", progress_message, rider,
+                         order_id=order.id, delivery_progress=stage, fulfillment_status=order.dispatch_status,
+                         rider_status=rider.status)
             session.flush();return response({"ok":True,"event":event_dict(event),"order":order_brief(order,event)})
     return response({"ok":False,"error":"Dispatch route not found."},404)
