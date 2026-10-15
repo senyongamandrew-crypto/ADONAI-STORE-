@@ -104,7 +104,7 @@ CSP_POLICY = (
     # 'self' lets the device-fit preview harness (device-preview.html) frame the
     # app's own POS / Admin pages side by side. It cannot frame, and cannot be
     # framed by, any other origin.
-    "frame-src 'self' https://checkout.flutterwave.com; "
+    "frame-src 'self' blob: https://checkout.flutterwave.com; "
     "object-src 'none'; "
     "base-uri 'self'; "
     "form-action 'self'; "
@@ -159,6 +159,13 @@ def api_response_headers(result):
         values["Content-Length"] = str(len(result[2]))
     values.update(getattr(result, "headers", {}))
     return list(values.items())
+
+
+def response_security_headers(path: str, content_type: str):
+    """Let only isolated HTML promo creatives use their explicit frame policy."""
+    if str(path or "").startswith("/api/promo-media/") and str(content_type or "").lower().startswith("text/html"):
+        return [(name, value) for name, value in SECURITY_HEADERS if name.lower() != "x-frame-options"]
+    return SECURITY_HEADERS
 
 
 def resolve_static_file(clean_path: str) -> str | None:
@@ -573,7 +580,8 @@ def wsgi_app(environ, start_response):
         headers = api_response_headers(result)
         headers.extend(cors)
         existing_headers = {name.lower() for name, _ in headers}
-        headers.extend((name, value) for name, value in SECURITY_HEADERS if name.lower() not in existing_headers)
+        headers.extend((name, value) for name, value in response_security_headers(raw_path, content_type)
+                       if name.lower() not in existing_headers)
 
         status_str = f"{status_code} {HTTPStatus(status_code).phrase}"
         start_response(status_str, headers)
@@ -762,7 +770,8 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(status_code)
             response_headers = api_response_headers(result)
             existing_headers = {name.lower() for name, _ in response_headers}
-            for k, v in [*response_headers, *cors, *((k, v) for k, v in SECURITY_HEADERS if k.lower() not in existing_headers)]:
+            security_headers = response_security_headers(path, content_type)
+            for k, v in [*response_headers, *cors, *((k, v) for k, v in security_headers if k.lower() not in existing_headers)]:
                 self.send_header(k, v)
             self.end_headers()
 

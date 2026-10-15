@@ -17,19 +17,36 @@ import uuid
 import warnings
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 from sqlalchemy import func
+
+register_heif_opener()
 
 import access_control
 from database import get_db
-from models import Product, ProductMedia, StoreSetting
+from models import Product, ProductMedia, StorePromotionCreative, StoreSetting
 
 MAX_IMAGES = 12
 MAX_IMAGE_UPLOAD = 10 * 1024 * 1024
 MAX_VIDEO_UPLOAD = 50 * 1024 * 1024
+MAX_PROMO_HTML_UPLOAD = 2 * 1024 * 1024
 MAX_VIDEO_SECONDS = 30
 MAX_STORED_VIDEO = 12 * 1024 * 1024
 MEDIA_ID = re.compile(r"^[0-9a-f]{32}$")
 MEDIA_PATH = re.compile(r"^/api/media/([0-9a-f]{32})$")
+PROMO_HTML_UPLOAD_PATH = "/api/promo-media/html"
+PROMO_HTML_PATH = re.compile(r"^/api/promo-media/([0-9a-f]{32})$")
+# Uploaded HTML runs only in a sandboxed iframe (no same-origin, top navigation,
+# popups or forms). This CSP permits normal HTTPS-hosted banner assets while
+# keeping the creative isolated from the store application and its credentials.
+PROMO_HTML_CSP = (
+    "sandbox allow-scripts; default-src 'none'; "
+    "img-src https: data: blob:; style-src 'unsafe-inline' https: data:; "
+    "script-src 'unsafe-inline' https:; font-src https: data:; "
+    "connect-src https:; media-src https: data: blob:; frame-src https:; "
+    "object-src 'none'; base-uri 'none'; form-action 'none'; "
+    "frame-ancestors 'self' https://appassets.androidplatform.net https://localhost capacitor://localhost"
+)
 
 
 class MediaResponse(tuple):
@@ -50,10 +67,13 @@ def header(headers, name, default=""):
 
 
 def upload_limit(path):
-    if path.rstrip("/") == "/api/media/videos":
+    clean_path = path.rstrip("/")
+    if clean_path == "/api/media/videos":
         return MAX_VIDEO_UPLOAD
-    if path.rstrip("/") == "/api/media/images":
+    if clean_path == "/api/media/images":
         return MAX_IMAGE_UPLOAD
+    if clean_path == PROMO_HTML_UPLOAD_PATH:
+        return MAX_PROMO_HTML_UPLOAD
     return None
 
 
@@ -65,7 +85,7 @@ def prepare_image(data):
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(data)) as original:
                 if original.format not in {"JPEG", "PNG", "WEBP", "HEIF"}:
-                    raise ValueError("Choose a JPG, PNG or WebP photo.")
+                    raise ValueError("Choose a JPG, PNG, WebP or HEIC/HEIF photo.")
                 if original.width * original.height > 30_000_000:
                     raise ValueError("This image is too large. Export a smaller phone photo.")
                 image = ImageOps.exif_transpose(original).convert("RGB")
@@ -75,6 +95,56 @@ def prepare_image(data):
                 return output.getvalue(), image.width, image.height
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ValueError("The photo could not be read. Export it as JPG or PNG and try again.") from exc
+
+
+def promotion_html_dimensions(source, filename):
+    """Read common ad dimensions, falling back to the standard 728x90 banner."""
+    match = re.search(r"(?<!\d)(\d{2,4})\s*[x×]\s*(\d{2,4})(?!\d)", filename, re.I)
+    if match:
+        width, height = int(match.group(1)), int(match.group(2))
+        if 40 <= width <= 2000 and 20 <= height <= 1200:
+            return width, height
+
+    for tag in re.findall(r"(?is)<meta\b[^>]*>", source[:100_000]):
+        name = re.search(r"\bname\s*=\s*(['\"])(.*?)\1", tag, re.I)
+        content = re.search(r"\bcontent\s*=\s*(['\"])(.*?)\1", tag, re.I)
+        if name and content and name.group(2).strip().lower() == "ad.size":
+            match = re.search(r"width\s*=\s*(\d{2,4})\s*[,;]\s*height\s*=\s*(\d{2,4})", content.group(2), re.I)
+            if match:
+                width, height = int(match.group(1)), int(match.group(2))
+                if 40 <= width <= 2000 and 20 <= height <= 1200:
+                    return width, height
+
+    # Also recognize fixed-size CSS / HTML dimensions on the same element.
+    dimension = re.search(
+        r"(?:width\s*[:=]\s*['\"]?(\d{2,4})\s*(?:px)?['\"]?[^>]{0,120}"
+        r"height\s*[:=]\s*['\"]?(\d{2,4})\s*(?:px)?['\"]?|"
+        r"height\s*[:=]\s*['\"]?(\d{2,4})\s*(?:px)?['\"]?[^>]{0,120}"
+        r"width\s*[:=]\s*['\"]?(\d{2,4})\s*(?:px)?['\"]?)",
+        source[:100_000], re.I,
+    )
+    if dimension:
+        groups = dimension.groups()
+        width, height = (int(groups[0]), int(groups[1])) if groups[0] else (int(groups[3]), int(groups[2]))
+        if 40 <= width <= 2000 and 20 <= height <= 1200:
+            return width, height
+    return 728, 90
+
+
+def prepare_promotion_html(data, filename):
+    """Bound and validate a single UTF-8 HTML banner before durable storage."""
+    if not data or len(data) > MAX_PROMO_HTML_UPLOAD:
+        raise ValueError("Choose an HTML banner smaller than 2 MB.")
+    if os.path.splitext(filename)[1].lower() not in {".html", ".htm"}:
+        raise ValueError("Choose an .html or .htm banner file.")
+    try:
+        source = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("The HTML banner must be saved as UTF-8.") from exc
+    if "\x00" in source or not re.search(r"<[a-zA-Z!][^>]*>", source):
+        raise ValueError("This file does not contain readable HTML markup.")
+    width, height = promotion_html_dimensions(source, filename)
+    return data, width, height
 
 
 def boxes(data, start=0, end=None):
@@ -209,13 +279,101 @@ def published_promo_media_ids(session):
         return set()
     return {
         item.get("media_id") for item in config["items"]
-        if isinstance(item, dict) and isinstance(item.get("media_id"), str)
-        and MEDIA_ID.fullmatch(item["media_id"])
+        if isinstance(item, dict) and str(item.get("type") or "image").lower() == "image"
+        and isinstance(item.get("media_id"), str) and MEDIA_ID.fullmatch(item["media_id"])
     }
+
+
+def published_promo_html_ids(session):
+    """Return HTML creative IDs explicitly published in the shared store setting."""
+    setting = session.query(StoreSetting).filter_by(key="storefront_promo_ids").first()
+    if not setting:
+        return set()
+    try:
+        config = json.loads(setting.value or "")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(config, dict) or config.get("mode") != "custom" or not isinstance(config.get("items"), list):
+        return set()
+    return {
+        item.get("media_id") for item in config["items"]
+        if isinstance(item, dict) and item.get("type") == "html"
+        and isinstance(item.get("media_id"), str) and MEDIA_ID.fullmatch(item["media_id"])
+    }
+
+
+def sanitize_filename(headers, fallback):
+    filename = urllib.parse.unquote(header(headers, "X-File-Name", fallback))
+    filename = os.path.basename(filename.replace("\\", "/"))[:150]
+    return re.sub(r"[\x00-\x1f\x7f]", "", filename) or fallback
+
+
+def route_promotion_html_request(method, headers, staff, promo_match):
+    with get_db() as session:
+        asset = session.query(StorePromotionCreative).filter_by(id=promo_match.group(1)).first()
+        if not asset:
+            return error("Media not found", 404)
+        published_ids = published_promo_html_ids(session)
+        if method == "DELETE":
+            if asset.id in published_ids:
+                return error("Remove this HTML banner from the published storefront promotions first.", 409)
+            if not staff or not access_control.allowed("stock", access_control.state(headers, session)):
+                return error("Media not found", 404)
+            if asset.uploaded_by != str(staff.get("id")) and staff.get("role") not in {"admin", "manager"}:
+                return error("Media not found", 404)
+            session.delete(asset)
+            return MediaResponse(200, "application/json; charset=utf-8", b'{"ok": true}')
+        if method not in {"GET", "HEAD"}:
+            return error("Method not allowed", 405)
+
+        public = asset.id in published_ids
+        if not public and (not staff or not access_control.allowed("stock", access_control.state(headers, session))):
+            return error("Media not found", 404)
+        if not public and asset.uploaded_by != str((staff or {}).get("id")) and (staff or {}).get("role") not in {"admin", "manager"}:
+            return error("Media not found", 404)
+
+        etag = '"' + asset.id + '"'
+        extra = {
+            "Cache-Control": "public, max-age=86400" if public else "private, no-store",
+            "ETag": etag,
+            "Content-Security-Policy": PROMO_HTML_CSP,
+            "Content-Length": str(asset.byte_length),
+        }
+        if public and header(headers, "If-None-Match") == etag:
+            return MediaResponse(304, "text/html; charset=utf-8", b"", extra)
+        payload = b"" if method == "HEAD" else session.query(
+            func.substr(StorePromotionCreative.data, 1, asset.byte_length)
+        ).filter_by(id=asset.id).scalar()
+        return MediaResponse(200, "text/html; charset=utf-8", bytes(payload or b""), extra)
 
 
 def route_request(method, path, data, headers, staff):
     """Called after existing staff + optional stock-area authorization."""
+    if path == PROMO_HTML_UPLOAD_PATH and method == "POST":
+        filename = sanitize_filename(headers, "promotion.html")
+        try:
+            prepared, width, height = prepare_promotion_html(data, filename)
+        except ValueError as exc:
+            return error(str(exc))
+        filename = filename[:150]
+        with get_db() as session:
+            stale_drafts = session.query(StorePromotionCreative).filter(
+                StorePromotionCreative.created_at < datetime.utcnow() - timedelta(days=1),
+            )
+            published_ids = published_promo_html_ids(session)
+            if published_ids:
+                stale_drafts = stale_drafts.filter(~StorePromotionCreative.id.in_(published_ids))
+            stale_drafts.delete(synchronize_session=False)
+            asset = StorePromotionCreative(
+                id=uuid.uuid4().hex, mime_type="text/html", filename=filename,
+                byte_length=len(prepared), width=width, height=height, data=prepared,
+                uploaded_by=str((staff or {}).get("id", "OPEN-TERMINAL")),
+            )
+            session.add(asset)
+            session.flush()
+            return MediaResponse(201, "application/json; charset=utf-8",
+                                 json.dumps({"ok": True, "creative": asset.to_dict()}).encode())
+
     if path in {"/api/media/images", "/api/media/videos"} and method == "POST":
         try:
             if path.endswith("images"):
@@ -248,6 +406,9 @@ def route_request(method, path, data, headers, staff):
                 duration=duration, data=prepared, uploaded_by=str(staff.get("id", "OPEN-TERMINAL")))
             session.add(asset); session.flush()
             return MediaResponse(201, "application/json; charset=utf-8", json.dumps({"ok": True, "media": asset.to_dict()}).encode())
+    promo_match = PROMO_HTML_PATH.fullmatch(path)
+    if promo_match:
+        return route_promotion_html_request(method, headers, staff, promo_match)
     match = MEDIA_PATH.fullmatch(path)
     if not match:
         return error("Media route not found", 404)

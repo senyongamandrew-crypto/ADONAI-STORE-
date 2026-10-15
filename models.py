@@ -453,6 +453,25 @@ class ProductMedia(Base):
                 "height": self.height, "duration": self.duration}
 
 
+class StorePromotionCreative(Base):
+    """Standalone HTML artwork uploaded for the public storefront promo strip."""
+    __tablename__ = "store_promotion_creatives"
+    id = Column(String(32), primary_key=True)
+    mime_type = Column(String(40), nullable=False, default="text/html")
+    filename = Column(String(160), nullable=False)
+    byte_length = Column(Integer, nullable=False)
+    width = Column(Integer, nullable=False, default=728)
+    height = Column(Integer, nullable=False, default=90)
+    data = deferred(Column(LargeBinary, nullable=False))
+    uploaded_by = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def to_dict(self):
+        return {"id": self.id, "url": "/api/promo-media/" + self.id,
+                "type": self.mime_type, "name": self.filename, "bytes": self.byte_length,
+                "width": self.width, "height": self.height}
+
+
 class Inventory(Base):
     __tablename__ = "inventory"
 

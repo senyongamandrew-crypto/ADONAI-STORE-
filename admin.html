@@ -787,8 +787,8 @@
         <div class="promo-manager-head">
           <div>
             <p class="pa-eyebrow">PUBLIC STOREFRONT</p>
-            <h3 id="storefrontPromoTitle">Manage the image strip</h3>
-            <p class="muted small">Choose catalog pieces or upload your own storefront artwork. Custom images can be reordered, replaced, removed and given accessible alt text; no prices or discounts are added to custom artwork.</p>
+            <h3 id="storefrontPromoTitle">Manage promotional banners</h3>
+            <p class="muted small">Choose catalog pieces or upload your own banner artwork or animated HTML advert. Upload the original HTML file to preserve its animation; a screenshot is only a still image. Creatives can be reordered, replaced, removed and given accessible descriptions; no prices or discounts are added to custom artwork.</p>
           </div>
         </div>
         <div class="promo-manager-controls">
@@ -797,7 +797,7 @@
             <select id="storefrontPromoMode" class="sel-full">
               <option value="auto">Automatic — discounts first, then available pieces</option>
               <option value="selected">Choose specific pieces</option>
-              <option value="custom">Upload custom images</option>
+              <option value="custom">Upload banner images or HTML</option>
               <option value="none">Hide the strip</option>
             </select>
           </div>
@@ -808,11 +808,11 @@
           <div class="promo-product-list" id="promoProductList"></div>
         </div>
         <div class="promo-product-choices promo-creative-choices" id="promoCreativeChoices" hidden>
-          <p class="promo-manager-hint muted small">Upload up to 8 JPG, PNG or WebP images. Reorder, replace or remove them below. Custom artwork is shown without generated price or discount labels, even when the catalog is empty.</p>
+          <p class="promo-manager-hint muted small">Upload up to 8 JPG, PNG, WebP, HEIC/HEIF images or animated HTML adverts (2 MB max per HTML file). Upload the original .html file to keep its animation; static image files are still images. HTML plays in an isolated sandbox, so use a self-contained file or HTTPS-hosted assets. Reorder, replace or remove creatives below. No generated prices or discounts are added.</p>
           <div class="promo-creative-toolbar">
-            <input id="promoCreativeFileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
-            <button class="btn" id="btnAddPromoImages" type="button">Add images</button>
-            <span class="muted small" id="promoCreativeCapacity">0 of 8 images</span>
+            <input id="promoCreativeFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,text/html,.jpg,.jpeg,.png,.webp,.heic,.heif,.html,.htm" multiple hidden />
+            <button class="btn" id="btnAddPromoImages" type="button">Add banner files</button>
+            <span class="muted small" id="promoCreativeCapacity">0 of 8 creatives</span>
           </div>
           <div class="promo-creative-list" id="promoCreativeList" aria-live="polite"></div>
         </div>

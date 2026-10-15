@@ -55,8 +55,14 @@ assert.match(adminHtml, /id="storefrontPromoManager"/,
   "Admin Suite contains a control panel for the storefront strip");
 assert.match(adminHtml, /id="storefrontPromoMode"/,
   "staff can choose automatic, selected products, custom images, or hidden mode");
-assert.match(adminHtml, /<option value="custom">Upload custom images<\/option>/,
-  "the promotion manager offers direct custom image management");
+assert.match(adminHtml, /<option value="custom">Upload banner images or HTML<\/option>/,
+  "the promotion manager supports custom images and HTML banners");
+assert.match(adminHtml, /accept="[^"]*\.html[^"]*\.htm/,
+  "the promotion file picker accepts standalone HTML banner files");
+assert.match(admin, /DB\.uploadPromotionHtml\(file\)/,
+  "uploaded HTML banners use the dedicated isolated-creative endpoint");
+assert.match(storefront, /sandbox="allow-scripts"/,
+  "public HTML artwork runs in a sandbox without same-origin access");
 assert.match(adminHtml, /id="promoCreativeFileInput"[\s\S]*?id="promoCreativeList"/,
   "the manager exposes an upload control and ordered creative list");
 assert.match(admin, /data-promo-creative-move[\s\S]*?data-promo-creative-replace[\s\S]*?data-promo-creative-remove/,
@@ -146,7 +152,7 @@ assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection()))
 const promoImageId = "a".repeat(32);
 promoContext.setPromoSetting(JSON.stringify({ mode: "custom", items: [{ media_id: promoImageId, alt_text: "Fresh arrivals" }] }));
 assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), {
-  mode: "custom", ids: [], items: [{ media_id: promoImageId, alt_text: "Fresh arrivals" }]
+  mode: "custom", ids: [], items: [{ media_id: promoImageId, type: "image", width: 0, height: 0, alt_text: "Fresh arrivals" }]
 }, "custom image selections preserve their manually ordered media and alt text");
 
 const dom = new JSDOM(homepage, { runScripts: "outside-only", url: "https://adonai-preview.example/" });
@@ -247,6 +253,38 @@ assert.equal(customCard.querySelector(".promo-card-discount"), null,
   "custom artwork never receives a fabricated discount badge");
 assert.ok(customWindow.document.querySelectorAll("#promoTrack .promo-card--custom").length > 1,
   "even a single manually uploaded image scrolls continuously across the strip");
+const customHtmlId = "d".repeat(32);
+const htmlDom = new JSDOM(homepage, { runScripts: "outside-only", url: "https://adonai-preview.example/" });
+const htmlWindow = htmlDom.window;
+htmlWindow.setInterval = () => 0;
+htmlWindow.requestAnimationFrame = callback => callback();
+htmlWindow.AdonaiPDP = window.AdonaiPDP;
+htmlWindow.DB = {
+  ...window.DB,
+  getSettings: () => ({ storefront_promo_ids: JSON.stringify({ mode: "custom", items: [{
+    media_id: customHtmlId, type: "html", width: 728, height: 90, alt_text: "Blazer sale banner"
+  }] }) }),
+  listProducts: () => []
+};
+htmlWindow.eval(storefront);
+const htmlCard = htmlWindow.document.querySelector("#promoTrack .promo-card--html");
+const htmlFrame = htmlCard && htmlCard.querySelector("iframe");
+assert.ok(htmlFrame, "a published HTML banner is embedded in its own frame");
+assert.equal(htmlWindow.document.querySelectorAll("#promoTrack iframe").length, 1,
+  "a single rich creative is not duplicated, avoiding repeated script execution and impressions");
+assert.ok(htmlWindow.document.querySelector("#promoTrack").classList.contains("is-static"),
+  "a single HTML banner displays once without a duplicate marquee iframe");
+assert.equal(htmlFrame.getAttribute("src"), `/api/promo-media/${customHtmlId}`,
+  "the public banner reads from durable HTML creative storage");
+assert.equal(htmlFrame.getAttribute("sandbox"), "allow-scripts",
+  "banner scripts remain sandboxed away from the store origin");
+assert.doesNotMatch(htmlFrame.getAttribute("sandbox"), /allow-same-origin|allow-top-navigation/,
+  "an uploaded banner cannot access the store DOM or take over the top page");
+assert.match(htmlCard.getAttribute("style"), /--promo-html-frame-width:728px/,
+  "standard 728 by 90 HTML banners retain their original viewport dimensions when scaled into the rail");
+assert.equal(htmlCard.getAttribute("aria-label"), "Storefront artwork: Blazer sale banner",
+  "HTML banner descriptions are exposed accessibly on the storefront");
+htmlDom.window.close();
 customDom.window.close();
 manualDom.window.close();
 dom.window.close();
@@ -267,6 +305,7 @@ managerWindow.DB = {
   listProducts: () => managerCatalog,
   apiUrl: value => value,
   uploadMedia: async () => ({ id: (++managerUploadCount).toString(16).padStart(32, "0") }),
+  uploadPromotionHtml: async file => ({ id: "f".repeat(32), url: "/api/promo-media/" + "f".repeat(32), name: file.name, width: 728, height: 90 }),
   syncStoreSettings: async patch => { managerSettings = { ...managerSettings, ...patch }; return { ok: true }; }
 };
 managerWindow.Icons = { svg: () => "<svg></svg>" };
@@ -309,27 +348,32 @@ async function verifyCustomCreativeManager() {
   mode.value = "custom";
   mode.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
   assert.equal(managerDoc.querySelector("#promoCreativeChoices").hidden, false,
-    "custom image controls appear when staff select the manual image mode");
-  assert.match(managerDoc.querySelector("#promoCreativeList").textContent, /No custom images yet/,
+    "custom creative controls appear when staff select the manual banner mode");
+  assert.match(managerDoc.querySelector("#promoCreativeList").textContent, /No custom banner files yet/,
     "the custom manager begins empty rather than inventing demo artwork");
 
   const fileInput = managerDoc.querySelector("#promoCreativeFileInput");
   const first = new managerWindow.File(["image one"], "artwork-one.png", { type: "image/png" });
-  const second = new managerWindow.File(["image two"], "artwork-two.webp", { type: "image/webp" });
+  const second = new managerWindow.File(["<!doctype html><html><body>Banner</body></html>"], "Blazer Banner 728x90.html", { type: "text/html" });
   Object.defineProperty(fileInput, "files", { configurable: true, value: [first, second] });
   fileInput.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
   await new Promise(resolve => managerWindow.setTimeout(resolve, 10));
   assert.equal(managerDoc.querySelectorAll("#promoCreativeList .promo-creative-row").length, 2,
     "uploaded artwork is listed as separate editable creatives");
-  assert.equal(managerDoc.querySelector("#promoCreativeCapacity").textContent, "2 of 8 images",
-    "custom artwork capacity is visible to staff");
+  assert.equal(managerDoc.querySelector("#promoCreativeCapacity").textContent, "2 of 8 creatives",
+    "custom banner-file capacity is visible to staff");
+  assert.match(managerDoc.querySelector("#promoCreativeList").textContent, /HTML banner 2/,
+    "uploaded HTML files are identified separately from image creatives");
+  const htmlPreview = managerDoc.querySelector("#promoCreativeList iframe");
+  assert.ok(htmlPreview && htmlPreview.getAttribute("sandbox") === "allow-scripts",
+    "the admin previews uploaded HTML in a sandbox too");
 
   managerDoc.querySelector('[data-promo-creative-move="down"][data-promo-creative-index="0"]').click();
   const alt = managerDoc.querySelector('[data-promo-alt="0"]');
   alt.value = "Owner-selected seasonal art";
   alt.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
 
-  const replaceInput = managerDoc.querySelector('[data-promo-replace-file="0"]');
+  const replaceInput = managerDoc.querySelector('[data-promo-replace-file="1"]');
   const replacement = new managerWindow.File(["replacement"], "replacement.jpg", { type: "image/jpeg" });
   Object.defineProperty(replaceInput, "files", { configurable: true, value: [replacement] });
   replaceInput.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
@@ -340,12 +384,17 @@ async function verifyCustomCreativeManager() {
   const published = JSON.parse(managerSettings.storefront_promo_ids);
   assert.equal(published.mode, "custom", "the manual creative mode publishes through the shared setting");
   assert.equal(published.items.length, 2, "publishing retains the selected custom artwork list");
-  assert.equal(published.items[0].media_id, "0".repeat(31) + "3",
-    "replacing a custom image uploads and publishes the replacement media ID");
+  assert.equal(published.items[0].media_id, "f".repeat(32),
+    "the uploaded HTML banner stays first after reordering and publishing");
+  assert.equal(published.items[0].type, "html",
+    "published settings retain the HTML creative type");
+  assert.equal(published.items[0].width, 728);
+  assert.equal(published.items[0].height, 90);
   assert.equal(published.items[0].alt_text, "Owner-selected seasonal art",
-    "accessible alt text survives reordering, replacement and publishing");
-  assert.equal(published.items[1].media_id, "0".repeat(31) + "1",
-    "manual image order is preserved when published");
+    "accessible descriptions survive reordering, replacement and publishing");
+  assert.equal(published.items[1].media_id, "0".repeat(31) + "2",
+    "the replaced image is uploaded and published after the HTML banner");
+  assert.equal(published.items[1].type, "image");
   managerDom.window.close();
   console.log("✓ storefront promotions use real catalog items, custom uploads/replacements/order, visible empty-catalog artwork and no fabricated offers");
 }

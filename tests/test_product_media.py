@@ -29,7 +29,7 @@ import database
 database.IS_POSTGRES = False
 from database import get_db, engine
 from db_init import init_db
-from models import Product, ProductMedia, PosAccessKey, PosAccessSession, StoreSetting, Inventory, NotificationEvent
+from models import Product, ProductMedia, StorePromotionCreative, PosAccessKey, PosAccessSession, StoreSetting, Inventory, NotificationEvent
 import api
 import access_control
 import media
@@ -53,7 +53,7 @@ class ProductMediaTests(unittest.TestCase):
 
     def setUp(self):
         with get_db() as session:
-            for model in [ProductMedia, Inventory, Product, NotificationEvent, PosAccessSession, PosAccessKey]:
+            for model in [StorePromotionCreative, ProductMedia, Inventory, Product, NotificationEvent, PosAccessSession, PosAccessKey]:
                 session.query(model).delete(synchronize_session=False)
             session.query(StoreSetting).filter(StoreSetting.key.in_([access_control.POLICY_KEY, "storefront_promo_ids"])).delete()
 
@@ -70,6 +70,13 @@ class ProductMediaTests(unittest.TestCase):
                           dict({"x-file-name": "phone%20garment.mov" if kind == "video" else "front.jpg"}, **(headers or {})))
         self.assertEqual(result[0], 201, result[2]); return json.loads(result[2])["media"]
 
+    def upload_promo_html(self, data=None, filename="Blazer%20Banner%20728x90.html", headers=None):
+        source = data or b'<!doctype html><html><head><meta name="ad.size" content="width=728,height=90"></head><body><div>Blazer sale</div></body></html>'
+        request_headers = dict({"x-file-name": filename, "content-type": "text/html"}, **(headers or {}))
+        result = self.raw("POST", "/api/promo-media/html", source, request_headers)
+        self.assertEqual(result[0], 201, result[2])
+        return json.loads(result[2])["creative"]
+
     def product(self, **extra):
         body = {"name": "Isolated garment", "sku": "MEDIA-TEST", "barcode_id": "MEDIA-TEST-1OF1",
                 "item_condition": "PRE_LOVED", "in_stock_count": 1, "cost_price": 10000,
@@ -77,6 +84,18 @@ class ProductMediaTests(unittest.TestCase):
         body.update(extra)
         status, data = self.request("POST", "/api/products", body)
         self.assertEqual(status, 201, data); return data["product"]
+
+    def test_heif_phone_photos_are_normalized_for_storefront_use(self):
+        from pillow_heif import from_pillow
+
+        image = Image.new("RGB", (32, 24), "#779876")
+        heif = io.BytesIO()
+        from_pillow(image).save(heif)
+        prepared, width, height = media.prepare_image(heif.getvalue())
+        with Image.open(io.BytesIO(prepared)) as normalized:
+            self.assertEqual(normalized.format, "JPEG")
+            self.assertEqual(normalized.size, (32, 24))
+        self.assertEqual((width, height), (32, 24))
 
     def test_twelve_phone_photos_video_and_legacy_edit_preservation(self):
         photos = [self.upload() for _ in range(12)]; clip = self.upload("video")
@@ -145,7 +164,12 @@ class ProductMediaTests(unittest.TestCase):
         headers = {"x-pos-access": owner["session"]["token"], "X-Adonai-Media-Preview": "1"}
         status, _ = self.request("PATCH", "/api/pos-access/policy", {"protected_areas": ["stock"]}, headers)
         self.assertEqual(status, 200)
-        for method, path, body in [("POST", "/api/media/images", self.photo_bytes), ("POST", "/api/media/videos", self.video_bytes), ("DELETE", image["url"], b"")]:
+        for method, path, body in [
+            ("POST", "/api/media/images", self.photo_bytes),
+            ("POST", "/api/media/videos", self.video_bytes),
+            ("POST", "/api/promo-media/html", b"<html><body>banner</body></html>"),
+            ("DELETE", image["url"], b""),
+        ]:
             result = self.raw(method, path, body)
             self.assertEqual(result[0], 403); self.assertEqual(json.loads(result[2])["area"], "stock")
         self.assertEqual(self.raw("GET", image["url"])[0], 200)
@@ -200,6 +224,90 @@ class ProductMediaTests(unittest.TestCase):
             self.assertEqual(self.raw("GET", image["url"])[0], 404, "unpublishing removes the no-longer-used custom image")
         with get_db() as session:
             self.assertIsNone(session.get(ProductMedia, image["id"]))
+
+    def test_html_promo_creatives_are_sandboxed_private_and_durable_when_published(self):
+        source = (
+            b'<!doctype html><html><head><meta name="ad.size" content="width=728,height=90">'
+            b'<style>body{margin:0}@keyframes blazer-pulse{to{opacity:.5}}.ad{animation:blazer-pulse 1s infinite alternate}</style>'
+            b'</head><body><a class="ad" href="https://example.com">Blazer offer</a>'
+            b'<script>document.documentElement.dataset.animationReady="true";</script></body></html>'
+        )
+        image = self.upload()
+        creative = self.upload_promo_html(source)
+        self.assertEqual(creative["type"], "text/html")
+        self.assertEqual((creative["width"], creative["height"]), (728, 90))
+        self.assertEqual(creative["name"], "Blazer Banner 728x90.html")
+        self.assertEqual(self.raw("GET", creative["url"])[0], 404,
+                         "an uploaded HTML creative remains private until the owner publishes it")
+        preview = self.raw("GET", creative["url"], headers={"X-Adonai-Media-Preview": "1"})
+        self.assertEqual(preview[0], 200)
+        self.assertEqual(preview[2], source)
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            self.assertEqual(self.raw("GET", creative["url"])[0], 404,
+                             "protected public reads cannot see an unpublished creative")
+
+        custom_setting = json.dumps({"mode": "custom", "items": [
+            {"media_id": image["id"], "type": "image", "alt_text": "Blazer photo"},
+            {"media_id": creative["id"], "type": "html", "width": 1, "height": 1,
+             "alt_text": "Blazer promotion"},
+        ]})
+        status, saved = self.request("POST", "/api/settings", {"storefront_promo_ids": custom_setting})
+        self.assertEqual(status, 200, saved)
+        normalized = json.loads(saved["settings"]["storefront_promo_ids"])
+        self.assertEqual(normalized["items"][1], {
+            "media_id": creative["id"], "type": "html", "alt_text": "Blazer promotion",
+            "width": 728, "height": 90
+        }, "the API persists the uploaded file's actual banner dimensions, not client-supplied values")
+        self.assertEqual(normalized["items"][0]["type"], "image")
+
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            public_image = self.raw("GET", image["url"])
+            public = self.raw("GET", creative["url"])
+        self.assertEqual(public_image[0], 200, "mixed image and HTML creatives are published together")
+        self.assertEqual(public[0], 200)
+        self.assertEqual(public[1], "text/html; charset=utf-8")
+        self.assertEqual(public[2], source)
+        self.assertEqual(public.headers["Cache-Control"], "public, max-age=86400")
+        self.assertIn("sandbox allow-scripts", public.headers["Content-Security-Policy"])
+        self.assertIn("script-src 'unsafe-inline' https:", public.headers["Content-Security-Policy"])
+        self.assertIn(b"@keyframes blazer-pulse", public[2], "CSS animation markup is served without flattening")
+        self.assertIn(b"<script>", public[2], "animated HTML retains its script inside the isolated frame")
+        self.assertIn("frame-ancestors 'self'", public.headers["Content-Security-Policy"])
+        served_security_headers = dict(serve.response_security_headers(creative["url"], public[1]))
+        self.assertNotIn("X-Frame-Options", served_security_headers,
+                         "the creative's CSP allowlist—not a same-origin-only legacy header—controls isolated embeds")
+        self.assertIn("X-Frame-Options", dict(serve.response_security_headers("/api/media/" + creative["id"], "image/jpeg")))
+        self.assertEqual(self.raw("HEAD", creative["url"])[0], 200)
+        self.assertEqual(self.raw("DELETE", creative["url"])[0], 409,
+                         "published HTML cannot be deleted behind the storefront setting")
+
+        with get_db() as session:
+            session.get(StorePromotionCreative, creative["id"]).created_at = datetime.utcnow() - timedelta(days=2)
+        self.upload_promo_html(filename="second-banner.html")
+        with get_db() as session:
+            self.assertIsNotNone(session.get(StorePromotionCreative, creative["id"]),
+                                 "published HTML artwork survives stale-draft cleanup")
+
+        status, removed = self.request("POST", "/api/settings", {"storefront_promo_ids": "auto"})
+        self.assertEqual(status, 200, removed)
+        self.assertEqual(self.raw("GET", creative["url"])[0], 404,
+                         "unpublishing deletes the no-longer-used HTML creative")
+        self.assertEqual(self.raw("GET", image["url"])[0], 404,
+                         "unpublishing also removes the no-longer-used image creative")
+        with get_db() as session:
+            self.assertIsNone(session.get(StorePromotionCreative, creative["id"]))
+            self.assertIsNone(session.get(ProductMedia, image["id"]))
+
+    def test_html_promo_uploads_are_limited_to_utf8_html_files(self):
+        self.assertEqual(self.raw("POST", "/api/promo-media/html", b"<html></html>",
+                                  {"x-file-name": "banner.txt"})[0], 400)
+        self.assertEqual(self.raw("POST", "/api/promo-media/html", b"<html>\xff</html>",
+                                  {"x-file-name": "banner.html"})[0], 400)
+        self.assertEqual(self.raw("POST", "/api/promo-media/html", b"not html",
+                                  {"x-file-name": "banner.html"})[0], 400)
+        self.assertEqual(self.raw("POST", "/api/promo-media/html", b"<html></html>" * 200_000,
+                                  {"x-file-name": "banner.html"})[0], 400)
+        self.assertEqual(serve.api_body_limit("POST", "/api/promo-media/html"), media.MAX_PROMO_HTML_UPLOAD)
 
     def test_invalid_media_reference_rolls_back_product_update_and_new_intake(self):
         product = self.product()
