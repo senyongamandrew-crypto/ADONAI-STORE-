@@ -127,13 +127,16 @@ def staff_auth_required() -> bool:
     }
 
 
+OFFICIAL_STORE_EMAIL = "info@adonaithrift-store.online"
+LEGACY_STORE_EMAILS = {"adonaithriftstore@gmail.com"}
+
 # Settings that may be read by the public storefront. Authentication keys and
 # operational flags are intentionally excluded from public API responses.
 PUBLIC_STORE_SETTING_KEYS = {
     "store_name", "tagline", "address", "whatsapp", "whatsapp_display",
     "phone", "hotline", "email", "tiktok", "instagram", "hours",
     "delivery_scope", "base_delivery_fee", "boda_base_fee", "currency",
-    "receipt_footer", "website_url", "app_url",
+    "receipt_footer", "website_url", "app_url", "storefront_promo_ids",
     # Pay-to details. Published on purpose, exactly like the bank details at
     # the bottom of an invoice: a shopper cannot transfer money to an account
     # they are not told about. Nothing here is a credential.
@@ -209,7 +212,34 @@ def normalize_fulfillment_stage(value):
 
 def public_store_settings(rows) -> dict:
     """Serialize only settings that are safe and useful on the storefront."""
-    return {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+    settings = {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+    email = str(settings.get("email") or "").strip()
+    if not email or email.lower() in LEGACY_STORE_EMAILS:
+        settings["email"] = OFFICIAL_STORE_EMAIL
+    return settings
+
+
+def normalize_storefront_promo_ids(value) -> str:
+    """Normalize the public strip mode or an ordered list of live product IDs."""
+    text = str(value or "").strip()
+    if text.lower() in {"auto", "none"}:
+        return text.lower()
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Choose automatic mode, hide the strip, or provide a JSON list of product IDs.") from exc
+    if not isinstance(parsed, list) or not parsed or len(parsed) > 8:
+        raise ValueError("Choose between 1 and 8 products, or use automatic mode / hide the strip.")
+    ids = []
+    for item in parsed:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 50:
+            raise ValueError("Each storefront promotion must be a valid product ID.")
+        product_id = item.strip()
+        if product_id not in ids:
+            ids.append(product_id)
+    if not ids:
+        raise ValueError("Choose at least one product or use automatic mode / hide the strip.")
+    return json.dumps(ids, ensure_ascii=False, separators=(",", ":"))
 
 
 # ============================================================================
@@ -4463,6 +4493,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         "error": f"Store setting '{key}' must be a scalar value"
                     }, status=400)
                 text_value = clean_text(value, 2000)
+                if key == "storefront_promo_ids":
+                    try:
+                        text_value = normalize_storefront_promo_ids(text_value)
+                    except ValueError as exc:
+                        return json_response({"ok": False, "error": str(exc)}, status=400)
+                if key == "email" and text_value.strip().lower() in LEGACY_STORE_EMAILS:
+                    text_value = OFFICIAL_STORE_EMAIL
                 if key in ("master_key", "admin_key"):
                     if len(text_value) < 6:
                         return json_response({

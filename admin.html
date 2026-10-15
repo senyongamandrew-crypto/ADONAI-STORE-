@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.8" />
+<link rel="stylesheet" href="styles.css?v=7.9" />
 <link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/dispatch.css?v=1.0" />
 <link rel="stylesheet" href="css/notifications.css?v=2.4" />
@@ -777,11 +777,40 @@
         <div>
           <p class="kicker">STORE CONFIGURATION</p>
           <h1>System Parameters</h1>
-          <p class="muted">Store details, delivery fees and optional passwords for sensitive POS areas.</p>
+          <p class="muted">Manage the storefront promotion strip, store details, delivery fees and optional passwords for sensitive POS areas.</p>
         </div>
         <span class="chip-gold big on terminal-access-status" id="openAccessChip" role="status" hidden><i data-icon="unlock" data-size="14"></i> Register stays open</span>
         <button class="chip-gold big" id="unlockChip" data-credential-control><i data-icon="lock" data-size="14"></i> Unlock Master Key</button>
       </div>
+
+      <section class="card promo-manager-card" id="storefrontPromoManager" aria-labelledby="storefrontPromoTitle">
+        <div class="promo-manager-head">
+          <div>
+            <p class="pa-eyebrow">PUBLIC STOREFRONT</p>
+            <h3 id="storefrontPromoTitle">Manage the image strip</h3>
+            <p class="muted small">Choose which catalog pieces shoppers see here. Photos and prices come from inventory; a discount appears only when the compare-at price is higher than the live price.</p>
+          </div>
+        </div>
+        <div class="promo-manager-controls">
+          <div class="field">
+            <label for="storefrontPromoMode">What should the strip show?</label>
+            <select id="storefrontPromoMode" class="sel-full">
+              <option value="auto">Automatic — discounts first, then available pieces</option>
+              <option value="selected">Choose specific pieces</option>
+              <option value="none">Hide the strip</option>
+            </select>
+          </div>
+          <p class="promo-manager-summary muted small" id="promoSelectionSummary" role="status"></p>
+        </div>
+        <div class="promo-product-choices" id="promoProductChoices" hidden>
+          <p class="promo-manager-hint muted small" id="promoManagerHint">Select up to 8 in-stock products and use the up/down controls to order them. Saved picks that go out of stock are skipped until available again and can be removed here. Update photos or Compare-at (UGX) in the inventory editor.</p>
+          <div class="promo-product-list" id="promoProductList"></div>
+        </div>
+        <div class="settings-foot">
+          <span class="muted small" id="promoManagerStatus">Changes apply to the storefront after publishing.</span>
+          <button class="btn primary" id="btnSavePromoSettings" type="button">Publish strip</button>
+        </div>
+      </section>
 
       <section class="ds-panel" id="displaySizeSettings" aria-labelledby="displaySizeTitle">
         <div class="ds-panel-head"><i data-icon="monitor" data-size="16"></i><h2 id="displaySizeTitle">Display size</h2></div>
@@ -818,13 +847,15 @@
         <div id="gatewayStatusBody" aria-live="polite"><p class="muted small">Checking how the gateway is configured…</p></div>
       </div>
 
+
+
       <div class="card" id="storeProfileSettings" style="max-width:860px">
         <div class="fgrid">
           <div class="field full"><label>Store name</label><input class="sel-full" id="setName" /></div>
           <div class="field"><label>WhatsApp customer notification line (raw digits)<span class="fhint">e.g. 256758873398</span></label><input class="sel-full" id="setWaRaw" /></div>
           <div class="field"><label>WhatsApp display format<span class="fhint">e.g. +256 7588 73398</span></label><input class="sel-full" id="setWaDisp" /></div>
           <div class="field"><label>Call / toll line<span class="fhint">e.g. +256 7656 52403</span></label><input class="sel-full" id="setHotline" /></div>
-          <div class="field"><label>Official email address<span class="fhint">e.g. adonaithriftstore@gmail.com</span></label><input class="sel-full" id="setEmail" /></div>
+          <div class="field"><label>Official email address<span class="fhint">e.g. info@adonaithrift-store.online</span></label><input class="sel-full" id="setEmail" type="email" autocomplete="email" /></div>
           <div class="field"><label>TikTok official handle<span class="fhint">e.g. @adonai.thrift256</span></label><input class="sel-full" id="setTiktok" /></div>
           <div class="field"><label>Instagram official handle<span class="fhint">e.g. @adonaithrift256</span></label><input class="sel-full" id="setInstagram" /></div>
           <div class="field full"><label>Physical store address</label><input class="sel-full" id="setAddress" /></div>
@@ -869,7 +900,7 @@
 <script src="js/adaptive.js?v=1.1"></script>
 <script src="js/notifications.js?v=2.4"></script>
 <script src="js/icons.js?v=1.2"></script>
-<script src="js/db.js?v=5.6"></script>
+<script src="js/db.js?v=5.8"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/intake.js?v=5.1"></script>
@@ -880,7 +911,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=8.0"></script>
+<script src="app.js?v=8.1"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

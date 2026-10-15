@@ -2148,3 +2148,54 @@ body.cart-drawer-closed { overflow:auto !important; touch-action:auto !important
   .audit-single-day label { margin: 0; font-size: 12px; }
   .audit-single-day input { width: 190px; }
 }
+
+/* Storefront promotion controls (Admin Suite → System Parameters) */
+.promo-manager-card { max-width: 860px; }
+.promo-manager-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.promo-manager-head h3 { margin: 2px 0 5px; color: #18231c; font: 700 19px/1.2 var(--font-display); }
+.promo-manager-head p:last-child { max-width: 70ch; margin-top: 5px; }
+.promo-manager-controls { display: grid; grid-template-columns: minmax(240px, 1.1fr) minmax(200px, .9fr); align-items: end; gap: 14px; margin-bottom: 12px; }
+.promo-manager-summary { margin: 0 0 10px; }
+.promo-product-choices { margin: 8px 0 14px; padding: 12px; border: 1px solid #E5E7EB; border-radius: 12px; background: #FAFAF9; }
+.promo-manager-hint { margin-bottom: 10px; }
+.promo-product-list { display: grid; gap: 7px; max-height: 310px; overflow-y: auto; padding: 2px; overscroll-behavior: contain; }
+.promo-product-choice {
+  display: grid;
+  grid-template-columns: 20px 48px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #E5E7EB;
+  border-radius: 10px;
+  background: #fff;
+}
+.promo-product-choice.is-selected { border-color: #16803C; background: #F1F8F3; box-shadow: 0 0 0 1px rgba(22, 128, 60, .12); }
+.promo-product-choice input { width: 16px; height: 16px; margin: 0; accent-color: #16803C; }
+.promo-product-thumb { display: grid; width: 48px; height: 50px; overflow: hidden; place-items: center; border-radius: 7px; background: #F1F5F2; color: #5A745F; cursor: pointer; }
+.promo-product-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.promo-product-thumb svg { width: 22px; height: 22px; }
+.promo-product-copy { min-width: 0; cursor: pointer; }
+.promo-product-copy strong { display: block; overflow: hidden; color: #1F2937; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.promo-product-copy small { display: block; overflow: hidden; margin-top: 3px; color: #6B7280; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.promo-product-price { text-align: right; white-space: nowrap; color: #166534; font-size: 11px; font-weight: 800; }
+.promo-product-price s { display: block; color: #8B8B87; font-size: 9px; font-weight: 500; }
+.promo-product-price small { display: block; margin-top: 2px; color: #B42318; font-size: 9px; font-weight: 800; }
+.promo-product-order { display: grid; justify-items: center; gap: 3px; white-space: nowrap; }
+.promo-product-order > small { color: #526359; font-size: 9px; }
+.promo-order-buttons { display: flex; gap: 3px; }
+.promo-order-buttons button { display: grid; width: 22px; height: 20px; padding: 0; place-items: center; border: 1px solid #D2DBD4; border-radius: 5px; background: #fff; color: #31533A; font-size: 13px; line-height: 1; cursor: pointer; }
+.promo-order-buttons button:disabled { opacity: .38; cursor: not-allowed; }
+.promo-product-choice--unavailable { grid-template-columns: 20px minmax(0, 1fr) auto; border-color: #F1D6CF; background: #FFF9F7; }
+.promo-product-choice--unavailable .promo-product-copy { cursor: default; }
+.promo-product-unavailable-mark { display: grid; width: 19px; height: 19px; place-items: center; border-radius: 50%; background: #FCE8E4; color: #B42318; font-size: 12px; font-weight: 800; }
+.promo-product-remove { padding: 5px 9px; border: 1px solid #E6BFB5; border-radius: 7px; background: #fff; color: #9C362A; font-size: 10px; font-weight: 700; cursor: pointer; }
+.promo-product-remove:hover { background: #FEF0ED; }
+.promo-products-empty { padding: 18px; border: 1px dashed #CBD5D1; border-radius: 10px; color: #6B7280; text-align: center; font-size: 12px; }
+@media (max-width: 640px) {
+  .promo-manager-controls { grid-template-columns: 1fr; gap: 4px; }
+  .promo-product-choice { grid-template-columns: 18px 42px minmax(0, 1fr) auto auto; gap: 8px; padding: 7px; }
+  .promo-product-choice--unavailable { grid-template-columns: 18px minmax(0, 1fr) auto; }
+  .promo-product-thumb { width: 42px; height: 46px; }
+  .promo-product-price { font-size: 10px; }
+}

@@ -4141,8 +4141,193 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
      STORE SETTINGS
      ============================================================ */
   let settingsDirty = false;
+  let promoManagerDirty = false;
+  let promoManagerMode = "auto";
+  let promoManagerIds = [];
   const settingsView = $("#view-settings");
   ["input", "change"].forEach(event => settingsView.addEventListener(event, e => { if (e.target.closest("#storeProfileSettings")) settingsDirty = true; }));
+
+  function parsePromoManagerSetting(value) {
+    const raw = String(value || "auto").trim();
+    if (!raw || raw.toLowerCase() === "auto") return { mode: "auto", ids: [] };
+    if (raw.toLowerCase() === "none") return { mode: "none", ids: [] };
+    try {
+      const ids = JSON.parse(raw);
+      if (Array.isArray(ids)) return {
+        mode: "selected",
+        ids: [...new Set(ids.filter(id => typeof id === "string").map(id => id.trim()).filter(Boolean))].slice(0, 8)
+      };
+    } catch (error) { /* A damaged preference safely returns to automatic selection. */ }
+    return { mode: "auto", ids: [] };
+  }
+
+  function renderPromoProductChoices() {
+    const mode = $("#storefrontPromoMode"), choices = $("#promoProductChoices");
+    const list = $("#promoProductList"), summary = $("#promoSelectionSummary");
+    if (!mode || !choices || !list || !summary) return;
+    mode.value = promoManagerMode;
+    choices.hidden = promoManagerMode !== "selected";
+
+    if (promoManagerMode === "auto") {
+      summary.textContent = "Automatic: discounted in-stock pieces first, then available items. With an empty catalog, the branded image remains.";
+      list.innerHTML = "";
+      return;
+    }
+    if (promoManagerMode === "none") {
+      summary.textContent = "The promotional strip will be hidden from the storefront.";
+      list.innerHTML = "";
+      return;
+    }
+
+    const catalog = DB.listProducts();
+    const products = catalog.filter(product => Number(product.in_stock_count) > 0
+      && (Number(product.final_selling_price ?? product.selling_price) || 0) > 0);
+    const selected = new Set(promoManagerIds);
+    const selectedOrder = new Map(promoManagerIds.map((id, index) => [id, index]));
+    const unavailableSelections = promoManagerIds.map(id => ({
+      id,
+      product: catalog.find(item => String(item.id || "") === id) || null
+    })).filter(item => !products.some(product => String(product.id || "") === item.id));
+    const unavailableCount = unavailableSelections.length;
+    const unavailableNotice = unavailableCount
+      ? ` ${unavailableCount} selected product${unavailableCount === 1 ? " is" : "s are"} currently unavailable and skipped on the storefront. Remove ${unavailableCount === 1 ? "it" : "them"} or keep ${unavailableCount === 1 ? "it" : "them"} saved; ${unavailableCount === 1 ? "it can" : "they can"} reappear if restocked.`
+      : "";
+    summary.textContent = `${promoManagerIds.length} of 8 products selected. Use the up/down buttons to set their order.${unavailableNotice}`;
+
+    const availableMarkup = products.map(product => {
+      const id = String(product.id || "");
+      const inputId = `promo-choice-${id}`;
+      const order = selectedOrder.has(id) ? selectedOrder.get(id) : -1;
+      const isSelected = selected.has(id);
+      const current = Number(product.final_selling_price ?? product.selling_price) || 0;
+      const compare = Number(product.compare_price) || 0;
+      const discount = compare > current && current > 0 ? Math.round((compare - current) / compare * 100) : 0;
+      const image = product.image_url
+        ? `<img src="${esc(product.image_url)}" alt="" loading="lazy" onerror="this.remove()">`
+        : Icons.svg("tag", "ico-14");
+      const name = product.name || "Untitled product";
+      const orderControls = isSelected ? `<span class="promo-product-order">
+        <small>Position ${order + 1}</small>
+        <span class="promo-order-buttons">
+          <button type="button" data-promo-move="up" data-promo-id="${esc(id)}" aria-label="Move ${esc(name)} earlier" ${order === 0 ? "disabled" : ""}>↑</button>
+          <button type="button" data-promo-move="down" data-promo-id="${esc(id)}" aria-label="Move ${esc(name)} later" ${order === promoManagerIds.length - 1 ? "disabled" : ""}>↓</button>
+        </span>
+      </span>` : '<span class="promo-product-order-placeholder" aria-hidden="true"></span>';
+      return `<div class="promo-product-choice${isSelected ? " is-selected" : ""}">
+        <input id="${esc(inputId)}" type="checkbox" data-promo-product value="${esc(id)}" aria-label="Show ${esc(name)} in the storefront strip" ${isSelected ? "checked" : ""} />
+        <label class="promo-product-thumb" for="${esc(inputId)}">${image}</label>
+        <label class="promo-product-copy" for="${esc(inputId)}"><strong>${esc(name)}</strong><small>${esc([product.category, product.size ? `Size ${product.size}` : ""].filter(Boolean).join(" · "))}</small></label>
+        <span class="promo-product-price">${discount ? `<s>${esc(ugx(compare))}</s>` : ""}${esc(ugx(current))}${discount ? `<small>${discount}% off</small>` : ""}</span>
+        ${orderControls}
+      </div>`;
+    }).join("");
+
+    const unavailableMarkup = unavailableSelections.map(({ id, product }) => {
+      const name = product ? (product.name || "Untitled product") : `Product ${id}`;
+      const reason = product
+        ? "Out of stock or missing a valid price. It will be skipped until available."
+        : "No longer in the catalog. It will be skipped on the storefront.";
+      return `<div class="promo-product-choice promo-product-choice--unavailable">
+        <span class="promo-product-unavailable-mark" aria-hidden="true">!</span>
+        <span class="promo-product-copy"><strong>${esc(name)}</strong><small>${esc(reason)}</small></span>
+        <button type="button" class="promo-product-remove" data-promo-remove="${esc(id)}" aria-label="Remove ${esc(name)} from the storefront selection">Remove</button>
+      </div>`;
+    }).join("");
+
+    if (!availableMarkup && !unavailableMarkup) {
+      list.innerHTML = '<p class="promo-products-empty">No in-stock products to select yet. Add a product in Catalog Intake first.</p>';
+      return;
+    }
+    list.innerHTML = availableMarkup + unavailableMarkup;
+  }
+
+  function renderPromoManager(settings) {
+    if (!promoManagerDirty) {
+      const saved = parsePromoManagerSetting((settings || DB.getSettings()).storefront_promo_ids);
+      promoManagerMode = saved.mode;
+      promoManagerIds = saved.ids;
+    }
+    renderPromoProductChoices();
+  }
+
+  function markPromoManagerDirty() {
+    promoManagerDirty = true;
+    $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
+  }
+
+  $("#storefrontPromoMode").addEventListener("change", event => {
+    promoManagerMode = event.target.value;
+    markPromoManagerDirty();
+    renderPromoProductChoices();
+  });
+  $("#promoProductList").addEventListener("click", event => {
+    const remove = event.target.closest("[data-promo-remove]");
+    if (remove) {
+      event.preventDefault();
+      const id = String(remove.dataset.promoRemove || "");
+      promoManagerIds = promoManagerIds.filter(savedId => savedId !== id);
+      markPromoManagerDirty();
+      renderPromoProductChoices();
+      return;
+    }
+
+    const move = event.target.closest("[data-promo-move]");
+    if (!move) return;
+    event.preventDefault();
+    const id = String(move.dataset.promoId || "");
+    const index = promoManagerIds.indexOf(id);
+    const next = index + (move.dataset.promoMove === "up" ? -1 : 1);
+    if (index < 0 || next < 0 || next >= promoManagerIds.length) return;
+    [promoManagerIds[index], promoManagerIds[next]] = [promoManagerIds[next], promoManagerIds[index]];
+    markPromoManagerDirty();
+    renderPromoProductChoices();
+  });
+  $("#promoProductList").addEventListener("change", event => {
+    const checkbox = event.target.closest("[data-promo-product]");
+    if (!checkbox) return;
+    const id = String(checkbox.value || "");
+    if (checkbox.checked) {
+      if (promoManagerIds.length >= 8) {
+        checkbox.checked = false;
+        toast("Choose up to 8 storefront products", false);
+        return;
+      }
+      if (!promoManagerIds.includes(id)) promoManagerIds.push(id);
+    } else {
+      promoManagerIds = promoManagerIds.filter(savedId => savedId !== id);
+    }
+    markPromoManagerDirty();
+    renderPromoProductChoices();
+  });
+
+  async function savePromoManager() {
+    if (promoManagerMode === "selected" && promoManagerIds.length === 0) {
+      toast("Select at least one piece, or choose Hide the strip", false);
+      return;
+    }
+    const value = promoManagerMode === "auto" ? "auto"
+      : promoManagerMode === "none" ? "none"
+      : JSON.stringify(promoManagerIds.slice(0, 8));
+    const button = $("#btnSavePromoSettings");
+    const originalLabel = button.textContent;
+    Keys.requireRemote(async adminCredential => {
+      button.disabled = true;
+      button.textContent = "Publishing…";
+      try {
+        await DB.syncStoreSettings({ storefront_promo_ids: value }, adminCredential);
+        promoManagerDirty = false;
+        $("#promoManagerStatus").textContent = "Published to the storefront.";
+        renderPromoManager(DB.getSettings());
+        toast("Storefront promotion strip updated");
+      } catch (error) {
+        toast(error.message || "Could not publish the storefront strip", false);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    });
+  }
+  $("#btnSavePromoSettings").addEventListener("click", savePromoManager);
 
   /* What the payment gateway can actually do right now, straight from the
      server. The console never holds keys — it only reports whether the host has
@@ -4211,6 +4396,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function renderSettings() {
     // Background sync must not erase an owner's unfinished settings edits.
     renderGatewayStatus();
+    renderPromoManager(DB.getSettings());
     if (settingsDirty) { paintUnlockChip(); return; }
     const s = DB.getSettings();
     $("#setName").value = s.store_name || "";
