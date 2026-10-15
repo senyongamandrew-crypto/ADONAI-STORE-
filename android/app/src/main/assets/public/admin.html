@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=7.9" />
+<link rel="stylesheet" href="styles.css?v=8.0" />
 <link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/dispatch.css?v=1.0" />
 <link rel="stylesheet" href="css/notifications.css?v=2.4" />
@@ -788,7 +788,7 @@
           <div>
             <p class="pa-eyebrow">PUBLIC STOREFRONT</p>
             <h3 id="storefrontPromoTitle">Manage the image strip</h3>
-            <p class="muted small">Choose which catalog pieces shoppers see here. Photos and prices come from inventory; a discount appears only when the compare-at price is higher than the live price.</p>
+            <p class="muted small">Choose catalog pieces or upload your own storefront artwork. Custom images can be reordered, replaced, removed and given accessible alt text; no prices or discounts are added to custom artwork.</p>
           </div>
         </div>
         <div class="promo-manager-controls">
@@ -797,6 +797,7 @@
             <select id="storefrontPromoMode" class="sel-full">
               <option value="auto">Automatic — discounts first, then available pieces</option>
               <option value="selected">Choose specific pieces</option>
+              <option value="custom">Upload custom images</option>
               <option value="none">Hide the strip</option>
             </select>
           </div>
@@ -805,6 +806,15 @@
         <div class="promo-product-choices" id="promoProductChoices" hidden>
           <p class="promo-manager-hint muted small" id="promoManagerHint">Select up to 8 in-stock products and use the up/down controls to order them. Saved picks that go out of stock are skipped until available again and can be removed here. Update photos or Compare-at (UGX) in the inventory editor.</p>
           <div class="promo-product-list" id="promoProductList"></div>
+        </div>
+        <div class="promo-product-choices promo-creative-choices" id="promoCreativeChoices" hidden>
+          <p class="promo-manager-hint muted small">Upload up to 8 JPG, PNG or WebP images. Reorder, replace or remove them below. Custom artwork is shown without generated price or discount labels, even when the catalog is empty.</p>
+          <div class="promo-creative-toolbar">
+            <input id="promoCreativeFileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+            <button class="btn" id="btnAddPromoImages" type="button">Add images</button>
+            <span class="muted small" id="promoCreativeCapacity">0 of 8 images</span>
+          </div>
+          <div class="promo-creative-list" id="promoCreativeList" aria-live="polite"></div>
         </div>
         <div class="settings-foot">
           <span class="muted small" id="promoManagerStatus">Changes apply to the storefront after publishing.</span>
@@ -900,7 +910,7 @@
 <script src="js/adaptive.js?v=1.1"></script>
 <script src="js/notifications.js?v=2.4"></script>
 <script src="js/icons.js?v=1.2"></script>
-<script src="js/db.js?v=5.8"></script>
+<script src="js/db.js?v=5.9"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/intake.js?v=5.1"></script>
@@ -911,7 +921,7 @@
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=8.1"></script>
+<script src="app.js?v=8.3"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

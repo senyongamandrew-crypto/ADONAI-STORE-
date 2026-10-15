@@ -1359,7 +1359,7 @@
       try {
         const response = await fetch(apiUrl("/api/media/" + id), {
           method: "GET", signal: controller.signal,
-          headers: Object.assign(apiHeaders(true), typeof PosAccess !== "undefined" && PosAccess.headers ? PosAccess.headers() : {})
+          headers: Object.assign(apiHeaders(true), { "X-Adonai-Media-Preview": "1" }, typeof PosAccess !== "undefined" && PosAccess.headers ? PosAccess.headers() : {})
         });
         if (!response.ok) throw new Error("Preview could not load. The uploaded video will be available after saving.");
         return await response.blob();

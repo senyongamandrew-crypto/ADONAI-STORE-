@@ -4144,29 +4144,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   let promoManagerDirty = false;
   let promoManagerMode = "auto";
   let promoManagerIds = [];
+  let promoManagerItems = [];
   const settingsView = $("#view-settings");
   ["input", "change"].forEach(event => settingsView.addEventListener(event, e => { if (e.target.closest("#storeProfileSettings")) settingsDirty = true; }));
 
   function parsePromoManagerSetting(value) {
     const raw = String(value || "auto").trim();
-    if (!raw || raw.toLowerCase() === "auto") return { mode: "auto", ids: [] };
-    if (raw.toLowerCase() === "none") return { mode: "none", ids: [] };
+    if (!raw || raw.toLowerCase() === "auto") return { mode: "auto", ids: [], items: [] };
+    if (raw.toLowerCase() === "none") return { mode: "none", ids: [], items: [] };
     try {
-      const ids = JSON.parse(raw);
-      if (Array.isArray(ids)) return {
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved)) return {
         mode: "selected",
-        ids: [...new Set(ids.filter(id => typeof id === "string").map(id => id.trim()).filter(Boolean))].slice(0, 8)
+        ids: [...new Set(saved.filter(id => typeof id === "string").map(id => id.trim()).filter(Boolean))].slice(0, 8),
+        items: []
+      };
+      if (saved && saved.mode === "custom" && Array.isArray(saved.items)) return {
+        mode: "custom",
+        ids: [],
+        items: saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
+          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }))
       };
     } catch (error) { /* A damaged preference safely returns to automatic selection. */ }
-    return { mode: "auto", ids: [] };
+    return { mode: "auto", ids: [], items: [] };
   }
 
   function renderPromoProductChoices() {
     const mode = $("#storefrontPromoMode"), choices = $("#promoProductChoices");
+    const creativeChoices = $("#promoCreativeChoices");
     const list = $("#promoProductList"), summary = $("#promoSelectionSummary");
-    if (!mode || !choices || !list || !summary) return;
+    if (!mode || !choices || !creativeChoices || !list || !summary) return;
     mode.value = promoManagerMode;
     choices.hidden = promoManagerMode !== "selected";
+    creativeChoices.hidden = promoManagerMode !== "custom";
 
     if (promoManagerMode === "auto") {
       summary.textContent = "Automatic: discounted in-stock pieces first, then available items. With an empty catalog, the branded image remains.";
@@ -4176,6 +4186,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (promoManagerMode === "none") {
       summary.textContent = "The promotional strip will be hidden from the storefront.";
       list.innerHTML = "";
+      return;
+    }
+    if (promoManagerMode === "custom") {
+      summary.textContent = `${promoManagerItems.length} of 8 custom images selected. Arrange and publish the images you want on the storefront.`;
+      list.innerHTML = "";
+      renderPromoCreativeChoices();
       return;
     }
 
@@ -4241,11 +4257,60 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     list.innerHTML = availableMarkup + unavailableMarkup;
   }
 
+  let promoUploadsInFlight = 0;
+
+  function releasePromoPreview(item) {
+    const preview = String(item && item.preview_url || "");
+    if (preview.startsWith("blob:") && window.URL && typeof window.URL.revokeObjectURL === "function") {
+      try { window.URL.revokeObjectURL(preview); } catch (error) { /* Preview cleanup is best-effort. */ }
+    }
+  }
+
+  function renderPromoCreativeChoices() {
+    const list = $("#promoCreativeList"), capacity = $("#promoCreativeCapacity");
+    const add = $("#btnAddPromoImages"), input = $("#promoCreativeFileInput");
+    if (!list || !capacity || !add || !input) return;
+    const count = promoManagerItems.length;
+    const busy = promoUploadsInFlight > 0;
+    capacity.textContent = `${count} of 8 images`;
+    add.disabled = count >= 8 || busy;
+    input.disabled = busy;
+    const mode = $("#storefrontPromoMode");
+    if (mode) mode.disabled = busy;
+    const save = $("#btnSavePromoSettings");
+    if (save) save.disabled = busy;
+    if (!count) {
+      list.innerHTML = '<p class="promo-creatives-empty">No custom images yet. Add artwork here; this works with an empty product catalog.</p>';
+      return;
+    }
+    list.innerHTML = promoManagerItems.map((item, index) => {
+      const mediaId = String(item.media_id || "");
+      const src = item.preview_url || (typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`);
+      return `<div class="promo-creative-row">
+        <div class="promo-creative-thumb"><img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.opacity='.15'"></div>
+        <div class="promo-creative-details">
+          <strong>Image ${index + 1}</strong>
+          <label for="promo-creative-alt-${index}">Alt text (for screen readers)</label>
+          <input id="promo-creative-alt-${index}" type="text" maxlength="120" value="${esc(item.alt_text || "")}" data-promo-alt="${index}" placeholder="Optional description" ${busy ? "disabled" : ""} />
+        </div>
+        <div class="promo-creative-actions">
+          <button type="button" data-promo-creative-move="up" data-promo-creative-index="${index}" aria-label="Move image ${index + 1} earlier" ${index === 0 || busy ? "disabled" : ""}>↑</button>
+          <button type="button" data-promo-creative-move="down" data-promo-creative-index="${index}" aria-label="Move image ${index + 1} later" ${index === count - 1 || busy ? "disabled" : ""}>↓</button>
+          <button type="button" data-promo-creative-replace="${index}" ${busy ? "disabled" : ""}>Replace</button>
+          <input type="file" accept="image/jpeg,image/png,image/webp" data-promo-replace-file="${index}" hidden ${busy ? "disabled" : ""} />
+          <button type="button" class="promo-creative-remove" data-promo-creative-remove="${index}" ${busy ? "disabled" : ""}>Remove</button>
+        </div>
+      </div>`;
+    }).join("");
+  }
+
   function renderPromoManager(settings) {
     if (!promoManagerDirty) {
+      promoManagerItems.forEach(releasePromoPreview);
       const saved = parsePromoManagerSetting((settings || DB.getSettings()).storefront_promo_ids);
       promoManagerMode = saved.mode;
       promoManagerIds = saved.ids;
+      promoManagerItems = saved.items;
     }
     renderPromoProductChoices();
   }
@@ -4254,6 +4319,110 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     promoManagerDirty = true;
     $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
   }
+
+  async function uploadPromoImages(files, replaceIndex) {
+    if (promoUploadsInFlight) return;
+    const selected = (files || []).filter(file => file && /^image\/(jpeg|png|webp)$/i.test(String(file.type || "")));
+    if (!selected.length) {
+      toast("Choose JPG, PNG or WebP images", false);
+      return;
+    }
+    const isReplace = Number.isInteger(replaceIndex);
+    const capacity = isReplace ? 1 : Math.max(0, 8 - promoManagerItems.length);
+    if (capacity < 1) {
+      toast("Custom promotions can contain up to 8 images", false);
+      return;
+    }
+    if (selected.length > capacity) toast(`Only ${capacity} more image${capacity === 1 ? " can" : "s can"} be added`, false);
+    const filesToUpload = selected.slice(0, capacity);
+    promoUploadsInFlight += 1;
+    $("#promoManagerStatus").textContent = `Uploading ${filesToUpload.length} image${filesToUpload.length === 1 ? "" : "s"}…`;
+    renderPromoCreativeChoices();
+    try {
+      for (const file of filesToUpload) {
+        const uploaded = await DB.uploadMedia(file, "image");
+        const mediaId = String(uploaded && uploaded.id || "").toLowerCase();
+        if (!/^[a-f0-9]{32}$/.test(mediaId)) throw new Error("The image upload did not return a valid media reference.");
+        let previewUrl = "";
+        if (window.URL && typeof window.URL.createObjectURL === "function") {
+          try { previewUrl = window.URL.createObjectURL(file); } catch (error) { /* The published URL will load after saving. */ }
+        }
+        const item = { media_id: mediaId, alt_text: "", preview_url: previewUrl };
+        if (isReplace) {
+          const previous = promoManagerItems[replaceIndex];
+          if (!previous) throw new Error("That promotion image is no longer available to replace.");
+          releasePromoPreview(previous);
+          item.alt_text = previous.alt_text || "";
+          promoManagerItems[replaceIndex] = item;
+        } else {
+          promoManagerItems.push(item);
+        }
+        markPromoManagerDirty();
+        renderPromoProductChoices();
+      }
+    } catch (error) {
+      toast(error.message || "Could not upload the storefront image", false);
+    } finally {
+      promoUploadsInFlight = Math.max(0, promoUploadsInFlight - 1);
+      if (promoManagerDirty) $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
+      else $("#promoManagerStatus").textContent = "Changes apply to the storefront after publishing.";
+      renderPromoProductChoices();
+    }
+  }
+
+  $("#btnAddPromoImages").addEventListener("click", () => {
+    if (!promoUploadsInFlight) $("#promoCreativeFileInput").click();
+  });
+  $("#promoCreativeFileInput").addEventListener("change", event => {
+    const input = event.currentTarget;
+    const files = Array.from(input.files || []);
+    input.value = "";
+    if (files.length) uploadPromoImages(files, null);
+  });
+  $("#promoCreativeList").addEventListener("click", event => {
+    const remove = event.target.closest("[data-promo-creative-remove]");
+    if (remove) {
+      const index = Number(remove.dataset.promoCreativeRemove);
+      if (!Number.isInteger(index) || !promoManagerItems[index]) return;
+      releasePromoPreview(promoManagerItems[index]);
+      promoManagerItems.splice(index, 1);
+      markPromoManagerDirty();
+      renderPromoProductChoices();
+      return;
+    }
+    const move = event.target.closest("[data-promo-creative-move]");
+    if (move) {
+      const index = Number(move.dataset.promoCreativeIndex);
+      const next = index + (move.dataset.promoCreativeMove === "up" ? -1 : 1);
+      if (!Number.isInteger(index) || index < 0 || next < 0 || next >= promoManagerItems.length) return;
+      [promoManagerItems[index], promoManagerItems[next]] = [promoManagerItems[next], promoManagerItems[index]];
+      markPromoManagerDirty();
+      renderPromoProductChoices();
+      return;
+    }
+    const replace = event.target.closest("[data-promo-creative-replace]");
+    if (replace && !promoUploadsInFlight) {
+      const index = Number(replace.dataset.promoCreativeReplace);
+      const input = $("#promoCreativeList").querySelector(`[data-promo-replace-file="${index}"]`);
+      if (input) input.click();
+    }
+  });
+  $("#promoCreativeList").addEventListener("change", event => {
+    const replaceInput = event.target.closest("[data-promo-replace-file]");
+    if (replaceInput) {
+      const file = replaceInput.files && replaceInput.files[0];
+      const index = Number(replaceInput.dataset.promoReplaceFile);
+      replaceInput.value = "";
+      if (file && Number.isInteger(index)) uploadPromoImages([file], index);
+      return;
+    }
+    const altInput = event.target.closest("[data-promo-alt]");
+    if (!altInput) return;
+    const item = promoManagerItems[Number(altInput.dataset.promoAlt)];
+    if (!item) return;
+    item.alt_text = String(altInput.value || "").trim().slice(0, 120);
+    markPromoManagerDirty();
+  });
 
   $("#storefrontPromoMode").addEventListener("change", event => {
     promoManagerMode = event.target.value;
@@ -4301,12 +4470,18 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   });
 
   async function savePromoManager() {
+    if (promoUploadsInFlight) return;
     if (promoManagerMode === "selected" && promoManagerIds.length === 0) {
-      toast("Select at least one piece, or choose Hide the strip", false);
+      toast("Select at least one piece, or choose another strip mode", false);
+      return;
+    }
+    if (promoManagerMode === "custom" && promoManagerItems.length === 0) {
+      toast("Add at least one custom image, or choose another strip mode", false);
       return;
     }
     const value = promoManagerMode === "auto" ? "auto"
       : promoManagerMode === "none" ? "none"
+      : promoManagerMode === "custom" ? JSON.stringify({ mode: "custom", items: promoManagerItems.slice(0, 8).map(item => ({ media_id: item.media_id, alt_text: item.alt_text || "" })) })
       : JSON.stringify(promoManagerIds.slice(0, 8));
     const button = $("#btnSavePromoSettings");
     const originalLabel = button.textContent;

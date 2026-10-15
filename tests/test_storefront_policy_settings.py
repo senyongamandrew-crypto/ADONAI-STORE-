@@ -1,4 +1,5 @@
 """Storefront contact-email migrations and public settings serialization."""
+import json
 import unittest
 
 from sqlalchemy import create_engine
@@ -42,6 +43,20 @@ class StorefrontPolicySettingsTests(unittest.TestCase):
             normalize_storefront_promo_ids("not-json")
         with self.assertRaises(ValueError):
             normalize_storefront_promo_ids('["SKU-1", "SKU-2", "SKU-3", "SKU-4", "SKU-5", "SKU-6", "SKU-7", "SKU-8", "SKU-9"]')
+
+    def test_custom_promotion_images_are_validated_ordered_and_accessible(self):
+        custom = '{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '","alt_text":"Campaign artwork"},{"media_id":"' + "b" * 32 + '","alt_text":""}]}'
+        normalized = normalize_storefront_promo_ids(custom)
+        self.assertEqual(normalized, '{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '","alt_text":"Campaign artwork"},{"media_id":"' + "b" * 32 + '","alt_text":""}]}')
+        with self.assertRaises(ValueError):
+            normalize_storefront_promo_ids('{"mode":"custom","items":[]}')
+        with self.assertRaises(ValueError):
+            normalize_storefront_promo_ids('{"mode":"custom","items":[{"media_id":"not-an-image-id"}]}')
+        with self.assertRaises(ValueError):
+            normalize_storefront_promo_ids('{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '"},{"media_id":"' + "a" * 32 + '"}]}')
+        too_many = [{"media_id": format(index, "032x"), "alt_text": ""} for index in range(9)]
+        with self.assertRaises(ValueError):
+            normalize_storefront_promo_ids(json.dumps({"mode": "custom", "items": too_many}))
 
 
 if __name__ == "__main__":

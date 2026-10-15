@@ -238,15 +238,20 @@
 
   function promotionalSelection() {
     const raw = String(S.storefront_promo_ids || "auto").trim();
-    if (!raw || raw.toLowerCase() === "auto") return { mode: "auto", ids: [] };
-    if (raw.toLowerCase() === "none") return { mode: "none", ids: [] };
+    if (!raw || raw.toLowerCase() === "auto") return { mode: "auto", ids: [], items: [] };
+    if (raw.toLowerCase() === "none") return { mode: "none", ids: [], items: [] };
     try {
-      const ids = JSON.parse(raw);
-      if (Array.isArray(ids)) {
-        return { mode: "selected", ids: [...new Set(ids.filter(id => typeof id === "string").map(id => id.trim()).filter(Boolean))].slice(0, 8) };
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved)) {
+        return { mode: "selected", ids: [...new Set(saved.filter(id => typeof id === "string").map(id => id.trim()).filter(Boolean))].slice(0, 8), items: [] };
+      }
+      if (saved && saved.mode === "custom" && Array.isArray(saved.items)) {
+        const items = saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
+          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }));
+        if (items.length) return { mode: "custom", ids: [], items };
       }
     } catch (error) { /* Invalid saved config safely falls back to automatic mode. */ }
-    return { mode: "auto", ids: [] };
+    return { mode: "auto", ids: [], items: [] };
   }
 
   function promotionalCardHTML(offer, decorativeCopy) {
@@ -290,6 +295,15 @@
     return `<a class="promo-card promo-card--brand" href="#catalogDashboardRegion"${copyAccessibility} aria-label="Adonai Store editorial image"><span class="promo-card-media">${image}</span></a>`;
   }
 
+  function customPromotionCardHTML(item, decorativeCopy) {
+    const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
+    const mediaId = String(item && item.media_id || "");
+    const src = typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`;
+    const alt = String(item && item.alt_text || "").trim().slice(0, 120);
+    const label = alt ? `Storefront artwork: ${alt}` : "View the Adonai Store collection";
+    return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media"><img src="${esc(src)}" alt="${esc(alt)}" class="promo-card-img" loading="lazy" decoding="async" width="560" height="180"></span></a>`;
+  }
+
   function renderPromotionalRail() {
     const rail = $("#promoRail"), track = $("#promoTrack");
     if (!rail || !track) return;
@@ -303,38 +317,51 @@
     }
 
     let offers = [], featured = [], brandFallback = false;
-    if (selection.mode === "selected") {
-      const selectedProducts = selection.ids.map(id => products.find(product => String(product.id) === id)).filter(Boolean);
-      featured = availablePromotionItems(selectedProducts);
-      if (!featured.length) {
+    const customMode = selection.mode === "custom";
+    const customItems = customMode ? selection.items : [];
+    if (customMode) {
+      if (!customItems.length) {
         rail.hidden = true;
         track.innerHTML = "";
         track.classList.remove("is-static");
         return;
       }
-      offers = featured.filter(item => item.percent > 0);
+    } else if (selection.mode === "selected") {
+      const selectedProducts = selection.ids.map(id => products.find(product => String(product.id) === id)).filter(Boolean);
+      featured = availablePromotionItems(selectedProducts);
+      if (!featured.length) {
+        // Preserve the visible strip on an empty catalog or when every saved
+        // pick is temporarily unavailable; never substitute a dummy product.
+        brandFallback = true;
+      } else {
+        offers = featured.filter(item => item.percent > 0);
+      }
     } else {
       offers = promotionalOffers(products);
       featured = offers.length ? offers : featuredPromotions(products);
       brandFallback = featured.length === 0;
     }
 
-    const oneProduct = !brandFallback && featured.length === 1;
+    const oneProduct = !customMode && !brandFallback && featured.length === 1;
     rail.hidden = false;
 
     const viewportWidth = Math.max(320, Number(window.innerWidth) || 1024);
     const cardEstimate = viewportWidth < 640 ? 300 : 406;
     const targetWidth = viewportWidth + cardEstimate;
     const widthPerCard = cardEstimate + 14;
-    const cardCount = brandFallback ? 1 : featured.length;
+    const cardCount = brandFallback ? 1 : customMode ? customItems.length : featured.length;
     const repeatCount = oneProduct ? 1 : Math.min(8, Math.max(1,
       Math.ceil(targetWidth / (cardCount * widthPerCard))));
     const repeatedItems = brandFallback
       ? Array.from({ length: repeatCount }, (_, index) => index)
-      : Array.from({ length: featured.length * repeatCount }, (_, index) => featured[index % featured.length]);
+      : customMode
+        ? Array.from({ length: customItems.length * repeatCount }, (_, index) => customItems[index % customItems.length])
+        : Array.from({ length: featured.length * repeatCount }, (_, index) => featured[index % featured.length]);
     const cards = brandFallback
       ? repeatedItems.map((_, index) => brandPromotionCardHTML(index > 0)).join("")
-      : repeatedItems.map((offer, index) => promotionalCardHTML(offer, index >= featured.length)).join("");
+      : customMode
+        ? repeatedItems.map((item, index) => customPromotionCardHTML(item, index >= customItems.length)).join("")
+        : repeatedItems.map((offer, index) => promotionalCardHTML(offer, index >= featured.length)).join("");
 
     track.classList.toggle("is-static", oneProduct);
     track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneProduct ? "" :

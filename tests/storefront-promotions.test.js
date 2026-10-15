@@ -16,6 +16,7 @@ const admin = read("app.js");
 const adminHtml = read("admin.html");
 const posHtml = read("pos.html");
 const api = read("api.py");
+const db = read("js/db.js");
 const dbInit = read("db_init.py");
 
 const masthead = homepage.indexOf('class="masthead wrap"');
@@ -53,7 +54,17 @@ assert.match(admin, /Compare-at \(UGX\)/,
 assert.match(adminHtml, /id="storefrontPromoManager"/,
   "Admin Suite contains a control panel for the storefront strip");
 assert.match(adminHtml, /id="storefrontPromoMode"/,
-  "staff can choose automatic, selected products, or hidden mode");
+  "staff can choose automatic, selected products, custom images, or hidden mode");
+assert.match(adminHtml, /<option value="custom">Upload custom images<\/option>/,
+  "the promotion manager offers direct custom image management");
+assert.match(adminHtml, /id="promoCreativeFileInput"[\s\S]*?id="promoCreativeList"/,
+  "the manager exposes an upload control and ordered creative list");
+assert.match(admin, /data-promo-creative-move[\s\S]*?data-promo-creative-replace[\s\S]*?data-promo-creative-remove/,
+  "custom artwork can be ordered, replaced and removed");
+assert.match(api, /normalize_storefront_promo_ids/,
+  "the API validates custom image settings before publication");
+assert.match(db, /X-Adonai-Media-Preview/,
+  "authorized staff preview uploaded drafts without making them public");
 assert.match(posHtml, /href="admin\.html\?view=settings" data-console-view="settings">[\s\S]*?<span>Storefront Promotions<\/span>/,
   "the POS navigation has a direct Storefront Promotions entry");
 assert.ok(adminHtml.indexOf('id="storefrontPromoManager"') < adminHtml.indexOf('id="displaySizeSettings"'),
@@ -126,12 +137,17 @@ assert.equal(featured.length, 1, "the non-discount rail still showcases only rea
 assert.equal(featured[0].percent, 0, "featured pieces never invent a discount");
 
 promoContext.setPromoSetting("auto");
-assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), { mode: "auto", ids: [] });
+assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), { mode: "auto", ids: [], items: [] });
 promoContext.setPromoSetting("none");
-assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), { mode: "none", ids: [] });
+assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), { mode: "none", ids: [], items: [] });
 promoContext.setPromoSetting('["SKU-3", "SKU-1", "SKU-3"]');
-assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), { mode: "selected", ids: ["SKU-3", "SKU-1"] },
+assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), { mode: "selected", ids: ["SKU-3", "SKU-1"], items: [] },
   "manual picks retain their chosen order and ignore duplicate IDs");
+const promoImageId = "a".repeat(32);
+promoContext.setPromoSetting(JSON.stringify({ mode: "custom", items: [{ media_id: promoImageId, alt_text: "Fresh arrivals" }] }));
+assert.deepEqual(JSON.parse(JSON.stringify(promoContext.promotionalSelection())), {
+  mode: "custom", ids: [], items: [{ media_id: promoImageId, alt_text: "Fresh arrivals" }]
+}, "custom image selections preserve their manually ordered media and alt text");
 
 const dom = new JSDOM(homepage, { runScripts: "outside-only", url: "https://adonai-preview.example/" });
 const { window } = dom;
@@ -189,6 +205,49 @@ assert.equal(manualCards[0].querySelector(".promo-card-discount").textContent, "
   "manual mode displays only the genuine discount from current catalog prices");
 assert.equal(manualCards.some(card => card.getAttribute("href").includes("SKU-3")), false,
   "an unavailable saved product never appears in the storefront strip");
+const emptySelectedDom = new JSDOM(homepage, { runScripts: "outside-only", url: "https://adonai-preview.example/" });
+const emptySelectedWindow = emptySelectedDom.window;
+emptySelectedWindow.setInterval = () => 0;
+emptySelectedWindow.requestAnimationFrame = callback => callback();
+emptySelectedWindow.AdonaiPDP = window.AdonaiPDP;
+emptySelectedWindow.DB = {
+  ...window.DB,
+  getSettings: () => ({ storefront_promo_ids: '["SKU-3"]' }),
+  listProducts: () => []
+};
+emptySelectedWindow.eval(storefront);
+assert.equal(emptySelectedWindow.document.querySelector("#promoRail").hidden, false,
+  "the promotional strip remains rendered when saved products are unavailable and the catalog is empty");
+assert.ok(emptySelectedWindow.document.querySelector(".promo-card--brand"),
+  "an empty selected-product mode falls back to existing Adonai artwork, not a dummy product");
+emptySelectedDom.window.close();
+const customImageId = "c".repeat(32);
+const customDom = new JSDOM(homepage, { runScripts: "outside-only", url: "https://adonai-preview.example/" });
+const customWindow = customDom.window;
+customWindow.setInterval = () => 0;
+customWindow.requestAnimationFrame = callback => callback();
+customWindow.AdonaiPDP = window.AdonaiPDP;
+customWindow.DB = {
+  ...window.DB,
+  getSettings: () => ({ storefront_promo_ids: JSON.stringify({ mode: "custom", items: [{ media_id: customImageId, alt_text: "Hand-picked seasonal artwork" }] }) }),
+  listProducts: () => []
+};
+customWindow.eval(storefront);
+const customRail = customWindow.document.querySelector("#promoRail");
+const customCard = customWindow.document.querySelector("#promoTrack .promo-card--custom");
+assert.equal(customRail.hidden, false, "a custom image strip stays visible with an empty catalog");
+assert.ok(customCard, "manual custom artwork appears in the storefront rail");
+assert.equal(customCard.querySelector("img").getAttribute("src"), `/api/media/${customImageId}`,
+  "custom artwork loads from durable uploaded media");
+assert.equal(customCard.querySelector("img").alt, "Hand-picked seasonal artwork",
+  "the owner-supplied accessible image description reaches the storefront");
+assert.equal(customCard.querySelector(".promo-card-prices"), null,
+  "custom artwork receives no generated price or discount copy");
+assert.equal(customCard.querySelector(".promo-card-discount"), null,
+  "custom artwork never receives a fabricated discount badge");
+assert.ok(customWindow.document.querySelectorAll("#promoTrack .promo-card--custom").length > 1,
+  "even a single manually uploaded image scrolls continuously across the strip");
+customDom.window.close();
 manualDom.window.close();
 dom.window.close();
 
@@ -202,9 +261,12 @@ const managerCatalog = [
   { id: "SKU-2", name: "Selected catalog item", selling_price: 70000, compare_price: 100000, in_stock_count: 2, image_url: "/api/media/2" },
   { id: "SKU-3", name: "Now sold-out item", selling_price: 50000, compare_price: 90000, in_stock_count: 0, image_url: "/api/media/3" }
 ];
+let managerUploadCount = 0;
 managerWindow.DB = {
   getSettings: () => managerSettings,
   listProducts: () => managerCatalog,
+  apiUrl: value => value,
+  uploadMedia: async () => ({ id: (++managerUploadCount).toString(16).padStart(32, "0") }),
   syncStoreSettings: async patch => { managerSettings = { ...managerSettings, ...patch }; return { ok: true }; }
 };
 managerWindow.Icons = { svg: () => "<svg></svg>" };
@@ -241,6 +303,55 @@ managerDoc.querySelector('[data-promo-remove="SKU-3"]').click();
 managerDoc.querySelector('[data-promo-remove="SKU-removed"]').click();
 assert.equal(managerDoc.querySelectorAll("#promoProductList [data-promo-remove]").length, 0,
   "stale selections can be removed from the saved list");
-managerDom.window.close();
 
-console.log("✓ storefront promotions use real catalog items, visible brand fallback, ordered manager controls and unavailable-item handling");
+async function verifyCustomCreativeManager() {
+  const mode = managerDoc.querySelector("#storefrontPromoMode");
+  mode.value = "custom";
+  mode.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
+  assert.equal(managerDoc.querySelector("#promoCreativeChoices").hidden, false,
+    "custom image controls appear when staff select the manual image mode");
+  assert.match(managerDoc.querySelector("#promoCreativeList").textContent, /No custom images yet/,
+    "the custom manager begins empty rather than inventing demo artwork");
+
+  const fileInput = managerDoc.querySelector("#promoCreativeFileInput");
+  const first = new managerWindow.File(["image one"], "artwork-one.png", { type: "image/png" });
+  const second = new managerWindow.File(["image two"], "artwork-two.webp", { type: "image/webp" });
+  Object.defineProperty(fileInput, "files", { configurable: true, value: [first, second] });
+  fileInput.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
+  await new Promise(resolve => managerWindow.setTimeout(resolve, 10));
+  assert.equal(managerDoc.querySelectorAll("#promoCreativeList .promo-creative-row").length, 2,
+    "uploaded artwork is listed as separate editable creatives");
+  assert.equal(managerDoc.querySelector("#promoCreativeCapacity").textContent, "2 of 8 images",
+    "custom artwork capacity is visible to staff");
+
+  managerDoc.querySelector('[data-promo-creative-move="down"][data-promo-creative-index="0"]').click();
+  const alt = managerDoc.querySelector('[data-promo-alt="0"]');
+  alt.value = "Owner-selected seasonal art";
+  alt.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
+
+  const replaceInput = managerDoc.querySelector('[data-promo-replace-file="0"]');
+  const replacement = new managerWindow.File(["replacement"], "replacement.jpg", { type: "image/jpeg" });
+  Object.defineProperty(replaceInput, "files", { configurable: true, value: [replacement] });
+  replaceInput.dispatchEvent(new managerWindow.Event("change", { bubbles: true }));
+  await new Promise(resolve => managerWindow.setTimeout(resolve, 10));
+
+  managerDoc.querySelector("#btnSavePromoSettings").click();
+  await new Promise(resolve => managerWindow.setTimeout(resolve, 10));
+  const published = JSON.parse(managerSettings.storefront_promo_ids);
+  assert.equal(published.mode, "custom", "the manual creative mode publishes through the shared setting");
+  assert.equal(published.items.length, 2, "publishing retains the selected custom artwork list");
+  assert.equal(published.items[0].media_id, "0".repeat(31) + "3",
+    "replacing a custom image uploads and publishes the replacement media ID");
+  assert.equal(published.items[0].alt_text, "Owner-selected seasonal art",
+    "accessible alt text survives reordering, replacement and publishing");
+  assert.equal(published.items[1].media_id, "0".repeat(31) + "1",
+    "manual image order is preserved when published");
+  managerDom.window.close();
+  console.log("✓ storefront promotions use real catalog items, custom uploads/replacements/order, visible empty-catalog artwork and no fabricated offers");
+}
+
+verifyCustomCreativeManager().catch(error => {
+  console.error(error);
+  managerDom.window.close();
+  process.exitCode = 1;
+});
