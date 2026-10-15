@@ -8,6 +8,7 @@ Adonai Store — Production Server & WSGI Gateway for Render
 - Strict security headers (HSTS, CSP, X-Frame-Options, nosniff)
 """
 import gzip
+import hashlib
 import http.server
 from http import HTTPStatus
 import io
@@ -15,6 +16,7 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import socketserver
 import sys
 import urllib.parse
@@ -228,6 +230,61 @@ def html_escape(value: str) -> str:
     )
 
 
+# ============================================================================
+# Static asset cache-busting
+# ============================================================================
+# css/js/media are served with `Cache-Control: public, max-age=31536000,
+# immutable`, and HTML with `no-store`. That combination only works if the
+# asset URL changes whenever the asset does — otherwise a returning shopper
+# (or an edge cache) keeps the previous stylesheet for up to a year and
+# "nothing changed" even though the deploy succeeded.
+#
+# The hand-maintained ?v=3.11 / ?v=4.5 query strings were doing that job, and
+# they are exactly the kind of thing a busy deploy forgets to bump. Instead
+# every HTML response gets its local css/, js/ and assets/ references stamped
+# with a short fingerprint of the file they point at, so the URL is derived
+# from the bytes: change the file, change the URL, no manual step.
+ASSET_QUERY_RE = re.compile(
+    r"""(?P<attr>\b(?:href|src)\s*=\s*["'])(?P<path>(?:\.{0,2}/)?(?:css|js|assets)/[^"'?#]+?)(?:\?[^"']*)?(?P<close>["'])"""
+)
+_ASSET_TOKEN_CACHE: dict[str, tuple[float, int, str]] = {}
+
+
+def asset_fingerprint(rel_path: str) -> str:
+    """Short, stable token for a local asset (empty string when unreadable)."""
+    rel = rel_path.lstrip("./").replace("..", "").lstrip("/")
+    absolute = os.path.join(ROOT, rel)
+    try:
+        stat = os.stat(absolute)
+    except OSError:
+        return ""
+    cached = _ASSET_TOKEN_CACHE.get(rel)
+    if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+        return cached[2]
+    token = hashlib.sha1(f"{rel}:{int(stat.st_mtime)}:{stat.st_size}".encode("utf-8")).hexdigest()[:10]
+    _ASSET_TOKEN_CACHE[rel] = (stat.st_mtime, stat.st_size, token)
+    return token
+
+
+def version_asset_references(content: bytes, mime_type: str) -> bytes:
+    """Stamp local css/js/asset URLs in an HTML response with a build token."""
+    if "html" not in mime_type:
+        return content
+    try:
+        html = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return content
+
+    def replace(match: "re.Match[str]") -> str:
+        path = match.group("path")
+        token = asset_fingerprint(path)
+        if not token:
+            return match.group(0)
+        return f"{match.group('attr')}{path}?v={token}{match.group('close')}"
+
+    return ASSET_QUERY_RE.sub(replace, html).encode("utf-8")
+
+
 def request_origin(environ_or_headers) -> str:
     """Best-effort public origin for canonical/OG URLs (Render, preview, local)."""
     try:
@@ -283,7 +340,7 @@ def product_page_html(slug: str, origin: str) -> bytes | None:
         logger.warning("PDP server render fell back to the client shell: %s", exc)
 
     if not product:
-        return html.encode("utf-8")
+        return version_asset_references(html.encode("utf-8"), "text/html")
 
     price = int(product.get("final_selling_price") or product.get("selling_price") or 0)
     compare = int(product.get("compare_price") or 0)
@@ -384,7 +441,9 @@ def product_page_html(slug: str, origin: str) -> bytes | None:
         + ";</script>"
     )
     html = html.replace(PDP_BOOTSTRAP_MARKER, bootstrap)
-    return html.encode("utf-8")
+    # Same build-stamped asset URLs as the storefront, or a shopper who opens a
+    # shared product link first would still pull the previous stylesheet.
+    return version_asset_references(html.encode("utf-8"), "text/html")
 
 
 def product_slug_from_path(clean_path: str) -> str | None:
@@ -635,6 +694,7 @@ def wsgi_app(environ, start_response):
 
         with open(target_file, "rb") as f:
             content = f.read()
+        content = version_asset_references(content, mime_type)
 
         accept_encoding = environ.get("HTTP_ACCEPT_ENCODING", "")
         should_gzip = "gzip" in accept_encoding and any(mime_type.startswith(t) for t in COMPRESSIBLE_TYPES) and len(content) > 256
@@ -827,6 +887,7 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
 
             with open(target_file, "rb") as f:
                 content = f.read()
+            content = version_asset_references(content, mime_type)
 
             accept_encoding = self.headers.get("Accept-Encoding", "")
             should_gzip = "gzip" in accept_encoding and any(mime_type.startswith(t) for t in COMPRESSIBLE_TYPES) and len(content) > 256

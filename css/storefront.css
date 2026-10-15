@@ -1224,3 +1224,298 @@ body.cart-drawer-closed { touch-action: auto; }
   }
   .promo-window::-webkit-scrollbar { display: none; }
 }
+
+/* ======================================================================
+   STOREFRONT BANNER · PROMO RAIL · MOBILE CATALOG CRAFT (v3.12)
+   ----------------------------------------------------------------------
+   Everything here is placed LAST on purpose, so this layer wins the
+   cascade over the component rules above (same contract as the v2.6 fit
+   layer). Each block documents the defect it removes.
+   ====================================================================== */
+
+/* ----------------------------------------------------------------------
+   1. MASTHEAD — the headline must never be washed out by its own photo.
+
+   The banner paints the editorial photo behind the copy with a
+   left-to-right scrim tuned for a wide desktop box (opaque to 40%,
+   transparent by 78%). Between ~640px and ~1100px — tablets, split
+   screens, and any phone browsing in "Desktop site" mode — that box is
+   much shorter, so the 78-100% window lands ON the paragraph: shoppers
+   read "…with factory tags and multiple" and the rest of every line
+   dissolves into the wall/vase photo. The copy column now carries its
+   own cream scrim that fades out before it reaches the photograph, so
+   legibility no longer depends on the banner's width.
+   ---------------------------------------------------------------------- */
+.masthead-inner { position: relative; z-index: 1; max-width: 100%; }
+@media (min-width: 701px) {
+  .masthead-inner { max-width: 62%; }
+  .masthead-inner::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -22px -86px -18px -30px;
+    border-radius: 26px;
+    background: linear-gradient(90deg,
+      rgba(255, 253, 248, .97) 0%,
+      rgba(255, 253, 248, .95) 62%,
+      rgba(255, 253, 248, .55) 84%,
+      rgba(255, 253, 248, 0) 100%);
+  }
+  /* Keep the paragraph inside the opaque part of that scrim. */
+  .masthead .lede { max-width: 56ch; }
+}
+
+/* Phone banner: the photo becomes a soft bottom band instead of a hard
+   right-hand slice, and the vertical watermark (unreadable at this width,
+   and colliding with the photo) is dropped. */
+@media (max-width: 700px) {
+  .masthead {
+    margin-top: 12px;
+    padding: 30px 22px 26px;
+    border-radius: 24px;
+    background:
+      linear-gradient(180deg,
+        rgba(255, 253, 248, .97) 0%,
+        rgba(255, 253, 248, .94) 58%,
+        rgba(255, 253, 248, .58) 82%,
+        rgba(255, 253, 248, .2) 100%),
+      url("../assets/storefront-editorial-bg.jpg") 72% 66% / cover no-repeat;
+  }
+  .masthead h1 { font-size: clamp(28px, 8.8vw, 38px); }
+  .masthead .lede { font-size: 14.5px; max-width: none; }
+  /* Long-form paragraph: desktop richness, phone brevity. */
+  .lede-more { display: none; }
+}
+@media (max-width: 900px) {
+  .masthead::after { display: none; }
+}
+
+/* Banner calls to action — the hero had none, so a shopper landing from a
+   WhatsApp/Instagram link had nothing to tap above the fold. */
+.masthead-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.mh-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 13px 22px; border-radius: 999px; border: 1px solid transparent;
+  font: 700 14px var(--font-text); text-decoration: none;
+  transition: transform .18s var(--ease-smooth), background .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.mh-btn svg { width: 17px; height: 17px; }
+.mh-btn.primary { background: var(--ink); color: #fff; box-shadow: 0 12px 26px rgba(17, 24, 39, .18); }
+.mh-btn.primary:hover { background: #1F2937; transform: translateY(-1px); }
+.mh-btn.ghost {
+  background: rgba(255, 255, 255, .74); color: #1F5C3A;
+  border-color: rgba(47, 107, 70, .4);
+}
+.mh-btn.ghost:hover { border-color: #1F5C3A; background: #fff; }
+@media (max-width: 460px) {
+  .mh-btn { flex: 1 1 auto; padding: 12px 16px; font-size: 13.5px; }
+}
+
+/* ----------------------------------------------------------------------
+   2. TRUST STRIP — the delivery/returns promise, above the fold.
+
+   The service promise (Adonai-managed delivery, pay on delivery, 2-day
+   returns, WhatsApp ordering) only existed two screens down. Four quiet
+   chips under the banner answer "can I trust this shop?" before the
+   shopper has to scroll for it.
+   ---------------------------------------------------------------------- */
+.trust-strip {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px auto 0;
+}
+.trust-strip li {
+  display: flex; align-items: center; gap: 9px;
+  padding: 11px 14px;
+  border: 1px solid rgba(128, 105, 81, .18);
+  border-radius: 14px;
+  background: rgba(255, 253, 248, .74);
+  color: #3F3A33;
+  font: 600 12.5px/1.35 var(--font-text);
+}
+.trust-strip svg { width: 17px; height: 17px; color: #2F6B46; flex-shrink: 0; }
+@media (max-width: 900px) { .trust-strip { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 420px) {
+  .trust-strip { gap: 8px; }
+  .trust-strip li { padding: 10px 11px; font-size: 11.5px; gap: 7px; }
+  .trust-strip svg { width: 15px; height: 15px; }
+}
+
+/* ----------------------------------------------------------------------
+   3. PROMO RAIL — a banner is only a banner if it says something.
+
+   When no live offer qualifies, the rail fell back to repeating the same
+   editorial photo as an unlabelled 280x74 sliver — four identical
+   grey-green tiles that read as broken images (`.promo-card--brand` was
+   referenced in JS but had no CSS rule at all). The fallback is now ONE
+   full-width branded card with a real message and a destination.
+   ---------------------------------------------------------------------- */
+.promo-track.is-static .promo-card { flex: 1 1 auto; min-width: 0; }
+/* Brand fallback ribbon.
+   This strip carries no invented copy by contract, which makes the artwork
+   itself the whole message. Cropping the same photo dead-centre into four
+   identical 280x74 bands is what made the owner's screenshot look like four
+   broken images, so each tile now frames a different part of the picture —
+   a photo ribbon instead of a grey bar. */
+.promo-card--brand { height: 88px; background: #EFE7DA; }
+.promo-card--brand .promo-card-img { object-position: 34% 40%; }
+.promo-card--brand:nth-child(2n) .promo-card-img { object-position: 62% 54%; }
+.promo-card--brand:nth-child(3n) .promo-card-img { object-position: 86% 45%; }
+/* Owner-uploaded artwork: keep the interesting band of the photo in frame
+   instead of the exact middle. */
+.promo-card--custom .promo-card-img { object-position: center 42%; }
+
+/* Live-offer tiles: crop to the garment instead of the middle of the
+   photo, and give the price chip a size a thumb can actually read. */
+.promo-card:not(.promo-card--brand):not(.promo-card--html) .promo-card-img { object-position: center 38%; }
+@media (max-width: 640px) {
+  .promo-card { flex-basis: min(320px, calc(100vw - 54px)); height: 96px; }
+  /* A 728x90 HTML leaderboard cannot shrink below legibility: give it the
+     full phone width instead of a 280px stamp, and let its own height win. */
+  .promo-card--html {
+    flex-basis: calc(100vw - 54px);
+    height: calc(var(--promo-html-display-height, 90px) + 22px);
+  }
+  .promo-card-prices b { font-size: 10.5px; }
+  .promo-card-prices s { font-size: 9.5px; }
+  .promo-card-discount { font-size: 9px; padding: 4px 7px; }
+}
+
+/* ----------------------------------------------------------------------
+   4. CATALOG FILTERS — collapse the wall of chips on anything but desktop.
+
+   On a 980px-wide box (tablet / Desktop-site phone) the 18 category chips
+   wrapped into six rows and pushed the first product a full screen and a
+   half down the page. Below 1100px the panel is now behind one "Refine the
+   rail" button that reports how many filters are live, while the chip rows
+   scroll horizontally — reachable without a wall.
+   ---------------------------------------------------------------------- */
+.rail-count { margin: 2px 0 0; color: var(--muted); font: 600 13px/1.5 var(--font-text); }
+.rail-count b { color: var(--ink); }
+
+.filter-bar { display: flex; align-items: center; gap: 10px; margin: 18px 0 0; }
+.filter-toggle {
+  display: none; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0;
+  padding: 13px 16px; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); color: var(--ink); text-align: left;
+  font: 700 13.5px var(--font-text); cursor: pointer; box-shadow: var(--shadow-sm);
+}
+.filter-toggle svg { width: 17px; height: 17px; color: var(--rust); }
+.filter-toggle-title { flex: 1 1 auto; }
+.filter-badge {
+  background: var(--rust); color: #fff; border-radius: 999px;
+  padding: 2px 9px; font: 700 11px/1.6 var(--font-text);
+}
+.filter-caret {
+  width: 8px; height: 8px; flex-shrink: 0;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .2s var(--ease-smooth);
+}
+.filter-toggle[aria-expanded="true"] .filter-caret { transform: rotate(225deg) translate(-1px, -1px); }
+.filter-clear {
+  display: none; padding: 12px 15px; border: 1px solid var(--line); border-radius: 12px;
+  background: transparent; color: var(--muted); font: 700 12.5px var(--font-text); cursor: pointer;
+}
+.filter-clear:hover { color: var(--ink); border-color: var(--ink); }
+
+.filter-clear[data-visible="1"] { display: inline-flex; }
+@media (min-width: 1101px) {
+  /* Nothing to toggle on desktop, so the bar is transparent until it has a
+     "Clear" action to offer. */
+  .filter-bar { margin-top: 0; justify-content: flex-end; }
+}
+@media (max-width: 1100px) {
+  .filter-toggle { display: inline-flex; }
+  .filter-card.is-collapsed { display: none; }
+  .filter-card { margin: 12px 0 18px; padding: 16px 16px; border-radius: 16px; gap: 12px; }
+  .filter-row { flex-wrap: nowrap; align-items: center; min-width: 0; }
+  .filter-row .filter-label { min-width: 76px; flex-shrink: 0; font-size: 11px; }
+  .filter-row .chipset {
+    flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto;
+    white-space: nowrap; padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none; overscroll-behavior-x: contain;
+  }
+  .filter-row .chipset::-webkit-scrollbar { display: none; }
+  .filter-row .chipset .fchip { flex-shrink: 0; }
+  .filter-row.selects { flex-wrap: wrap; }
+}
+
+/* ----------------------------------------------------------------------
+   5. MOBILE PRODUCT RAIL — two readable columns instead of one tall card.
+
+   The v2.6 fit layer resolves the catalog to minmax(min(280px,100%),1fr):
+   on a 360px phone that is ONE column, and because each card still
+   carried its desktop furniture (SKU row, brand/size/colour meta, review
+   line, measurements line and two stacked full-width buttons), a single
+   garment filled the whole screen — 18 pieces meant 18 screens of
+   scrolling. Phones now get the standard two-up rail with an
+   image-led card: names and prices stay, the desktop micro-copy moves to
+   the PDP the card already links to.
+   ---------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  #productGrid.grid,
+  #productGrid.card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .pcard { border-radius: 14px; }
+  .pmedia { aspect-ratio: 4 / 4.5; }
+  .pbody { padding: 9px 10px 4px; gap: 3px; }
+  .phead-row { font-size: 10px; gap: 6px; }
+  .psku { display: none; }
+  .pname { font-size: 13.5px; line-height: 1.28; margin-top: 0; }
+  .pmeta { font-size: 10.8px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+  .star-rating { display: none; }
+  .pmeasure { font-size: 10px; }
+  .price-row { margin-top: 4px; gap: 6px; }
+  .pprice { font-size: 15.5px; }
+  .pcompare { font-size: 11px; }
+  .pcard-actions { padding: 0 10px 10px; gap: 0; }
+  /* The whole card is already the link to the full specification page, so
+     the duplicate "Details & measurements" button only ate a tap target. */
+  .view-detail-btn { display: none; }
+  .add-cart-btn { padding: 10px; font-size: 12px; border-radius: 9px; gap: 6px; }
+  .add-cart-btn svg { width: 14px; height: 14px; }
+  .grade-badge, .inventory-badge { font-size: 9px; padding: 4px 7px; top: 7px; right: 7px; }
+  .discount-badge { font-size: 10px; padding: 4px 8px; top: 7px; left: 7px; }
+  .media-dots { left: 8px; bottom: 8px; padding: 3px 6px; gap: 4px; }
+  .media-dots i { width: 15px; height: 15px; }
+}
+
+/* ----------------------------------------------------------------------
+   6. ANCHOR OFFSETS — the site header is 72px tall and sticky, so every
+   in-page jump (#catalogDashboardRegion, #delivery, the promo cards)
+   landed with its heading hidden underneath it.
+   ---------------------------------------------------------------------- */
+[id] { scroll-margin-top: 88px; }
+
+/* ----------------------------------------------------------------------
+   7. WHATSAPP ORDER BUTTON — one floating action, out of the way.
+
+   Most Adonai orders start as a WhatsApp message, so the button earns its
+   place — but it must not sit on top of the catalog: it is a compact
+   pill, it respects the iOS home-indicator inset, it hides itself while
+   the cart drawer or the consent banner is open, and the catalog reserves
+   room for it so the last row of pieces stays tappable.
+   ---------------------------------------------------------------------- */
+.wa-fab {
+  position: fixed; z-index: 45;
+  right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 13px; border-radius: 999px;
+  background: #1FA855; color: #fff; text-decoration: none;
+  box-shadow: 0 10px 26px rgba(19, 78, 47, .34);
+  font: 700 13.5px var(--font-text);
+  transition: transform .18s var(--ease-smooth), box-shadow .18s ease;
+}
+.wa-fab:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(19, 78, 47, .4); }
+.wa-fab:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.wa-fab svg { width: 22px; height: 22px; }
+.wa-fab-text { display: none; }
+@media (min-width: 701px) {
+  .wa-fab { padding: 13px 20px 13px 15px; }
+  .wa-fab-text { display: inline; }
+}
+body.cart-open .wa-fab { display: none; }
+/* Keep the last row of pieces and the footer clear of the button. */
+.site-foot { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
