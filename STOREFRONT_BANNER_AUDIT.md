@@ -114,8 +114,11 @@ your door", roughly two screens down. That is a lot of trust to ask for, unseen.
 **What changed**
 
 * Two buttons in the banner: **Shop the live rail** (anchors to the catalog) and
-  **Order on WhatsApp** (real `wa.me` link, pre-filled message, hidden automatically if the
-  store has no published number).
+  **Delivery & pickup** (anchors to the delivery network section) — both pointing at
+  things the page can actually honour.
+  *(Updated after review: the banner first carried an "Order on WhatsApp" button. Ordering
+  is consolidated on the cart → POS path, so WhatsApp is now enquiry-only — see
+  "Follow-up: WhatsApp is not an order path" at the end of this document.)*
 * A **four-chip service strip** directly under the banner: same-day Kampala delivery ·
   pay on delivery available · 2-day returns · order or track on WhatsApp — each backed by
   what the site already does (delivery regions, `/return-policy`, the storefront's payment
@@ -145,13 +148,11 @@ a shopper needs to decide.
 
 **What changed**
 
-* A compact **brand-green pill** instead of a large bubble: icon-only on phones, icon +
-  "Order on WhatsApp" from 701px up, offset from the iOS home-indicator
-  (`env(safe-area-inset-bottom)`).
-* It **hides itself** while the cart drawer or the privacy banner owns the bottom of the
-  screen (CSS + a `MutationObserver` on the banner), and it is never rendered without a
-  published number.
-* The footer and the last row of cards reserve room, so nothing important sits underneath it.
+* The floating **"Order on WhatsApp" button is gone entirely**. A compact green pill sat on
+  top of the rail and duplicated a channel that cannot take an order; the store's WhatsApp
+  line is still one tap away in the footer contact list, where it belongs.
+* The 4th service chip, which read *"Order or track on WhatsApp"*, became
+  **"Free pickup at our Kampala store"** — a promise the store can keep.
 
 ## 6. A desktop card on a phone
 
@@ -189,11 +190,68 @@ one card per screen.
 
 | File | What |
 |---|---|
-| `index.html` | banner copy wrapper + CTAs, service strip, rail count, filter toggle/clear, WhatsApp order link |
-| `css/storefront.css` | new **v3.12** layer: banner scrim + mobile crop, CTAs, trust strip, promo ribbon framing, collapsible filter panel, two-up mobile cards, anchor offsets, WhatsApp FAB |
-| `js/storefront.js` | WhatsApp wiring for both entry points, FAB visibility, promo fallback crop + missing-artwork degradation, filter panel state, live counts, clear-filters |
+| `index.html` | banner copy wrapper + CTAs, service strip, rail count, filter toggle/clear |
+| `css/storefront.css` | new **v3.12** layer: banner scrim + mobile crop, CTAs, trust strip, promo ribbon framing, collapsible filter panel, two-up mobile cards, anchor offsets |
+| `js/storefront.js` | promo fallback crop + missing-artwork degradation, filter panel state, live counts, clear-filters |
 | `serve.py` | automatic asset fingerprinting for HTML responses (storefront + PDP) |
+| `js/product.js` · `product.html` · `css/product.css` | one order path on the PDP: cart only, WhatsApp reduced to enquiries |
+| `tests/pdp-order-path.test.js` · `package.json` | contract test locking the order path (wired into `npm test`) |
 | `design/storefront-audit-annotated.png` | your screenshot with the six findings marked |
+
+---
+
+## Follow-up: WhatsApp is not an order path
+
+**Question raised:** *"After selecting any item, the product page has an 'Order via
+WhatsApp' option — orders are received in the POS now, so what is the purpose of this tab?"*
+
+Traced in the code, that button built a `wa.me` deep link with a nice pre-filled message
+(item, SKU, price, condition, size, delivery zone, product link) and then did **nothing
+else**: no order row, no inventory lock, no POS ticket, no staff notification.
+
+| | Add to Cart | Order via WhatsApp (removed) |
+|---|---|---|
+| Creates an order | ✅ `POST /api/orders`, `channel: "web"` | ❌ nothing |
+| Reserves a 1-of-1 piece | ✅ `acquireInventoryLock` + heartbeats | ❌ nothing |
+| Appears in the POS | ✅ with payment + fulfilment state | ❌ only if staff re-type it |
+| Channel reporting | ✅ counted as *Web Storefront* | ❌ invisible / becomes a walk-in |
+| Payment, receipts, dispatch, tracking | ✅ | ❌ |
+
+It was a leftover from before web checkout existed — the README still documented it as a
+feature, and on mobile it was actually the **primary** button (`.pdp-actionbar-btns` gave it
+the wider `1.2fr` column in solid WhatsApp green, while Add to Cart was the white outline
+button). The storefront was steering shoppers away from its own order pipeline.
+
+**Removed**
+
+* PDP buy box: the second button is gone; **Add to Cart** is the only action on a buyable piece.
+* Mobile action bar: WhatsApp is hidden unless the piece is sold, and the bar collapses to one
+  full-width button (`.pdp-actionbar-btns.single`).
+* Storefront banner: "Order on WhatsApp" → **"Delivery & pickup"**.
+* Floating WhatsApp FAB: removed (`wa-fab` markup, styles, `wireWhatsAppLinks`,
+  `updateFabVisibility`, the consent `MutationObserver`).
+* Service chip *"Order or track on WhatsApp"* → **"Free pickup at our Kampala store"**.
+
+**Kept — WhatsApp where it is not an order**
+
+* A **sold** piece → *"Ask for something similar"* (`enquiryWhatsAppLink`), reusing the same
+  button slot, now styled as a secondary outline action.
+* A piece with **no measurements logged** → *"message us and a staff member will measure it
+  flat"*.
+* An **empty gallery** → *"ask us on WhatsApp for live pictures"*.
+* A **sold/removed permalink** → *"Ask on WhatsApp"* to source a similar piece.
+* **Staff → customer** confirmation and delivery updates, sent from a real POS order.
+* The store's WhatsApp number stays in the footer contact list.
+
+**Trust claim corrected:** the PDP read *"✓ Real-time WhatsApp rider tracking"*. Rider
+messages in `dispatch.py` are explicitly *"staff-only scope; never sent to customers"* — a
+customer gets a confirmation and updates, not live tracking. It now reads
+**"✓ Delivery updates on WhatsApp"**.
+
+**Locked in:** `tests/pdp-order-path.test.js` asserts an available piece has exactly one
+buying action, that the words "Order via WhatsApp" never reach a shopper, that a sold piece
+shows an enquiry rather than an order, and that no floating/banner order button returns. It
+is wired into `npm test`, and it was verified to fail when the old button is reintroduced.
 
 ## Verification
 
@@ -219,9 +277,9 @@ one card per screen.
   `assets/storefront-editorial-bg.jpg` (a wall, a cloth and a vase). One clear photo of a
   styled outfit — or three — would make the banner sell clothes instead of atmosphere.
 * **A single WhatsApp number.** The rail/footer link uses `settings.whatsapp`
-  (`256758873398`) and the screenshot's FAB resolved to `+256 758893398`. Worth confirming
-  which is live in **Admin → Store Settings**; the FAB and the banner button now follow that
-  setting automatically.
+  (`256758873398`) while the screenshot's bubble resolved to `+256 758893398`. Worth
+  confirming which line is live in **Admin → Store Settings** — the PDP enquiry links all
+  read from that setting.
 * **The shop itself.** The demo rail shows "New arrival · No reviews yet" on every piece.
   Honest, but two or three real reviews on the top sellers would do more for conversion than
   any of the above.

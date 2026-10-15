@@ -75,10 +75,6 @@
 
     const trackLink = $("#trackOrderLink");
     if (trackLink) trackLink.href = `https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hello ${storeName}, I would like to track my order`)}`;
-    /* Same number drives the banner CTA and the floating order button, so a
-       change in Store Settings can never leave one of them pointing at a
-       stale line (or at a dead `#` link). */
-    wireWhatsAppLinks(whatsapp, storeName);
     const scope = $("#deliveryScopeText");
     if (scope) scope.textContent = S.delivery_scope || "Adonai-managed delivery available across Uganda — from order confirmation to customer handoff.";
     const pickupAddress = $("#storePickupAddress");
@@ -86,35 +82,6 @@
     const copyright = $("#footCopyright");
     if (copyright) copyright.textContent = `© 2026 ${storeName} · All prices in Ugandan Shillings (UGX)`;
     document.title = `${storeName} — Brand-New & Curated Vintage Fashion`;
-  }
-
-  /* ---------- WhatsApp entry points ---------- */
-  function wireWhatsAppLinks(number, storeName) {
-    const digits = String(number || "").replace(/\D/g, "");
-    const href = digits
-      ? `https://wa.me/${digits}?text=${encodeURIComponent(`Hello ${storeName || "Adonai Store"}, I would like to order from the rail`)}`
-      : "";
-    ["#mastheadWhatsApp", "#waFab"].forEach(sel => {
-      const el = $(sel);
-      if (!el) return;
-      if (!href) { el.hidden = true; el.removeAttribute("href"); return; }
-      el.href = href;
-    });
-    updateFabVisibility();
-  }
-
-  /* The floating order button is only shown when it can actually do
-     something: a published number, and no consent banner already occupying
-     the bottom of the screen. (Hiding it while the cart drawer is open is
-     pure CSS — `body.cart-open .wa-fab` — so both of the drawer's close
-     paths, including the one in cartController.js, are covered.) */
-  function updateFabVisibility() {
-    const fab = $("#waFab");
-    if (!fab) return;
-    const consent = $("#consent");
-    const consentOpen = !!consent && !consent.hidden && getComputedStyle(consent).display !== "none";
-    const href = fab.getAttribute("href") || "";
-    fab.hidden = !href || href === "#" || consentOpen;
   }
 
   renderStoreProfile();
@@ -128,7 +95,6 @@
       el.hidden = true;
       el.style.display = "none";
     }
-    updateFabVisibility();   // the banner no longer owns the bottom of the screen
   }
 
   if (!localStorage.getItem(CONSENT_KEY)) {
@@ -136,15 +102,6 @@
   } else {
     $("#consent").hidden = true;
     $("#consent").style.display = "none";
-  }
-  updateFabVisibility();
-
-  /* The consent banner's own `hidden`/style state is the source of truth, so
-     watch it instead of re-deriving it from every code path that can change. */
-  const consentEl = $("#consent");
-  if (consentEl && typeof MutationObserver === "function") {
-    new MutationObserver(updateFabVisibility)
-      .observe(consentEl, { attributes: true, attributeFilter: ["hidden", "style"] });
   }
 
   $$("[data-consent]").forEach(b => b.addEventListener("click", () => {
@@ -863,7 +820,7 @@
   /* ============================================================
      PRODUCT DETAIL PAGE NAVIGATION
      The full specification experience (flat-lay measurements, flaw
-     disclosure, delivery estimator, WhatsApp ordering) lives on the
+     disclosure, delivery estimator, one cart-based order path) lives on the
      dedicated, shareable PDP at /product/<slug>, so a rail card deep
      links straight into it instead of opening a partial quick-view.
      ============================================================ */

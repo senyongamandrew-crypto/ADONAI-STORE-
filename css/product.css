@@ -446,6 +446,9 @@ body.pdp-lightbox-open { overflow: hidden; }
 .pab-stock.last { color: #B45309; }
 .pab-stock.sold { color: #DC2626; }
 .pdp-actionbar-btns { display: grid; grid-template-columns: 1fr 1.2fr; gap: 8px; }
+/* A shopper with a buyable piece gets ONE action (Add to Cart). The second
+   column only exists for a sold piece's "ask for something similar" link. */
+.pdp-actionbar-btns.single { grid-template-columns: 1fr; }
 .pdp-actionbar-btns .pdp-btn { padding: 13px 10px; font-size: 13.5px; }
 
 /* ============================================================
