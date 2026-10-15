@@ -62,7 +62,7 @@ one-of-one, the page is built to answer the two questions that block a sale:
 | Breakpoint | Structure |
 | --- | --- |
 | `≥1024px` | Three-column asymmetric grid — **45%** sticky gallery with a vertical thumbnail strip, **30%** specifications and storytelling, **25%** sticky buy box (`position: sticky; top: 92px`). |
-| `≤1023px` | Single column — edge-to-edge swipeable carousel with a dynamic photo/video counter, pricing, urgency badges, accordion specs, and a **fixed bottom action bar** (`Add to Cart` secondary, `Order via WhatsApp` primary). |
+| `≤1023px` | Single column — edge-to-edge swipeable carousel with a dynamic photo/video counter, pricing, urgency badges, accordion specs, and a **fixed bottom action bar** with a single full-width `Add to Cart` (the one order path). A sold piece swaps in `Ask for something similar`. |
 
 The body is never given `overflow: hidden` or a fixed height, so the whole
 specification stack stays scrollable behind the mobile action bar. The only
@@ -83,13 +83,21 @@ scroll lock is `body.pdp-lightbox-open`, applied while the full-screen zoom is o
   flags that thumbnail in amber with a ⚠️ tag that jumps to the close-up photo.
 - **Single-unit inventory** — when stock reaches zero the gallery drops to 50%
   opacity with a high-visibility SOLD OUT stamp and every buy button is disabled;
-  the WhatsApp CTA switches to "Ask for something similar".
+  the only remaining action is an enquiry, "Ask for something similar".
+- **One order path** — ordering happens through the cart: `POST /api/orders`
+  (`channel: "web"`) writes the order and reserves the piece, and the order then
+  appears in the POS for fulfilment and dispatch. The PDP deliberately has no
+  way to "order" over WhatsApp, because a chat message has no order row, no
+  inventory lock and no channel attribution.
 
 ### Localization (Kampala / Uganda)
 
-- **WhatsApp ordering** — `https://wa.me/{settings.whatsapp}?text=…` pre-filled
-  with item, SKU, UGX price (`toLocaleString()`), condition, size, the selected
-  delivery zone and the canonical product URL.
+- **WhatsApp, as a channel that is not ordering** — a sold piece offers to
+  source something similar (`enquiryWhatsAppLink`), an unmeasured piece invites
+  a measurement request, an empty gallery invites a photo request, and staff
+  send the order confirmation + delivery updates from a real POS order. Staff
+  can share a payment reference on WhatsApp too. Nothing here creates an order,
+  and no control says "order" unless it goes through the cart.
 - **Delivery estimator** — Central (Kampala · Wakiso · Entebbe · Mukono) same or
   next-day boda; up-country hubs (Mbarara, Jinja, Gulu, Arua, Masaka, Mbale) on
   24–48h bus/courier; and free self-pickup at the store counter. The choice

@@ -178,6 +178,11 @@
   /* ---------- filter state ---------- */
   let products = [];
   let fDemo = "All", fCat = "All", fSize = "All", fCond = "All", fInventory = "All", fMax = 200000, term = "";
+  /* Compact catalog (<1100px) keeps the filter panel behind one button.
+     Must stay in sync with the @media (max-width: 1100px) block in
+     css/storefront.css (v3.12). */
+  const FILTER_PANEL_MAX = 1100;
+  let filtersOpen = false;
 
   // Deep links from the PDP breadcrumb (/?demo=Women&cat=Dresses%20%26%20Skirts)
   // preselect the rail filters so "Home › Women › Dresses" behaves like a
@@ -292,6 +297,13 @@
       </a>`;
   }
 
+  /* Brand fallback — used when no live offer qualifies (an empty rail, or
+     saved promo picks that have since sold). Per the storefront promotion
+     contract this strip carries no invented copy: it is the store's own
+     artwork and nothing else. It does have to LOOK deliberate, so
+     css/storefront.css (v3.12) frames each tile and steps the crop across
+     the frame — the same photo cropped dead-centre into four identical
+     280x74 bands is what read as four broken images on a phone. */
   function brandPromotionCardHTML(decorativeCopy) {
     const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
     const image = PK.pictureHTML("assets/storefront-editorial-bg.jpg", {
@@ -394,6 +406,26 @@
     track.classList.toggle("is-static", oneCard);
     track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneCard ? "" :
       `<div class="promo-set promo-set--clone" aria-hidden="true" inert>${cards}</div>`);
+
+    /* Uploaded artwork whose bytes are gone must not render as an empty grey
+       tile — a shopper reads that as a broken shop. It degrades to the same
+       icon placeholder the product tiles use for a missing photo: no
+       invented copy, still one tap away from the rail. */
+    Array.from(track.querySelectorAll(".promo-card--custom img")).forEach(img => {
+      const degrade = () => {
+        const media = img.closest(".promo-card-media");
+        if (!media || media.dataset.degraded === "1") return;
+        media.dataset.degraded = "1";
+        img.remove();
+        const placeholder = document.createElement("span");
+        placeholder.className = "promo-image-fallback";
+        placeholder.setAttribute("aria-hidden", "true");
+        placeholder.innerHTML = catIcon("tag");
+        media.appendChild(placeholder);
+      };
+      if (img.complete && img.naturalWidth === 0) degrade();
+      else img.addEventListener("error", degrade, { once: true });
+    });
 
     if (!oneCard) {
       const setDuration = () => {
@@ -558,6 +590,98 @@
     renderGrid();
   });
 
+  /* ============================================================
+     COMPACT CATALOG CHROME
+     Two things the rail was missing on phones and tablets: an honest
+     count ("12 of 18 pieces match") and a way to put the filter panel
+     away. Both are driven from renderGrid(), so every filter path —
+     chips, selects, search, price, and live stock updates — keeps them
+     accurate without any extra bookkeeping.
+     ============================================================ */
+  function activeFilterCount() {
+    const range = $("#priceRange");
+    const priceCapped = !!range && Number(range.value) < Number(range.max);
+    return (fDemo !== "All" ? 1 : 0) + (fCat !== "All" ? 1 : 0) +
+           (fInventory !== "All" ? 1 : 0) + (fSize !== "All" ? 1 : 0) +
+           (fCond !== "All" ? 1 : 0) + (term ? 1 : 0) + (priceCapped ? 1 : 0);
+  }
+
+  let railMatched = 0, railTotal = 0;
+
+  function applyFilterPanelState() {
+    const toggle = $("#filterToggle"), card = $("#filterCard");
+    if (!toggle || !card) return;
+    const compact = window.innerWidth <= FILTER_PANEL_MAX;
+    const open = !compact || filtersOpen;
+    card.classList.toggle("is-collapsed", !open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.hidden = !compact;
+
+    /* While the panel is open its own button doubles as the live result
+       read-out, so a tap on a chip answers itself without scrolling. */
+    const title = toggle.querySelector(".filter-toggle-title");
+    if (title) title.textContent = open ? `Showing ${railMatched} of ${railTotal}` : "Refine the rail";
+
+    const active = activeFilterCount();
+    const badge = $("#filterBadge");
+    if (badge) {
+      badge.textContent = active ? `${active} active` : "";
+      badge.hidden = !active;
+    }
+    const clear = $("#filterClear");
+    if (clear) clear.dataset.visible = active ? "1" : "0";
+  }
+
+  function updateRailMeta(matched, total) {
+    const count = $("#railCount");
+    if (count) {
+      const pieces = matched === 1 ? "piece" : "pieces";
+      count.innerHTML = matched === total
+        ? `<b>${total}</b> ${pieces} on the rail right now · prices in UGX`
+        : `<b>${matched}</b> of ${total} ${pieces} match your filters`;
+    }
+    applyFilterPanelState();
+  }
+
+  const filterToggleBtn = $("#filterToggle");
+  if (filterToggleBtn) {
+    filterToggleBtn.addEventListener("click", () => {
+      filtersOpen = !filtersOpen;
+      applyFilterPanelState();
+    });
+  }
+
+  const filterClearBtn = $("#filterClear");
+  if (filterClearBtn) {
+    filterClearBtn.addEventListener("click", () => {
+      fDemo = fCat = fInventory = fSize = fCond = "All";
+      term = "";
+      const search = $("#shopSearch");
+      if (search) search.value = "";
+      const range = $("#priceRange");
+      if (range) {
+        range.value = range.max;
+        fMax = Number(range.max);
+        const readout = $("#priceVal");
+        if (readout) readout.textContent = DB.ugx(fMax);
+      }
+      renderChips();
+      renderGrid();
+      updateDynamicSEO();
+    });
+  }
+
+  /* Re-evaluate only when the viewport actually crosses the breakpoint —
+     mobile browsers fire resize constantly as the URL bar slides away. */
+  let filterLayoutCompact = null;
+  window.addEventListener("resize", () => {
+    const compact = window.innerWidth <= FILTER_PANEL_MAX;
+    if (compact === filterLayoutCompact) return;
+    filterLayoutCompact = compact;
+    if (!compact) filtersOpen = false;   // desktop shows the panel outright
+    applyFilterPanelState();
+  }, { passive: true });
+
   /* ---------- verified social proof only ---------- */
   function ratingHTML(p) {
     const reviews = Math.max(0, Number(p.review_count || 0));
@@ -664,6 +788,7 @@
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#gridEmpty").hidden = list.length > 0;
     grid.innerHTML = list.map(cardHTML).join("");
+    updateRailMeta(list.length, products.length);
     if (window.AdonaiAnalytics && list.length > 0) {
       window.AdonaiAnalytics.trackViewItemList(list, fCat !== "All" ? fCat : (fDemo !== "All" ? fDemo : "All"));
     }
@@ -695,7 +820,7 @@
   /* ============================================================
      PRODUCT DETAIL PAGE NAVIGATION
      The full specification experience (flat-lay measurements, flaw
-     disclosure, delivery estimator, WhatsApp ordering) lives on the
+     disclosure, delivery estimator, one cart-based order path) lives on the
      dedicated, shareable PDP at /product/<slug>, so a rail card deep
      links straight into it instead of opening a partial quick-view.
      ============================================================ */

@@ -4,7 +4,7 @@
 
    Desktop (≥1024px): 45% media gallery · 30% specs · 25% sticky buy box
    Mobile  (≤1023px): swipeable carousel → pricing → badges → accordions
-                      → fixed bottom action bar (Cart + WhatsApp)
+                      → fixed bottom action bar (one order path: the cart)
    ============================================================ */
 (function () {
   "use strict";
@@ -447,9 +447,15 @@
     const stock = K.stockState(product);
     const price = K.displayPrice(product);
     const estimate = K.deliveryEstimate(zone, settings);
-    const waLink = stock.sold
-      ? K.enquiryWhatsAppLink(product, settings)
-      : K.generateWhatsAppLink(product, settings, { zone });
+    /* Ordering has exactly ONE path: Add to Cart → checkout → the order is
+       written to the database, reserves the piece and appears in the POS.
+       The previous "Order via WhatsApp" button next to it wrote nothing at
+       all — no order, no stock reservation — so a one-of-one piece could be
+       promised to two shoppers at once and the sale would only exist once a
+       staff member re-typed it. WhatsApp is kept only where it is NOT an
+       order: a piece that is gone (sourcing a similar one) and a question
+       about measurements that were never logged. */
+    const waEnquiry = K.enquiryWhatsAppLink(product, settings);
 
     $("#pdpBuyBox").innerHTML = `
       <div class="pdp-buybox">
@@ -467,10 +473,11 @@
           <button class="pdp-btn primary block" id="buyCart" type="button" ${stock.sold ? "disabled" : ""}>
             ${stock.sold ? "Sold — no longer available" : "Add to Cart"}
           </button>
-          <a class="pdp-btn whatsapp block ${stock.sold ? "muted" : ""}" id="buyWhatsApp" href="${esc(waLink)}" target="_blank" rel="noopener">
+          ${stock.sold ? `
+          <a class="pdp-btn outline block" id="buyEnquiry" href="${esc(waEnquiry)}" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Z"/><path d="M17.5 14.4c-.3-.2-1.7-.9-2-1-.3-.1-.5-.1-.7.1-.2.3-.7 1-.9 1.2-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.6-2.1-.2-.3 0-.4.1-.6l.5-.5c.1-.2.2-.3.3-.5 0-.2 0-.4-.1-.5 0-.2-.7-1.6-.9-2.2-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5 4.4.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.2-.3-.2-.6-.3Z"/></svg>
-            ${stock.sold ? "Ask for something similar" : "Order via WhatsApp"}
-          </a>
+            Ask for something similar
+          </a>` : ""}
         </div>
 
         <div class="buybox-delivery">
@@ -496,7 +503,7 @@
           <ul class="trust-list">
             <li>✓ Inspect the piece before you pay</li>
             <li>✓ <a href="/return-policy">48-hour defect / grading return policy</a></li>
-            <li>✓ Real-time WhatsApp rider tracking</li>
+            <li>✓ Delivery updates on WhatsApp</li>
           </ul>
         </div>
       </div>`;
@@ -526,10 +533,16 @@
     cartBtn.disabled = stock.sold;
     cartBtn.textContent = stock.sold ? "Sold Out" : "Add to Cart";
 
+    /* WhatsApp appears in this bar only for a sold piece, where there is no
+       order left to place. It is never a second "order" button competing
+       with the cart on a piece a shopper can actually buy. */
     const wa = $("#pabWhatsApp");
-    wa.href = stock.sold
-      ? K.enquiryWhatsAppLink(product, settings)
-      : K.generateWhatsAppLink(product, settings, { zone });
+    if (wa) {
+      wa.hidden = !stock.sold;
+      if (stock.sold) wa.href = K.enquiryWhatsAppLink(product, settings);
+    }
+    const barButtons = bar.querySelector(".pdp-actionbar-btns");
+    if (barButtons) barButtons.classList.toggle("single", !stock.sold);
   }
 
   /* ============================================================
