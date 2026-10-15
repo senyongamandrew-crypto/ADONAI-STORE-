@@ -402,10 +402,10 @@
           <summary>Delivery, pickup &amp; returns<span class="acc-sign" aria-hidden="true"></span></summary>
           <div class="pdp-acc-body">
             <ul class="pdp-bullets">
-              <li><strong>Central Region (Kampala, Wakiso, Mukono):</strong> same-day or next-day door delivery by boda courier.</li>
-              <li><strong>Up-country hubs (Mbarara, Jinja, Gulu, Arua, Masaka, Mbale):</strong> 24–48 hour parcel transit via regional bus terminals or express couriers.</li>
-              <li><strong>Self-pickup:</strong> collect free at ${esc(settings.address || "our Kampala store")}.</li>
-              <li>Returns or exchanges honored within 2 days with a valid receipt.</li>
+              <li><strong>Central Region (Kampala, Wakiso, Mukono):</strong> delivery is targeted for the same day when your order is confirmed by 4:00 PM; later orders target the next available delivery day.</li>
+              <li><strong>Regional Uganda:</strong> dispatch is targeted within one business day after confirmation, with 1–3 business days transit to major towns; remote routes may take longer and are confirmed before dispatch.</li>
+              <li><strong>Self-pickup:</strong> collect free at ${esc(settings.address || "Plot 45 Salama Road / Kibuli, Kampala")}; wait for our ready-to-collect confirmation.</li>
+              <li>Request a return within 48 hours for defective or incorrectly graded items. <a href="/return-policy">Read the 2-day return policy.</a></li>
             </ul>
           </div>
         </details>
@@ -495,7 +495,7 @@
           </div>
           <ul class="trust-list">
             <li>✓ Inspect the piece before you pay</li>
-            <li>✓ 2-day returns with a valid receipt</li>
+            <li>✓ <a href="/return-policy">48-hour defect / grading return policy</a></li>
             <li>✓ Real-time WhatsApp rider tracking</li>
           </ul>
         </div>
@@ -573,9 +573,11 @@
     if (loc) loc.textContent = address.split(",")[0];
     const contact = $("#footContactList");
     if (contact) {
+      const email = K.storeEmail(settings);
       contact.innerHTML = `
         <li><span class="k">WhatsApp:</span> <a class="rust" href="https://wa.me/${esc(whatsapp)}" target="_blank" rel="noopener">${esc(settings.whatsapp_display || "+" + whatsapp)}</a></li>
         <li><span class="k">Hotline:</span> <a href="tel:${esc(String(settings.hotline || "").replace(/\s/g, ""))}">${esc(settings.hotline || "")}</a></li>
+        <li><span class="k">Email:</span> <a href="mailto:${esc(email)}">${esc(email)}</a></li>
         <li><span class="k">Location:</span> ${esc(address)}</li>
         <li><span class="k">Hours:</span> ${esc(settings.hours || "")}</li>`;
     }

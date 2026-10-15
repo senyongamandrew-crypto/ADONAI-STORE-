@@ -127,13 +127,16 @@ def staff_auth_required() -> bool:
     }
 
 
+OFFICIAL_STORE_EMAIL = "info@adonaithrift-store.online"
+LEGACY_STORE_EMAILS = {"adonaithriftstore@gmail.com"}
+
 # Settings that may be read by the public storefront. Authentication keys and
 # operational flags are intentionally excluded from public API responses.
 PUBLIC_STORE_SETTING_KEYS = {
     "store_name", "tagline", "address", "whatsapp", "whatsapp_display",
     "phone", "hotline", "email", "tiktok", "instagram", "hours",
     "delivery_scope", "base_delivery_fee", "boda_base_fee", "currency",
-    "receipt_footer", "website_url", "app_url",
+    "receipt_footer", "website_url", "app_url", "storefront_promo_ids",
     # Pay-to details. Published on purpose, exactly like the bank details at
     # the bottom of an invoice: a shopper cannot transfer money to an account
     # they are not told about. Nothing here is a credential.
@@ -209,7 +212,65 @@ def normalize_fulfillment_stage(value):
 
 def public_store_settings(rows) -> dict:
     """Serialize only settings that are safe and useful on the storefront."""
-    return {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+    settings = {row.key: row.value for row in rows if row.key in PUBLIC_STORE_SETTING_KEYS}
+    email = str(settings.get("email") or "").strip()
+    if not email or email.lower() in LEGACY_STORE_EMAILS:
+        settings["email"] = OFFICIAL_STORE_EMAIL
+    return settings
+
+
+def storefront_promo_custom_media_ids(value) -> list[str]:
+    """Return the uploaded media IDs in a normalized custom-image setting."""
+    try:
+        parsed = json.loads(str(value or ""))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, dict) or parsed.get("mode") != "custom" or not isinstance(parsed.get("items"), list):
+        return []
+    return [item["media_id"] for item in parsed["items"] if isinstance(item, dict) and isinstance(item.get("media_id"), str)]
+
+
+def normalize_storefront_promo_ids(value) -> str:
+    """Normalize automatic, hidden, product-list, or uploaded-image mode."""
+    text = str(value or "").strip()
+    if text.lower() in {"auto", "none"}:
+        return text.lower()
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Choose automatic mode, hide the strip, or provide a valid product/image list.") from exc
+
+    if isinstance(parsed, dict):
+        if parsed.get("mode") != "custom" or not isinstance(parsed.get("items"), list):
+            raise ValueError("Custom promotions must contain an ordered list of uploaded images.")
+        if not parsed["items"] or len(parsed["items"]) > 8:
+            raise ValueError("Upload between 1 and 8 custom promotion images.")
+        items, seen = [], set()
+        for item in parsed["items"]:
+            if not isinstance(item, dict):
+                raise ValueError("Each custom promotion must reference an uploaded image.")
+            media_id = str(item.get("media_id") or "").strip().lower()
+            if not re.fullmatch(r"[0-9a-f]{32}", media_id):
+                raise ValueError("Each custom promotion must reference a valid uploaded image.")
+            if media_id in seen:
+                raise ValueError("A custom promotion image can only appear once.")
+            seen.add(media_id)
+            alt_text = clean_text(item.get("alt_text", ""), 120)
+            items.append({"media_id": media_id, "alt_text": alt_text})
+        return json.dumps({"mode": "custom", "items": items}, ensure_ascii=False, separators=(",", ":"))
+
+    if not isinstance(parsed, list) or not parsed or len(parsed) > 8:
+        raise ValueError("Choose between 1 and 8 products, upload custom images, or hide the strip.")
+    ids = []
+    for item in parsed:
+        if not isinstance(item, str) or not item.strip() or len(item.strip()) > 50:
+            raise ValueError("Each storefront promotion must be a valid product ID.")
+        product_id = item.strip()
+        if product_id not in ids:
+            ids.append(product_id)
+    if not ids:
+        raise ValueError("Choose at least one product or use automatic mode / hide the strip.")
+    return json.dumps(ids, ensure_ascii=False, separators=(",", ":"))
 
 
 # ============================================================================
@@ -1708,6 +1769,14 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 authenticated, staff_info = is_authenticated_staff(headers, {}, {})
                 if not authenticated:
                     staff_info = None
+                elif not staff_auth_required():
+                    # In PIN-free mode, normal API calls use an open terminal
+                    # identity. Keep unattached media out of ordinary public
+                    # <img> reads; staff previews opt in through DB.mediaPreview.
+                    preview_header = next((str(value).strip() for key, value in headers.items()
+                                           if str(key).lower() == "x-adonai-media-preview"), "")
+                    if preview_header != "1":
+                        staff_info = None
             return media.route_request(method, clean_path, body_bytes, headers, staff_info)
 
         if clean_path.startswith("/api/consignment/"):
@@ -4463,6 +4532,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         "error": f"Store setting '{key}' must be a scalar value"
                     }, status=400)
                 text_value = clean_text(value, 2000)
+                if key == "storefront_promo_ids":
+                    try:
+                        text_value = normalize_storefront_promo_ids(text_value)
+                    except ValueError as exc:
+                        return json_response({"ok": False, "error": str(exc)}, status=400)
+                if key == "email" and text_value.strip().lower() in LEGACY_STORE_EMAILS:
+                    text_value = OFFICIAL_STORE_EMAIL
                 if key in ("master_key", "admin_key"):
                     if len(text_value) < 6:
                         return json_response({
@@ -4485,6 +4561,27 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 return json_response({"ok": False, "error": "No store settings supplied"}, status=400)
 
             with get_db() as session:
+                previous_promo_setting = session.query(StoreSetting).filter_by(key="storefront_promo_ids").first()
+                previous_promo_media_ids = storefront_promo_custom_media_ids(previous_promo_setting.value if previous_promo_setting else "")
+                next_promo_media_ids = previous_promo_media_ids
+                removed_promo_media_ids = []
+                if "storefront_promo_ids" in updates:
+                    next_promo_media_ids = storefront_promo_custom_media_ids(updates["storefront_promo_ids"])
+                    if next_promo_media_ids:
+                        valid_media_ids = {
+                            row.id for row in session.query(ProductMedia.id).filter(
+                                ProductMedia.id.in_(next_promo_media_ids),
+                                ProductMedia.kind == "image",
+                                ProductMedia.product_id.is_(None),
+                            ).all()
+                        }
+                        if valid_media_ids != set(next_promo_media_ids):
+                            return json_response({
+                                "ok": False,
+                                "error": "Custom promotions can only use uploaded, unattached image files. Upload the image again and retry.",
+                            }, status=400)
+                    removed_promo_media_ids = sorted(set(previous_promo_media_ids) - set(next_promo_media_ids))
+
                 changed_keys = []
                 for key, value in updates.items():
                     setting = session.query(StoreSetting).filter_by(key=key).first()
@@ -4495,6 +4592,15 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     else:
                         session.add(StoreSetting(key=key, value=value))
                 session.flush()
+                if removed_promo_media_ids:
+                    removed_assets = session.query(ProductMedia).filter(
+                        ProductMedia.id.in_(removed_promo_media_ids),
+                        ProductMedia.kind == "image",
+                        ProductMedia.product_id.is_(None),
+                    ).all()
+                    for asset in removed_assets:
+                        session.delete(asset)
+                    session.flush()
 
                 # Optional one-command rollout: re-point every catalog item's
                 # transport cost at the (new) global base delivery fee so a

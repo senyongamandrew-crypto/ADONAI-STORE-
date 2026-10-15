@@ -744,7 +744,7 @@ def seed_settings(session):
         "whatsapp_display": "+256 758 873 398",
         "phone": "+256 758 873 398",
         "hotline": "+256 765 652 403",
-        "email": "adonaithriftstore@gmail.com",
+        "email": "info@adonaithrift-store.online",
         "tiktok": "@adonai.thrift256",
         "instagram": "@adonaithrift256",
         "address": "Plot 45 Salama Road / Kibuli, Kampala, Uganda",
@@ -753,6 +753,8 @@ def seed_settings(session):
         "currency": "UGX",
         "base_delivery_fee": "7000",
         "boda_base_fee": "7000",
+        # Automatic storefront strip; owners can curate or hide it in Admin Suite.
+        "storefront_promo_ids": "auto",
         # SECURITY: no default master_key is seeded. The preferred store-owner
         # passkey is the server-only STORE_MASTER_KEY environment variable;
         # legacy admin env aliases and a System Parameters key remain supported.
@@ -762,6 +764,8 @@ def seed_settings(session):
         existing = session.query(StoreSetting).filter_by(key=k).first()
         if not existing:
             session.add(StoreSetting(key=k, value=v))
+        elif k == "email" and str(existing.value or "").strip().lower() == "adonaithriftstore@gmail.com":
+            existing.value = v
         elif k == "delivery_scope" and str(existing.value or "").strip().lower() in {
             "uganda (central, eastern, and western regions)",
             "delivery available across uganda",

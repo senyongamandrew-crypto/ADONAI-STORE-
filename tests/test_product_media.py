@@ -55,7 +55,7 @@ class ProductMediaTests(unittest.TestCase):
         with get_db() as session:
             for model in [ProductMedia, Inventory, Product, NotificationEvent, PosAccessSession, PosAccessKey]:
                 session.query(model).delete(synchronize_session=False)
-            session.query(StoreSetting).filter_by(key=access_control.POLICY_KEY).delete()
+            session.query(StoreSetting).filter(StoreSetting.key.in_([access_control.POLICY_KEY, "storefront_promo_ids"])).delete()
 
     def raw(self, method, path, body=b"", headers=None):
         return api.handle_api_request(method, path, {}, body, headers=headers or {}, client_addr="media-tests")
@@ -142,7 +142,7 @@ class ProductMediaTests(unittest.TestCase):
         product = self.product(images=[image["url"]], image_url=image["url"])
         status, owner = self.request("POST", "/api/pos-access/admin", {"password": "Media owner test password"})
         self.assertEqual(status, 200, owner)
-        headers = {"x-pos-access": owner["session"]["token"]}
+        headers = {"x-pos-access": owner["session"]["token"], "X-Adonai-Media-Preview": "1"}
         status, _ = self.request("PATCH", "/api/pos-access/policy", {"protected_areas": ["stock"]}, headers)
         self.assertEqual(status, 200)
         for method, path, body in [("POST", "/api/media/images", self.photo_bytes), ("POST", "/api/media/videos", self.video_bytes), ("DELETE", image["url"], b"")]:
@@ -157,6 +157,49 @@ class ProductMediaTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/api/products/" + product["id"])[0], 200)
         with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
             self.assertEqual(self.raw("POST", "/api/media/images", self.photo_bytes, headers=headers)[0], 401)
+
+    def test_custom_promo_images_are_private_until_published_and_durable_until_removed(self):
+        image = self.upload()
+        self.assertEqual(self.raw("GET", image["url"])[0], 404, "unpublished uploads stay private to ordinary public reads")
+        self.assertEqual(self.raw("GET", image["url"], headers={"X-Adonai-Media-Preview": "1"})[0], 200,
+                         "the staff editor can preview its private upload through the explicit preview route")
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            self.assertEqual(self.raw("GET", image["url"])[0], 404, "protected public reads cannot see an unpublished upload")
+        custom_setting = json.dumps({"mode": "custom", "items": [{"media_id": image["id"], "alt_text": "Seasonal storefront artwork"}]})
+        status, saved = self.request("POST", "/api/settings", {"storefront_promo_ids": custom_setting})
+        self.assertEqual(status, 200, saved)
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            public = self.raw("GET", image["url"])
+        self.assertEqual(public[0], 200)
+        self.assertEqual(public[1], "image/jpeg")
+        self.assertEqual(public.headers["Cache-Control"], "public, max-age=86400")
+        normalized = json.loads(saved["settings"]["storefront_promo_ids"])
+        self.assertEqual(normalized["items"][0]["alt_text"], "Seasonal storefront artwork")
+        status, rejected_attachment = self.request("POST", "/api/products", {
+            "name": "Must remain a standalone creative", "sku": "PROMO-ASSET-TEST",
+            "base_price": 10000, "in_stock_count": 1, "image_url": image["url"], "images": [image["url"]],
+        })
+        self.assertEqual(status, 400, "published storefront artwork cannot be attached to and lost with a garment")
+
+        invalid_setting = json.dumps({"mode": "custom", "items": [{"media_id": "f" * 32, "alt_text": ""}]})
+        status, rejected = self.request("POST", "/api/settings", {"storefront_promo_ids": invalid_setting})
+        self.assertEqual(status, 400, rejected)
+        self.assertEqual(self.raw("DELETE", image["url"])[0], 409, "published artwork cannot be deleted behind the active setting")
+
+        with get_db() as session:
+            session.get(ProductMedia, image["id"]).created_at = datetime.utcnow() - timedelta(days=2)
+        self.upload()  # Expired private drafts are collected; published artwork is retained.
+        with get_db() as session:
+            self.assertIsNotNone(session.get(ProductMedia, image["id"]))
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            self.assertEqual(self.raw("GET", image["url"])[0], 200)
+
+        status, removed = self.request("POST", "/api/settings", {"storefront_promo_ids": "auto"})
+        self.assertEqual(status, 200, removed)
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            self.assertEqual(self.raw("GET", image["url"])[0], 404, "unpublishing removes the no-longer-used custom image")
+        with get_db() as session:
+            self.assertIsNone(session.get(ProductMedia, image["id"]))
 
     def test_invalid_media_reference_rolls_back_product_update_and_new_intake(self):
         product = self.product()

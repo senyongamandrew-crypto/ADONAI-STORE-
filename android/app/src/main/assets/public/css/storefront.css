@@ -505,6 +505,8 @@ h1, h2, h3, .brand-word, .section-title {
 .foot-list { list-style: none; display: flex; flex-direction: column; gap: 9px; font-size: 13.5px; }
 .foot-list a { color: #9CA3AF; text-decoration: none; }
 .foot-list a:hover { color: #F3F4F6; text-decoration: underline; }
+.foot-list a:focus-visible,
+.foot-base a:focus-visible { color: #F3F4F6; outline: 2px solid #86EFAC; outline-offset: 3px; border-radius: 2px; }
 .foot-list .k { color: #6B7280; min-width: 74px; display: inline-block; }
 .foot-list .rust { color: var(--rust); }
 .foot-base { color: #6B7280; font-size: 12.5px; padding: 18px 22px 24px; border-top: 1px solid #1F2937; margin-top: 28px; }
@@ -716,6 +718,24 @@ body.cart-open .drawer-backdrop, .drawer-backdrop.is-active { opacity: 1; pointe
 .pay-switch-label { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
 .pay-switch-row { display: flex; flex-wrap: wrap; gap: 7px; }
 .claim-notice-sub { font-size: 11px; color: var(--muted); text-align: center; margin-top: 7px; line-height: 1.4; }
+.checkout-policy-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+.checkout-policy-note a {
+  color: var(--rust-dark);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.checkout-policy-note a:focus-visible {
+  outline: 2px solid var(--rust);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
 
 /* Instant mobile money: the prompt button is the primary action, and the
    merchant-line instructions sit underneath it as the deliberate fallback. */
@@ -1013,3 +1033,165 @@ body.cart-drawer-closed { touch-action: auto; }
 .media-extra-photos { bottom:73px; font-size:9px; background:rgba(255,255,255,.9); color:#395543; }
 
 .media-video-badge { display:inline-flex; align-items:center; gap:4px; }
+
+/* ======================================================================
+   COMPACT LIVE PROMOTIONAL IMAGE STRIP
+   ====================================================================== */
+.promo-rail {
+  margin: 12px auto 0;
+  padding: 7px 14px;
+  border: 1px solid rgba(128, 105, 81, .18);
+  border-radius: 16px;
+  background: rgba(255, 253, 248, .84);
+  box-shadow: 0 8px 22px rgba(91, 72, 50, .08);
+}
+.promo-window {
+  position: relative;
+  overflow: hidden;
+  border-radius: 11px;
+  outline-offset: 4px;
+}
+.promo-track {
+  display: flex;
+  width: max-content;
+  animation: promo-left-scroll var(--promo-duration, 34s) linear infinite;
+  will-change: transform;
+}
+.promo-track.is-static {
+  width: 100%;
+  animation: none;
+  will-change: auto;
+}
+.promo-set {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 10px;
+  padding-right: 10px;
+}
+.promo-track.is-static .promo-set {
+  width: 100%;
+  padding-right: 0;
+}
+.promo-card {
+  position: relative;
+  display: block;
+  flex: 0 0 min(280px, calc(100vw - 70px));
+  height: 74px;
+  overflow: hidden;
+  border: 1px solid rgba(128, 105, 81, .18);
+  border-radius: 11px;
+  background: #E9E4DA;
+  box-shadow: 0 3px 9px rgba(56, 44, 30, .08);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.promo-card:hover,
+.promo-card:focus-visible {
+  border-color: rgba(47, 107, 70, .55);
+  box-shadow: 0 6px 14px rgba(56, 44, 30, .14);
+}
+.promo-card-media {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: linear-gradient(130deg, #e9e2d6, #d7ded3);
+}
+.promo-card-media::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(17, 24, 39, .08), transparent 48%, rgba(17, 24, 39, .20));
+  content: "";
+  pointer-events: none;
+}
+.promo-card-media picture,
+.promo-card-media > img,
+.promo-card-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.promo-image-fallback {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: #52715B;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.6), transparent 60%);
+}
+.promo-image-fallback svg { width: 34px; height: 34px; }
+.promo-card-discount {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  left: 6px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #B42318;
+  box-shadow: 0 2px 6px rgba(127, 29, 29, .24);
+  color: #fff;
+  font: 800 8px/1 var(--font-text);
+  letter-spacing: .02em;
+}
+.promo-card-prices {
+  position: absolute;
+  z-index: 2;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, .35);
+  border-radius: 7px;
+  background: rgba(17, 24, 39, .82);
+  color: #fff;
+  backdrop-filter: blur(4px);
+}
+.promo-card-prices s {
+  color: rgba(255, 255, 255, .76);
+  font: 600 8px/1.1 var(--font-text);
+}
+.promo-card-prices b {
+  color: #fff;
+  font: 800 9px/1.1 var(--font-text);
+}
+.promo-window:hover .promo-track,
+.promo-window:focus-within .promo-track {
+  animation-play-state: paused;
+}
+@keyframes promo-left-scroll {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+@media (max-width: 640px) {
+  .promo-rail {
+    margin-top: 10px;
+    padding: 6px 9px;
+    border-radius: 14px;
+  }
+  .promo-card {
+    flex-basis: min(280px, calc(100vw - 54px));
+    height: 68px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .promo-track {
+    animation: none !important;
+    transform: none !important;
+    will-change: auto;
+  }
+  .promo-set--clone { display: none !important; }
+  .promo-window {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .promo-window::-webkit-scrollbar { display: none; }
+}

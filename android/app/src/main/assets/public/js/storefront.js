@@ -57,7 +57,7 @@
     const whatsapp = String(S.whatsapp || "256758873398").replace(/\D/g, "");
     const whatsappDisplay = S.whatsapp_display || (whatsapp ? "+" + whatsapp : "");
     const hotline = S.hotline || S.phone || "";
-    const email = S.email || "";
+    const email = PK.storeEmail(S);
     const tiktok = S.tiktok || "";
     const instagram = S.instagram || "";
 
@@ -86,7 +86,6 @@
 
   renderStoreProfile();
   $("#installBtn").addEventListener("click", () => toast("Tip: use your browser's \"Add to Home Screen\" to install Adonai Store app"));
-  $$("[data-policy]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); toast("Full store policies publish with the live site"); }));
 
   /* ---------- consent banner (disappears immediately upon choice) ---------- */
   function hideConsent(choice) {
@@ -204,8 +203,190 @@
     return list;
   }
 
+  /* ---------- live promotional rail ----------
+     Offers and featured pieces are drawn from the real available catalog.
+     If the catalog is intentionally empty, the strip falls back to Adonai's
+     existing brand image and live store tagline — never a fake deal/product. */
+  const PROMO_MAX_PRODUCTS = 12;
+  let promoResizeTimer = 0;
+
+  function availablePromotionItems(list) {
+    return (Array.isArray(list) ? list : []).map(product => {
+      const current = displayPrice(product);
+      const compare = Number(product && product.compare_price) || 0;
+      const stock = Math.max(0, Number(product && product.in_stock_count) || 0);
+      if (!product || stock <= 0 || current <= 0) return null;
+      const discounted = compare > current;
+      return {
+        product,
+        current,
+        compare: discounted ? compare : 0,
+        percent: discounted ? Math.round(((compare - current) / compare) * 100) : 0,
+        image: getProductImages(product)[0] || ""
+      };
+    }).filter(Boolean).slice(0, PROMO_MAX_PRODUCTS);
+  }
+
+  function promotionalOffers(list) {
+    return availablePromotionItems(list).filter(item => item.percent > 0)
+      .sort((a, b) => b.percent - a.percent || String(a.product.name || "").localeCompare(String(b.product.name || ""), "en"));
+  }
+
+  function featuredPromotions(list) {
+    return availablePromotionItems(list);
+  }
+
+  function promotionalSelection() {
+    const raw = String(S.storefront_promo_ids || "auto").trim();
+    if (!raw || raw.toLowerCase() === "auto") return { mode: "auto", ids: [], items: [] };
+    if (raw.toLowerCase() === "none") return { mode: "none", ids: [], items: [] };
+    try {
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved)) {
+        return { mode: "selected", ids: [...new Set(saved.filter(id => typeof id === "string").map(id => id.trim()).filter(Boolean))].slice(0, 8), items: [] };
+      }
+      if (saved && saved.mode === "custom" && Array.isArray(saved.items)) {
+        const items = saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
+          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }));
+        if (items.length) return { mode: "custom", ids: [], items };
+      }
+    } catch (error) { /* Invalid saved config safely falls back to automatic mode. */ }
+    return { mode: "auto", ids: [], items: [] };
+  }
+
+  function promotionalCardHTML(offer, decorativeCopy) {
+    const p = offer.product;
+    const isDiscount = offer.percent > 0;
+    const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
+    const image = offer.image
+      ? PK.pictureHTML(offer.image, {
+          alt: "",
+          className: "promo-card-img",
+          sizes: "(min-width: 640px) 280px, 78vw",
+          width: 560,
+          height: 180
+        })
+      : `<span class="promo-image-fallback" aria-hidden="true">${catIcon(p.category)}</span>`;
+    const current = DB.ugx(offer.current);
+    const compare = DB.ugx(offer.compare);
+    const label = isDiscount
+      ? `Shop ${esc(p.name)}: ${offer.percent}% off, now ${esc(current)}`
+      : `Shop ${esc(p.name)}, currently available for ${esc(current)}`;
+    return `
+      <a class="promo-card" href="${esc(PK.productPath(p))}"${copyAccessibility}
+         aria-label="${label}">
+        <span class="promo-card-media">
+          ${image}
+          ${isDiscount ? `<span class="promo-card-discount">${offer.percent}% OFF</span>` : ""}
+          <span class="promo-card-prices">${isDiscount ? `<s>${esc(compare)}</s>` : ""}<b>${esc(current)}</b></span>
+        </span>
+      </a>`;
+  }
+
+  function brandPromotionCardHTML(decorativeCopy) {
+    const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
+    const image = PK.pictureHTML("assets/storefront-editorial-bg.jpg", {
+      alt: "",
+      className: "promo-card-img",
+      sizes: "(min-width: 640px) 280px, 78vw",
+      width: 560,
+      height: 180
+    });
+    return `<a class="promo-card promo-card--brand" href="#catalogDashboardRegion"${copyAccessibility} aria-label="Adonai Store editorial image"><span class="promo-card-media">${image}</span></a>`;
+  }
+
+  function customPromotionCardHTML(item, decorativeCopy) {
+    const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
+    const mediaId = String(item && item.media_id || "");
+    const src = typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`;
+    const alt = String(item && item.alt_text || "").trim().slice(0, 120);
+    const label = alt ? `Storefront artwork: ${alt}` : "View the Adonai Store collection";
+    return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media"><img src="${esc(src)}" alt="${esc(alt)}" class="promo-card-img" loading="lazy" decoding="async" width="560" height="180"></span></a>`;
+  }
+
+  function renderPromotionalRail() {
+    const rail = $("#promoRail"), track = $("#promoTrack");
+    if (!rail || !track) return;
+
+    const selection = promotionalSelection();
+    if (selection.mode === "none") {
+      rail.hidden = true;
+      track.innerHTML = "";
+      track.classList.remove("is-static");
+      return;
+    }
+
+    let offers = [], featured = [], brandFallback = false;
+    const customMode = selection.mode === "custom";
+    const customItems = customMode ? selection.items : [];
+    if (customMode) {
+      if (!customItems.length) {
+        rail.hidden = true;
+        track.innerHTML = "";
+        track.classList.remove("is-static");
+        return;
+      }
+    } else if (selection.mode === "selected") {
+      const selectedProducts = selection.ids.map(id => products.find(product => String(product.id) === id)).filter(Boolean);
+      featured = availablePromotionItems(selectedProducts);
+      if (!featured.length) {
+        // Preserve the visible strip on an empty catalog or when every saved
+        // pick is temporarily unavailable; never substitute a dummy product.
+        brandFallback = true;
+      } else {
+        offers = featured.filter(item => item.percent > 0);
+      }
+    } else {
+      offers = promotionalOffers(products);
+      featured = offers.length ? offers : featuredPromotions(products);
+      brandFallback = featured.length === 0;
+    }
+
+    const oneProduct = !customMode && !brandFallback && featured.length === 1;
+    rail.hidden = false;
+
+    const viewportWidth = Math.max(320, Number(window.innerWidth) || 1024);
+    const cardEstimate = viewportWidth < 640 ? 300 : 406;
+    const targetWidth = viewportWidth + cardEstimate;
+    const widthPerCard = cardEstimate + 14;
+    const cardCount = brandFallback ? 1 : customMode ? customItems.length : featured.length;
+    const repeatCount = oneProduct ? 1 : Math.min(8, Math.max(1,
+      Math.ceil(targetWidth / (cardCount * widthPerCard))));
+    const repeatedItems = brandFallback
+      ? Array.from({ length: repeatCount }, (_, index) => index)
+      : customMode
+        ? Array.from({ length: customItems.length * repeatCount }, (_, index) => customItems[index % customItems.length])
+        : Array.from({ length: featured.length * repeatCount }, (_, index) => featured[index % featured.length]);
+    const cards = brandFallback
+      ? repeatedItems.map((_, index) => brandPromotionCardHTML(index > 0)).join("")
+      : customMode
+        ? repeatedItems.map((item, index) => customPromotionCardHTML(item, index >= customItems.length)).join("")
+        : repeatedItems.map((offer, index) => promotionalCardHTML(offer, index >= featured.length)).join("");
+
+    track.classList.toggle("is-static", oneProduct);
+    track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneProduct ? "" :
+      `<div class="promo-set promo-set--clone" aria-hidden="true" inert>${cards}</div>`);
+
+    if (!oneProduct) {
+      const setDuration = () => {
+        const firstSet = track.querySelector(".promo-set");
+        if (!firstSet || !track.isConnected) return;
+        const seconds = Math.max(24, Math.min(100, firstSet.scrollWidth / 46));
+        track.style.setProperty("--promo-duration", `${seconds.toFixed(1)}s`);
+      };
+      if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(setDuration);
+      else setTimeout(setDuration, 0);
+    }
+  }
+
+  window.addEventListener("resize", () => {
+    clearTimeout(promoResizeTimer);
+    promoResizeTimer = setTimeout(renderPromotionalRail, 160);
+  }, { passive: true });
+
   function refreshProducts() {
     products = DB.listProducts();
+    renderPromotionalRail();
     let changed = false;
     cart = cart.reduce((acc, l) => {
       const p = products.find(x => x.id === l.product_id);
@@ -823,7 +1004,12 @@
             ? `Pay ${DB.ugx(grandTotal)} — Card`
             : `Confirm order & pay ${DB.ugx(grandTotal)}`
       }</button>
-      <p class="claim-notice-sub">Returns or exchanges honored within 2 days with valid receipt.</p>
+      <p class="checkout-policy-note">
+        <strong>Returns:</strong> request within 48 hours of receipt for defective or incorrectly graded items.
+        Review the <a href="/return-policy">return policy</a>,
+        <a href="/terms-and-conditions">Terms &amp; Conditions</a>, and
+        <a href="/privacy-policy">Privacy Policy</a> before confirming.
+      </p>
     `;
 
     // Bind form inputs
@@ -1555,6 +1741,7 @@
 
   DB.on("settings", () => {
     renderStoreProfile();
+    renderPromotionalRail();
     DELIVERY_AREAS = buildDeliveryAreas();
     if (selectedAreaIndex >= DELIVERY_AREAS.length) selectedAreaIndex = 0;
     renderCart();

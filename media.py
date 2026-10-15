@@ -21,7 +21,7 @@ from sqlalchemy import func
 
 import access_control
 from database import get_db
-from models import Product, ProductMedia
+from models import Product, ProductMedia, StoreSetting
 
 MAX_IMAGES = 12
 MAX_IMAGE_UPLOAD = 10 * 1024 * 1024
@@ -196,6 +196,24 @@ def prepare_video(data):
         return normalized, duration, width, height
 
 
+def published_promo_media_ids(session):
+    """Return only durable image assets explicitly published in the public promo strip."""
+    setting = session.query(StoreSetting).filter_by(key="storefront_promo_ids").first()
+    if not setting:
+        return set()
+    try:
+        config = json.loads(setting.value or "")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(config, dict) or config.get("mode") != "custom" or not isinstance(config.get("items"), list):
+        return set()
+    return {
+        item.get("media_id") for item in config["items"]
+        if isinstance(item, dict) and isinstance(item.get("media_id"), str)
+        and MEDIA_ID.fullmatch(item["media_id"])
+    }
+
+
 def route_request(method, path, data, headers, staff):
     """Called after existing staff + optional stock-area authorization."""
     if path in {"/api/media/images", "/api/media/videos"} and method == "POST":
@@ -215,9 +233,16 @@ def route_request(method, path, data, headers, staff):
         filename = re.sub(r"[\x00-\x1f\x7f]", "", filename) or "garment"
         filename = os.path.splitext(filename)[0] + extension
         with get_db() as session:
-            # Unattached drafts are private and expire after a day, not forever.
-            session.query(ProductMedia).filter(ProductMedia.product_id.is_(None),
-                ProductMedia.created_at < datetime.utcnow() - timedelta(days=1)).delete(synchronize_session=False)
+            # Unpublished unattached drafts expire after a day; published strip
+            # images remain durable until the owner removes them from settings.
+            stale_drafts = session.query(ProductMedia).filter(
+                ProductMedia.product_id.is_(None),
+                ProductMedia.created_at < datetime.utcnow() - timedelta(days=1),
+            )
+            published_ids = published_promo_media_ids(session)
+            if published_ids:
+                stale_drafts = stale_drafts.filter(~ProductMedia.id.in_(published_ids))
+            stale_drafts.delete(synchronize_session=False)
             asset = ProductMedia(id=uuid.uuid4().hex, kind=kind, mime_type=mime,
                 filename=filename, byte_length=len(prepared), width=width, height=height,
                 duration=duration, data=prepared, uploaded_by=str(staff.get("id", "OPEN-TERMINAL")))
@@ -231,14 +256,19 @@ def route_request(method, path, data, headers, staff):
         asset = (query.with_for_update() if method == "DELETE" else query).first()
         if not asset:
             return error("Media not found", 404)
+        promo_media_ids = published_promo_media_ids(session)
         if method == "DELETE":
             if asset.product_id:
                 return error("Save the garment without this media to remove it.", 409)
+            if asset.id in promo_media_ids:
+                return error("Remove this image from the published storefront promotions first.", 409)
             if asset.uploaded_by != str(staff.get("id")) and staff.get("role") not in {"admin", "manager"}:
                 return error("Media not found", 404)
             session.delete(asset)
             return MediaResponse(200, "application/json; charset=utf-8", b'{"ok": true}')
         public = bool(asset.product_id and asset.product and asset.product.inventory_status not in {"ARCHIVED", "WRITTEN_OFF"})
+        if asset.kind == "image" and asset.product_id is None and asset.id in promo_media_ids:
+            public = True
         if not public and (not staff or not access_control.allowed("stock", access_control.state(headers, session))):
             return error("Media not found", 404)
         if not public and asset.uploaded_by != str((staff or {}).get("id")) and (staff or {}).get("role") not in {"admin", "manager"}:
@@ -291,10 +321,13 @@ def attach_to_product(session, product, body, staff):
         raise ValueError("Invalid garment video reference.")
     wanted = wanted_images | ({wanted_video} if wanted_video else set())
     selected = []
+    published_promo_ids = published_promo_media_ids(session)
     for asset_id in sorted(wanted):
         asset = session.query(ProductMedia).filter_by(id=asset_id).with_for_update().populate_existing().first()
         if not asset or (asset.product_id and asset.product_id != product.id):
             raise ValueError("An uploaded file is unavailable or belongs to another garment. Upload it again.")
+        if asset_id in published_promo_ids:
+            raise ValueError("This image is published as storefront artwork. Upload a separate copy for a garment.")
         if not asset.product_id and asset.uploaded_by != str(staff.get("id")) and staff.get("role") not in {"admin", "manager"}:
             raise ValueError("This upload belongs to another staff member.")
         if (asset_id == wanted_video and asset.kind != "video") or (asset_id in wanted_images and asset.kind != "image"):
