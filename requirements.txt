@@ -4,8 +4,9 @@ psycopg[binary]>=3.2.4
 gunicorn>=23.0.0
 typing-extensions>=4.12.2
 
-# Durable product media: JPEG validation and short MP4 video optimization
+# Durable product media: JPEG validation, HEIC/HEIF phone photos, and MP4 optimization
 Pillow>=11.3.0
+pillow-heif>=0.18.0,<2
 imageio-ffmpeg>=0.6.0,<0.7
 
 # Genuine Excel workbooks for audit-log downloads

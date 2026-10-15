@@ -121,7 +121,7 @@ def required_area(method, path, body):
         return {"sales": "orders", "orders": "orders", "customers": "orders", "ledger": "finance", "expenses": "finance", "journal": "finance", "stock": "stock", "staff": "security"}.get(body.get("kind", "sales"))
     if path == "/api/settings" and method in {"POST", "PUT", "PATCH"}:
         return "settings"
-    if path.startswith(("/api/products", "/api/media/")) and method in {"POST", "PUT", "PATCH", "DELETE"}:
+    if path.startswith(("/api/products", "/api/media/", "/api/promo-media/")) and method in {"POST", "PUT", "PATCH", "DELETE"}:
         return "stock"
     if path.startswith("/api/finance/"):
         return "finance"

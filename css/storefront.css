@@ -1116,6 +1116,35 @@ body.cart-drawer-closed { touch-action: auto; }
   height: 100%;
   object-fit: cover;
 }
+.promo-card.promo-card--html {
+  flex-basis: calc(var(--promo-html-display-width, min(728px, calc(100vw - 70px))) + 2px);
+  height: calc(var(--promo-html-display-height, 90px) + 2px);
+}
+.promo-card--html .promo-card-media { display: grid; place-items: center; background: #fff; }
+.promo-card--html .promo-card-media::after { display: none; content: none; }
+.promo-html-viewport {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: var(--promo-html-display-width, 280px);
+  height: var(--promo-html-display-height, 35px);
+  overflow: hidden;
+  background: #fff;
+}
+.promo-html-viewport iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: var(--promo-html-frame-width, 728px);
+  height: var(--promo-html-frame-height, 90px);
+  max-width: none;
+  border: 0;
+  transform: scale(var(--promo-html-scale, .38));
+  transform-origin: top left;
+  pointer-events: none;
+  background: transparent;
+}
 .promo-image-fallback {
   display: grid;
   width: 100%;

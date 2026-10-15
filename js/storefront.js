@@ -247,7 +247,16 @@
       }
       if (saved && saved.mode === "custom" && Array.isArray(saved.items)) {
         const items = saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
-          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }));
+          .slice(0, 8).map(item => {
+            const type = item.type === "html" ? "html" : "image";
+            return {
+              media_id: String(item.media_id).toLowerCase(),
+              type,
+              width: type === "html" ? Math.max(1, Math.min(2000, Number(item.width) || 728)) : 0,
+              height: type === "html" ? Math.max(1, Math.min(1200, Number(item.height) || 90)) : 0,
+              alt_text: String(item.alt_text || "").slice(0, 120)
+            };
+          });
         if (items.length) return { mode: "custom", ids: [], items };
       }
     } catch (error) { /* Invalid saved config safely falls back to automatic mode. */ }
@@ -298,9 +307,22 @@
   function customPromotionCardHTML(item, decorativeCopy) {
     const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
     const mediaId = String(item && item.media_id || "");
-    const src = typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`;
+    const creativeType = item && item.type === "html" ? "html" : "image";
+    const endpoint = creativeType === "html" ? "/api/promo-media/" : "/api/media/";
+    const src = typeof DB.apiUrl === "function" ? DB.apiUrl(`${endpoint}${mediaId}`) : `${endpoint}${mediaId}`;
     const alt = String(item && item.alt_text || "").trim().slice(0, 120);
     const label = alt ? `Storefront artwork: ${alt}` : "View the Adonai Store collection";
+    if (creativeType === "html") {
+      const width = Math.max(1, Math.min(2000, Number(item.width) || 728));
+      const height = Math.max(1, Math.min(1200, Number(item.height) || 90));
+      const maxWidth = Math.min(728, Math.max(180, (Number(window.innerWidth) || 320) - 70));
+      const scale = Math.min(1, maxWidth / width, 90 / height);
+      const displayWidth = Math.max(1, Math.round(width * scale));
+      const displayHeight = Math.max(1, Math.round(height * scale));
+      const sizeStyle = `--promo-html-frame-width:${width}px;--promo-html-frame-height:${height}px;--promo-html-scale:${scale};--promo-html-display-width:${displayWidth}px;--promo-html-display-height:${displayHeight}px`;
+      const frame = `<span class="promo-html-viewport"><iframe src="${esc(src)}" title="" width="${width}" height="${height}" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" tabindex="-1" aria-hidden="true"></iframe></span>`;
+      return `<a class="promo-card promo-card--custom promo-card--html" href="#catalogDashboardRegion" style="${sizeStyle}"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media">${frame}</span></a>`;
+    }
     return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media"><img src="${esc(src)}" alt="${esc(alt)}" class="promo-card-img" loading="lazy" decoding="async" width="560" height="180"></span></a>`;
   }
 
@@ -342,7 +364,9 @@
       brandFallback = featured.length === 0;
     }
 
-    const oneProduct = !customMode && !brandFallback && featured.length === 1;
+    const oneHtmlCreative = customMode && customItems.length === 1 && customItems[0].type === "html";
+    const oneCard = (!customMode && !brandFallback && featured.length === 1) || oneHtmlCreative;
+    const hasHtmlCreative = customMode && customItems.some(item => item.type === "html");
     rail.hidden = false;
 
     const viewportWidth = Math.max(320, Number(window.innerWidth) || 1024);
@@ -350,7 +374,11 @@
     const targetWidth = viewportWidth + cardEstimate;
     const widthPerCard = cardEstimate + 14;
     const cardCount = brandFallback ? 1 : customMode ? customItems.length : featured.length;
-    const repeatCount = oneProduct ? 1 : Math.min(8, Math.max(1,
+    // Repeating HTML frames would execute third-party scripts and inflate
+    // impressions. Keep one item sequence per rich-creative marquee pass; a
+    // single HTML creative stays static, while image-only strips retain their
+    // fully repeated seamless loop.
+    const repeatCount = oneCard ? 1 : hasHtmlCreative ? 1 : Math.min(8, Math.max(1,
       Math.ceil(targetWidth / (cardCount * widthPerCard))));
     const repeatedItems = brandFallback
       ? Array.from({ length: repeatCount }, (_, index) => index)
@@ -363,11 +391,11 @@
         ? repeatedItems.map((item, index) => customPromotionCardHTML(item, index >= customItems.length)).join("")
         : repeatedItems.map((offer, index) => promotionalCardHTML(offer, index >= featured.length)).join("");
 
-    track.classList.toggle("is-static", oneProduct);
-    track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneProduct ? "" :
+    track.classList.toggle("is-static", oneCard);
+    track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneCard ? "" :
       `<div class="promo-set promo-set--clone" aria-hidden="true" inert>${cards}</div>`);
 
-    if (!oneProduct) {
+    if (!oneCard) {
       const setDuration = () => {
         const firstSet = track.querySelector(".promo-set");
         if (!firstSet || !track.isConnected) return;

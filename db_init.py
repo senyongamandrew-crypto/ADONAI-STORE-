@@ -21,6 +21,7 @@ from models import (
     OrderItem,
     Product,
     Rider,
+    StorePromotionCreative,
     StoreSetting,
     User,
     build_product_slug,

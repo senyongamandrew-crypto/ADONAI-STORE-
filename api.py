@@ -68,6 +68,7 @@ from models import (
     QuantityType,
     Rider,
     StockLot,
+    StorePromotionCreative,
     StoreSetting,
     User,
     build_product_slug,
@@ -219,48 +220,64 @@ def public_store_settings(rows) -> dict:
     return settings
 
 
-def storefront_promo_custom_media_ids(value) -> list[str]:
-    """Return the uploaded media IDs in a normalized custom-image setting."""
+def storefront_promo_custom_items(value) -> list[dict]:
+    """Return the uploaded image / HTML creative references in a custom setting."""
     try:
         parsed = json.loads(str(value or ""))
     except (TypeError, ValueError):
         return []
     if not isinstance(parsed, dict) or parsed.get("mode") != "custom" or not isinstance(parsed.get("items"), list):
         return []
-    return [item["media_id"] for item in parsed["items"] if isinstance(item, dict) and isinstance(item.get("media_id"), str)]
+    items = []
+    for item in parsed["items"]:
+        if not isinstance(item, dict) or not isinstance(item.get("media_id"), str):
+            continue
+        media_id = item["media_id"].strip().lower()
+        creative_type = str(item.get("type") or "image").strip().lower()
+        if re.fullmatch(r"[0-9a-f]{32}", media_id) and creative_type in {"image", "html"}:
+            items.append({"media_id": media_id, "type": creative_type})
+    return items
+
+
+def storefront_promo_custom_media_ids(value) -> list[str]:
+    """Backwards-compatible helper returning IDs from either creative type."""
+    return [item["media_id"] for item in storefront_promo_custom_items(value)]
 
 
 def normalize_storefront_promo_ids(value) -> str:
-    """Normalize automatic, hidden, product-list, or uploaded-image mode."""
+    """Normalize automatic, hidden, product-list, or uploaded-creative mode."""
     text = str(value or "").strip()
     if text.lower() in {"auto", "none"}:
         return text.lower()
     try:
         parsed = json.loads(text)
     except (TypeError, ValueError) as exc:
-        raise ValueError("Choose automatic mode, hide the strip, or provide a valid product/image list.") from exc
+        raise ValueError("Choose automatic mode, hide the strip, or provide a valid product/creative list.") from exc
 
     if isinstance(parsed, dict):
         if parsed.get("mode") != "custom" or not isinstance(parsed.get("items"), list):
-            raise ValueError("Custom promotions must contain an ordered list of uploaded images.")
+            raise ValueError("Custom promotions must contain an ordered list of uploaded images or HTML banners.")
         if not parsed["items"] or len(parsed["items"]) > 8:
-            raise ValueError("Upload between 1 and 8 custom promotion images.")
+            raise ValueError("Upload between 1 and 8 custom promotion creatives.")
         items, seen = [], set()
         for item in parsed["items"]:
             if not isinstance(item, dict):
-                raise ValueError("Each custom promotion must reference an uploaded image.")
+                raise ValueError("Each custom promotion must reference an uploaded creative.")
             media_id = str(item.get("media_id") or "").strip().lower()
+            creative_type = str(item.get("type") or "image").strip().lower()
             if not re.fullmatch(r"[0-9a-f]{32}", media_id):
-                raise ValueError("Each custom promotion must reference a valid uploaded image.")
+                raise ValueError("Each custom promotion must reference a valid uploaded creative.")
+            if creative_type not in {"image", "html"}:
+                raise ValueError("Custom promotions support uploaded images or HTML banners only.")
             if media_id in seen:
-                raise ValueError("A custom promotion image can only appear once.")
+                raise ValueError("A custom promotion creative can only appear once.")
             seen.add(media_id)
             alt_text = clean_text(item.get("alt_text", ""), 120)
-            items.append({"media_id": media_id, "alt_text": alt_text})
+            items.append({"media_id": media_id, "type": creative_type, "alt_text": alt_text})
         return json.dumps({"mode": "custom", "items": items}, ensure_ascii=False, separators=(",", ":"))
 
     if not isinstance(parsed, list) or not parsed or len(parsed) > 8:
-        raise ValueError("Choose between 1 and 8 products, upload custom images, or hide the strip.")
+        raise ValueError("Choose between 1 and 8 products, upload creative images or HTML banners, or hide the strip.")
     ids = []
     for item in parsed:
         if not isinstance(item, str) or not item.strip() or len(item.strip()) > 50:
@@ -1710,7 +1727,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     }, status=429)
 
         body = {}
-        if body_bytes and method in ("POST", "PUT", "PATCH", "DELETE") and not path.startswith("/api/media/"):
+        if body_bytes and method in ("POST", "PUT", "PATCH", "DELETE") and not path.startswith(("/api/media/", "/api/promo-media/")):
             try:
                 body = json.loads(body_bytes.decode("utf-8"))
             except Exception:
@@ -1758,7 +1775,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             # Its original scope is revalidated server-side, also in another browser.
             return exports.download(method, clean_path.split("/")[-1], staff_auth_required())
 
-        if clean_path.startswith("/api/media/"):
+        if clean_path.startswith(("/api/media/", "/api/promo-media/")):
             # Mutation shares both existing staff and optional Stock passwords.
             # Public reads of attached garment media need neither.
             if method in {"POST", "DELETE"}:
@@ -4562,25 +4579,51 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
 
             with get_db() as session:
                 previous_promo_setting = session.query(StoreSetting).filter_by(key="storefront_promo_ids").first()
-                previous_promo_media_ids = storefront_promo_custom_media_ids(previous_promo_setting.value if previous_promo_setting else "")
-                next_promo_media_ids = previous_promo_media_ids
-                removed_promo_media_ids = []
+                previous_promo_items = storefront_promo_custom_items(previous_promo_setting.value if previous_promo_setting else "")
+                next_promo_items = previous_promo_items
+                removed_promo_items = []
                 if "storefront_promo_ids" in updates:
-                    next_promo_media_ids = storefront_promo_custom_media_ids(updates["storefront_promo_ids"])
-                    if next_promo_media_ids:
-                        valid_media_ids = {
-                            row.id for row in session.query(ProductMedia.id).filter(
-                                ProductMedia.id.in_(next_promo_media_ids),
-                                ProductMedia.kind == "image",
-                                ProductMedia.product_id.is_(None),
-                            ).all()
-                        }
-                        if valid_media_ids != set(next_promo_media_ids):
-                            return json_response({
-                                "ok": False,
-                                "error": "Custom promotions can only use uploaded, unattached image files. Upload the image again and retry.",
-                            }, status=400)
-                    removed_promo_media_ids = sorted(set(previous_promo_media_ids) - set(next_promo_media_ids))
+                    next_promo_items = storefront_promo_custom_items(updates["storefront_promo_ids"])
+                    image_ids = [item["media_id"] for item in next_promo_items if item["type"] == "image"]
+                    html_ids = [item["media_id"] for item in next_promo_items if item["type"] == "html"]
+                    valid_image_ids = {
+                        row.id for row in session.query(ProductMedia.id).filter(
+                            ProductMedia.id.in_(image_ids or ["__none__"]),
+                            ProductMedia.kind == "image",
+                            ProductMedia.product_id.is_(None),
+                        ).all()
+                    }
+                    html_assets = {
+                        row.id: row for row in session.query(StorePromotionCreative).filter(
+                            StorePromotionCreative.id.in_(html_ids or ["__none__"]),
+                        ).all()
+                    }
+                    if valid_image_ids != set(image_ids) or set(html_assets) != set(html_ids):
+                        return json_response({
+                            "ok": False,
+                            "error": "Custom promotions can only use uploaded, unattached images or HTML banners. Upload the missing creative again and retry.",
+                        }, status=400)
+
+                    # HTML design dimensions are server-derived metadata. The
+                    # public rail scales the creative to its compact slot while
+                    # preserving its original aspect ratio.
+                    if next_promo_items:
+                        promo_config = json.loads(updates["storefront_promo_ids"])
+                        if isinstance(promo_config, dict) and promo_config.get("mode") == "custom":
+                            for item in promo_config["items"]:
+                                if item.get("type") == "html":
+                                    asset = html_assets[item["media_id"]]
+                                    item["width"], item["height"] = asset.width, asset.height
+                            updates["storefront_promo_ids"] = json.dumps(
+                                promo_config, ensure_ascii=False, separators=(",", ":")
+                            )
+                            if len(updates["storefront_promo_ids"]) > 2000:
+                                return json_response({"ok": False, "error": "The storefront creative list is too long."}, status=400)
+                    next_keys = {(item["type"], item["media_id"]) for item in next_promo_items}
+                    removed_promo_items = [
+                        item for item in previous_promo_items
+                        if (item["type"], item["media_id"]) not in next_keys
+                    ]
 
                 changed_keys = []
                 for key, value in updates.items():
@@ -4592,14 +4635,23 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     else:
                         session.add(StoreSetting(key=key, value=value))
                 session.flush()
-                if removed_promo_media_ids:
+                removed_image_ids = [item["media_id"] for item in removed_promo_items if item["type"] == "image"]
+                removed_html_ids = [item["media_id"] for item in removed_promo_items if item["type"] == "html"]
+                if removed_image_ids:
                     removed_assets = session.query(ProductMedia).filter(
-                        ProductMedia.id.in_(removed_promo_media_ids),
+                        ProductMedia.id.in_(removed_image_ids),
                         ProductMedia.kind == "image",
                         ProductMedia.product_id.is_(None),
                     ).all()
                     for asset in removed_assets:
                         session.delete(asset)
+                if removed_html_ids:
+                    removed_assets = session.query(StorePromotionCreative).filter(
+                        StorePromotionCreative.id.in_(removed_html_ids),
+                    ).all()
+                    for asset in removed_assets:
+                        session.delete(asset)
+                if removed_image_ids or removed_html_ids:
                     session.flush()
 
                 # Optional one-command rollout: re-point every catalog item's

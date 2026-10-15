@@ -1350,6 +1350,15 @@
       if (!data.media || !data.media.id) throw new Error("The upload did not complete. Please try again.");
       return Object.assign({}, data.media, { url: apiUrl(data.media.url) });
     },
+    async uploadPromotionHtml(file, signal) {
+      if (!file || !/\.html?$/i.test(String(file.name || ""))) throw new Error("Choose an .html or .htm banner file");
+      const data = await apiRequest("/api/promo-media/html", {
+        method: "POST", body: file, signal, timeoutMs: 60000,
+        headers: { "Content-Type": file.type || "text/html", "X-File-Name": encodeURIComponent(file.name || "promotion.html") }
+      }, true);
+      if (!data.creative || !data.creative.id) throw new Error("The HTML banner upload did not complete. Please try again.");
+      return Object.assign({}, data.creative, { url: apiUrl(data.creative.url) });
+    },
     async mediaPreview(id, signal) {
       if (!/^[a-f0-9]{32}$/.test(String(id || ""))) throw new Error("Invalid media reference");
       const controller = new AbortController();

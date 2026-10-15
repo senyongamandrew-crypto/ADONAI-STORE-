@@ -47,7 +47,14 @@ class StorefrontPolicySettingsTests(unittest.TestCase):
     def test_custom_promotion_images_are_validated_ordered_and_accessible(self):
         custom = '{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '","alt_text":"Campaign artwork"},{"media_id":"' + "b" * 32 + '","alt_text":""}]}'
         normalized = normalize_storefront_promo_ids(custom)
-        self.assertEqual(normalized, '{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '","alt_text":"Campaign artwork"},{"media_id":"' + "b" * 32 + '","alt_text":""}]}')
+        self.assertEqual(normalized, '{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '","type":"image","alt_text":"Campaign artwork"},{"media_id":"' + "b" * 32 + '","type":"image","alt_text":""}]}')
+        html = '{"mode":"custom","items":[{"media_id":"' + "c" * 32 + '","type":"html","width":728,"height":90,"alt_text":"Blazer banner"}]}'
+        self.assertEqual(
+            normalize_storefront_promo_ids(html),
+            '{"mode":"custom","items":[{"media_id":"' + "c" * 32 + '","type":"html","alt_text":"Blazer banner"}]}',
+        )
+        with self.assertRaises(ValueError):
+            normalize_storefront_promo_ids('{"mode":"custom","items":[{"media_id":"' + "a" * 32 + '","type":"svg"}]}')
         with self.assertRaises(ValueError):
             normalize_storefront_promo_ids('{"mode":"custom","items":[]}')
         with self.assertRaises(ValueError):

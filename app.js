@@ -4163,7 +4163,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         mode: "custom",
         ids: [],
         items: saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
-          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }))
+          .slice(0, 8).map(item => ({
+            media_id: String(item.media_id).toLowerCase(),
+            type: item.type === "html" ? "html" : "image",
+            width: item.type === "html" ? Math.max(1, Math.min(2000, Number(item.width) || 728)) : 0,
+            height: item.type === "html" ? Math.max(1, Math.min(1200, Number(item.height) || 90)) : 0,
+            alt_text: String(item.alt_text || "").slice(0, 120)
+          }))
       };
     } catch (error) { /* A damaged preference safely returns to automatic selection. */ }
     return { mode: "auto", ids: [], items: [] };
@@ -4189,7 +4195,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       return;
     }
     if (promoManagerMode === "custom") {
-      summary.textContent = `${promoManagerItems.length} of 8 custom images selected. Arrange and publish the images you want on the storefront.`;
+      summary.textContent = `${promoManagerItems.length} of 8 custom banner creatives selected. Arrange and publish the images or HTML banners you want on this store's storefront.`;
       list.innerHTML = "";
       renderPromoCreativeChoices();
       return;
@@ -4272,7 +4278,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!list || !capacity || !add || !input) return;
     const count = promoManagerItems.length;
     const busy = promoUploadsInFlight > 0;
-    capacity.textContent = `${count} of 8 images`;
+    capacity.textContent = `${count} of 8 creatives`;
     add.disabled = count >= 8 || busy;
     input.disabled = busy;
     const mode = $("#storefrontPromoMode");
@@ -4280,24 +4286,34 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const save = $("#btnSavePromoSettings");
     if (save) save.disabled = busy;
     if (!count) {
-      list.innerHTML = '<p class="promo-creatives-empty">No custom images yet. Add artwork here; this works with an empty product catalog.</p>';
+      list.innerHTML = '<p class="promo-creatives-empty">No custom banner files yet. Add images or HTML artwork here; this also works with an empty product catalog.</p>';
       return;
     }
     list.innerHTML = promoManagerItems.map((item, index) => {
       const mediaId = String(item.media_id || "");
-      const src = item.preview_url || (typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`);
+      const creativeType = item.type === "html" ? "html" : "image";
+      const src = item.preview_url || (typeof DB.apiUrl === "function"
+        ? DB.apiUrl(`${creativeType === "html" ? "/api/promo-media/" : "/api/media/"}${mediaId}`)
+        : `${creativeType === "html" ? "/api/promo-media/" : "/api/media/"}${mediaId}`);
+      const label = creativeType === "html" ? `HTML banner ${index + 1}` : `Image ${index + 1}`;
+      const creativeWidth = Math.max(1, Math.min(2000, Number(item.width) || 728));
+      const creativeHeight = Math.max(1, Math.min(1200, Number(item.height) || 90));
+      const previewScale = Math.min(1, 68 / creativeWidth, 76 / creativeHeight);
+      const preview = creativeType === "html"
+        ? `<iframe src="${esc(src)}" title="" width="${creativeWidth}" height="${creativeHeight}" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" tabindex="-1" aria-hidden="true" style="--promo-preview-width:${creativeWidth}px;--promo-preview-height:${creativeHeight}px;--promo-preview-scale:${previewScale}"></iframe>`
+        : `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.opacity='.15'">`;
       return `<div class="promo-creative-row">
-        <div class="promo-creative-thumb"><img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.opacity='.15'"></div>
+        <div class="promo-creative-thumb${creativeType === "html" ? " promo-creative-thumb--html" : ""}">${preview}</div>
         <div class="promo-creative-details">
-          <strong>Image ${index + 1}</strong>
-          <label for="promo-creative-alt-${index}">Alt text (for screen readers)</label>
+          <strong>${label}</strong>
+          <label for="promo-creative-alt-${index}">Accessible description</label>
           <input id="promo-creative-alt-${index}" type="text" maxlength="120" value="${esc(item.alt_text || "")}" data-promo-alt="${index}" placeholder="Optional description" ${busy ? "disabled" : ""} />
         </div>
         <div class="promo-creative-actions">
-          <button type="button" data-promo-creative-move="up" data-promo-creative-index="${index}" aria-label="Move image ${index + 1} earlier" ${index === 0 || busy ? "disabled" : ""}>↑</button>
-          <button type="button" data-promo-creative-move="down" data-promo-creative-index="${index}" aria-label="Move image ${index + 1} later" ${index === count - 1 || busy ? "disabled" : ""}>↓</button>
+          <button type="button" data-promo-creative-move="up" data-promo-creative-index="${index}" aria-label="Move ${label} earlier" ${index === 0 || busy ? "disabled" : ""}>↑</button>
+          <button type="button" data-promo-creative-move="down" data-promo-creative-index="${index}" aria-label="Move ${label} later" ${index === count - 1 || busy ? "disabled" : ""}>↓</button>
           <button type="button" data-promo-creative-replace="${index}" ${busy ? "disabled" : ""}>Replace</button>
-          <input type="file" accept="image/jpeg,image/png,image/webp" data-promo-replace-file="${index}" hidden ${busy ? "disabled" : ""} />
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,text/html,.jpg,.jpeg,.png,.webp,.heic,.heif,.html,.htm" data-promo-replace-file="${index}" hidden ${busy ? "disabled" : ""} />
           <button type="button" class="promo-creative-remove" data-promo-creative-remove="${index}" ${busy ? "disabled" : ""}>Remove</button>
         </div>
       </div>`;
@@ -4320,37 +4336,54 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
   }
 
-  async function uploadPromoImages(files, replaceIndex) {
+  function promoCreativeType(file) {
+    const name = String(file && file.name || "").toLowerCase();
+    if (/\.html?$/.test(name)) return "html";
+    if (/\.(jpe?g|png|webp|heic|heif)$/.test(name)) return "image";
+    return "";
+  }
+
+  async function uploadPromoCreatives(files, replaceIndex) {
     if (promoUploadsInFlight) return;
-    const selected = (files || []).filter(file => file && /^image\/(jpeg|png|webp)$/i.test(String(file.type || "")));
+    const selected = (files || []).map(file => ({ file, type: promoCreativeType(file) })).filter(item => item.type);
     if (!selected.length) {
-      toast("Choose JPG, PNG or WebP images", false);
+      toast("Choose JPG, PNG, WebP, HEIC/HEIF or HTML banner files", false);
       return;
     }
     const isReplace = Number.isInteger(replaceIndex);
     const capacity = isReplace ? 1 : Math.max(0, 8 - promoManagerItems.length);
     if (capacity < 1) {
-      toast("Custom promotions can contain up to 8 images", false);
+      toast("Custom promotions can contain up to 8 banner files", false);
       return;
     }
-    if (selected.length > capacity) toast(`Only ${capacity} more image${capacity === 1 ? " can" : "s can"} be added`, false);
+    if (selected.length > capacity) toast(`Only ${capacity} more creative${capacity === 1 ? " can" : "s can"} be added`, false);
     const filesToUpload = selected.slice(0, capacity);
     promoUploadsInFlight += 1;
-    $("#promoManagerStatus").textContent = `Uploading ${filesToUpload.length} image${filesToUpload.length === 1 ? "" : "s"}…`;
+    $("#promoManagerStatus").textContent = `Uploading ${filesToUpload.length} banner file${filesToUpload.length === 1 ? "" : "s"}…`;
     renderPromoCreativeChoices();
     try {
-      for (const file of filesToUpload) {
-        const uploaded = await DB.uploadMedia(file, "image");
+      for (const selection of filesToUpload) {
+        const { file, type } = selection;
+        const uploaded = type === "html"
+          ? await DB.uploadPromotionHtml(file)
+          : await DB.uploadMedia(file, "image");
         const mediaId = String(uploaded && uploaded.id || "").toLowerCase();
-        if (!/^[a-f0-9]{32}$/.test(mediaId)) throw new Error("The image upload did not return a valid media reference.");
+        if (!/^[a-f0-9]{32}$/.test(mediaId)) throw new Error("The banner upload did not return a valid creative reference.");
         let previewUrl = "";
         if (window.URL && typeof window.URL.createObjectURL === "function") {
           try { previewUrl = window.URL.createObjectURL(file); } catch (error) { /* The published URL will load after saving. */ }
         }
-        const item = { media_id: mediaId, alt_text: "", preview_url: previewUrl };
+        const item = {
+          media_id: mediaId,
+          type,
+          width: type === "html" ? Math.max(1, Math.min(2000, Number(uploaded.width) || 728)) : 0,
+          height: type === "html" ? Math.max(1, Math.min(1200, Number(uploaded.height) || 90)) : 0,
+          alt_text: "",
+          preview_url: previewUrl
+        };
         if (isReplace) {
           const previous = promoManagerItems[replaceIndex];
-          if (!previous) throw new Error("That promotion image is no longer available to replace.");
+          if (!previous) throw new Error("That promotion creative is no longer available to replace.");
           releasePromoPreview(previous);
           item.alt_text = previous.alt_text || "";
           promoManagerItems[replaceIndex] = item;
@@ -4361,7 +4394,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         renderPromoProductChoices();
       }
     } catch (error) {
-      toast(error.message || "Could not upload the storefront image", false);
+      toast(error.message || "Could not upload the storefront banner file", false);
     } finally {
       promoUploadsInFlight = Math.max(0, promoUploadsInFlight - 1);
       if (promoManagerDirty) $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
@@ -4377,7 +4410,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const input = event.currentTarget;
     const files = Array.from(input.files || []);
     input.value = "";
-    if (files.length) uploadPromoImages(files, null);
+    if (files.length) uploadPromoCreatives(files, null);
   });
   $("#promoCreativeList").addEventListener("click", event => {
     const remove = event.target.closest("[data-promo-creative-remove]");
@@ -4413,7 +4446,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const file = replaceInput.files && replaceInput.files[0];
       const index = Number(replaceInput.dataset.promoReplaceFile);
       replaceInput.value = "";
-      if (file && Number.isInteger(index)) uploadPromoImages([file], index);
+      if (file && Number.isInteger(index)) uploadPromoCreatives([file], index);
       return;
     }
     const altInput = event.target.closest("[data-promo-alt]");
@@ -4476,12 +4509,17 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       return;
     }
     if (promoManagerMode === "custom" && promoManagerItems.length === 0) {
-      toast("Add at least one custom image, or choose another strip mode", false);
+      toast("Add at least one banner image or HTML file, or choose another strip mode", false);
       return;
     }
     const value = promoManagerMode === "auto" ? "auto"
       : promoManagerMode === "none" ? "none"
-      : promoManagerMode === "custom" ? JSON.stringify({ mode: "custom", items: promoManagerItems.slice(0, 8).map(item => ({ media_id: item.media_id, alt_text: item.alt_text || "" })) })
+      : promoManagerMode === "custom" ? JSON.stringify({ mode: "custom", items: promoManagerItems.slice(0, 8).map(item => ({
+        media_id: item.media_id,
+        type: item.type === "html" ? "html" : "image",
+        ...(item.type === "html" ? { width: item.width || 728, height: item.height || 90 } : {}),
+        alt_text: item.alt_text || ""
+      })) })
       : JSON.stringify(promoManagerIds.slice(0, 8));
     const button = $("#btnSavePromoSettings");
     const originalLabel = button.textContent;
