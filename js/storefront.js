@@ -701,16 +701,10 @@
       : `<div class="star-rating" aria-label="No customer reviews yet"><span class="review-count">New arrival · No reviews yet</span></div>`;
   }
 
-  const discountPercent = p => {
-    const original = Number(p.compare_price || 0);
-    const selling = Number(displayPrice(p) || 0);
-    return original > 0 && selling >= 0 && selling < original
-      ? Math.round(((original - selling) / original) * 100)
-      : 0;
-  };
-
-  /* ---------- product card with multi-angle preview ---------- */
-  function mediaHTML(p, photos, disc) {
+  /* ---------- product card with multi-angle preview ----------
+     The photo-count indicator is the only overlay on the card image.
+     Grade, discount, stock type and video belong to the product page. */
+  function mediaHTML(p, photos) {
     const mainImg = photos[0] || p.image_url;
     const img = mainImg
       ? PK.pictureHTML(mainImg, {
@@ -724,28 +718,22 @@
       ? `<div class="media-dots" title="Open the full photo set">${photos.slice(0, 4).map((src, i) =>
           `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.resolveSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
       : "";
-    const grade = PK.gradeFor(p);
     return `
       <div class="pmedia">
-        <span class="grade-badge" style="--grade:${grade.color}">${esc(grade.short)}</span>
-        ${disc > 0 ? `<span class="discount-badge">${disc}% OFF</span>` : ""}
-        <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.is_consignment ? "PARTNER · VINTAGE" : (p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE")}</span>
         ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
         ${dots}
-        ${p.video && p.video.url ? '<span class="media-video-badge"><svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10" aria-hidden="true"><path d="M8 5v14l12-7z"/></svg>Video</span>' : ""}
         ${photos.length > 4 ? `<span class="media-extra-photos">+${photos.length - 4} photos</span>` : ""}
       </div>`;
   }
 
   function cardHTML(p) {
     const sold = p.in_stock_count <= 0;
-    const disc = discountPercent(p);
     const photos = getProductImages(p);
     const href = esc(PK.productPath(p));
     return `
     <article class="pcard ${sold ? "sold" : ""}" data-card="${esc(p.id)}">
       <a class="pcard-link" href="${href}" aria-label="View full details, measurements and photos for ${esc(p.name)}">
-        ${mediaHTML(p, photos, disc)}
+        ${mediaHTML(p, photos)}
         <div class="pbody">
           <div class="phead-row">
             <span class="pdem">${esc(p.demographic || p.category)}</span>
