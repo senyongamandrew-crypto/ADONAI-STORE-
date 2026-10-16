@@ -10,12 +10,14 @@ const ROOT = path.resolve(__dirname, '..');
 const POS_DIST = path.join(ROOT, 'pos-dist');
 const ANDROID_ASSETS = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'public');
 
-/**
- * Responsive WebP derivatives (p1001-320.webp, …) are generated for the public
- * storefront's <picture> srcset only. The POS register and admin console render
- * the base JPEG, so shipping the whole ladder would bloat the APK for nothing.
- */
-const STOREFRONT_ONLY_ASSET = /-\d+\.webp$/i;
+  /**
+   * Responsive WebP derivatives (p1001-320.webp, …) are generated for the public
+   * storefront's <picture> srcset only. The POS register and admin console render
+   * the base JPEG, so shipping the whole ladder would bloat the APK for nothing.
+   * The rider-demo browser bridge is web-review-only: the installed APK's rider
+   * screen talks to the native Java bridge and must never bundle the simulation.
+   */
+  const STOREFRONT_ONLY_ASSET = /(-\d+\.webp$|rider-demo-bridge\.js$)/i;
 
 function copyDirRecursive(src, dest) {
   if (!fs.existsSync(src)) return;
