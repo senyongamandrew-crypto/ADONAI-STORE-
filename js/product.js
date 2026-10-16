@@ -314,6 +314,9 @@
     const story = String(product.desc || "").trim();
     const staffNote = String(product.staff_notes || "").trim();
     const size = product.size && product.size !== "-" ? product.size : "Standard";
+    const stockType = product.is_consignment
+      ? "Partner · Vintage"
+      : product.item_condition === "BRAND_NEW" ? "Brand New" : "Vintage / Pre-Loved";
 
     $("#pdpDetail").innerHTML = `
       <p class="pdp-eyebrow">${esc(product.brand || "Vintage / Unbranded")}</p>
@@ -339,6 +342,7 @@
         <div><dt>Tagged size</dt><dd>${esc(size)}</dd></div>
         <div><dt>Colour / wash</dt><dd>${esc(product.color || "As photographed")}</dd></div>
         <div><dt>Category</dt><dd>${esc(product.category || "—")}</dd></div>
+        <div><dt>Stock type</dt><dd>${esc(stockType)}</dd></div>
         <div><dt>Fits</dt><dd>${esc(product.demographic || "Unisex")}</dd></div>
         ${fabric ? `<div><dt>Fabric composition</dt><dd>${esc(fabric)}</dd></div>` : ""}
         <div><dt>Availability</dt><dd>${esc(stock.label)}</dd></div>
@@ -556,14 +560,12 @@
 
     $("#pdpRelatedGrid").innerHTML = list.map(item => {
       const image = K.productImages(item)[0];
-      const grade = K.gradeFor(item);
       return `
         <a class="rel-card" href="${esc(K.productPath(item))}">
           <div class="rel-media">
             ${image
               ? K.pictureHTML(image, { alt: item.name, sizes: "(min-width: 1024px) 220px, 45vw", width: 400, height: 500 })
               : `<span class="rel-noimg">No photo</span>`}
-            <span class="rel-grade" style="--grade:${grade.color}">${esc(grade.short)}</span>
           </div>
           <p class="rel-name">${esc(item.name)}</p>
           <p class="rel-meta">${esc(item.size && item.size !== "-" ? "Size " + item.size : "One size")} · ${esc(item.brand || "Vintage")}</p>

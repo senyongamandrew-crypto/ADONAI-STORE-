@@ -111,7 +111,22 @@
     { key: "leg_opening", label: "Leg Opening", group: "bottom" },
     // Footwear
     { key: "insole", label: "Insole Length", group: "feet" },
-    { key: "heel", label: "Heel Height", group: "feet" }
+    { key: "heel", label: "Heel Height", group: "feet" },
+    // Jewelry & watches
+    { key: "pendant", label: "Pendant / Stone Size", group: "jewelry" },
+    { key: "case_diameter", label: "Case Diameter", group: "watch" },
+    { key: "band_width", label: "Band Width", group: "watch" },
+    { key: "band_length", label: "Band Length", group: "watch" },
+    // Bags
+    { key: "height", label: "Height", group: "bag" },
+    { key: "depth", label: "Depth", group: "bag" },
+    { key: "strap_drop", label: "Strap / Handle Drop", group: "bag" },
+    // Eyewear
+    { key: "lens_width", label: "Lens Width", group: "eyewear" },
+    { key: "bridge", label: "Bridge Width", group: "eyewear" },
+    { key: "temple", label: "Temple Arm Length", group: "eyewear" },
+    // Hats, scarves & belts
+    { key: "circumference", label: "Head / Waist Circumference", group: "accessory" }
   ];
 
   const MEASUREMENT_GROUPS = {
@@ -129,13 +144,13 @@
     Boots: "feet",
     Sandals: "feet",
     "Accessories": "any",
-    "Bags & Handbags": "none",
-    "Necklaces & Chains": "none",
-    "Bracelets & Bangles": "none",
-    "Rings & Earrings": "none",
-    Watches: "none",
-    "Eyewear & Sunglasses": "none",
-    "Hats, Scarves & Belts": "none"
+    "Bags & Handbags": "bag",
+    "Necklaces & Chains": "jewelry",
+    "Bracelets & Bangles": "jewelry",
+    "Rings & Earrings": "jewelry",
+    Watches: "watch",
+    "Eyewear & Sunglasses": "eyewear",
+    "Hats, Scarves & Belts": "accessory"
   };
 
   const titleCase = key => String(key || "")

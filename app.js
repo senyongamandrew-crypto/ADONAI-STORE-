@@ -1662,6 +1662,158 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     "Accessories": ["Accessories", "Hats, Scarves & Belts"],
     "Kids": ["Children Wear"]
   };
+
+  /* Category-aware intake profiles. Once staff pick the category group /
+     category, Catalog Intake asks only the details that belong to that kind
+     of stock: a necklace gets length and material questions — never S/M/L
+     size variants, fabric composition or garment grading notes. */
+  const INTAKE_PROFILES = {
+    apparel: {
+      hint: "Garment intake — size, fabric & composition, care and flat-lay measurements. Garment sizes (S–XL) and fabric fields are only asked for apparel.",
+      brandNewLabel: "Brand-New Apparel · Multi-Quantity",
+      size: { label: "Size", placeholder: "L / 42 / -", presets: ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"] },
+      sizeVariants: true,
+      quickMeasurements: { label: "Exact garment measurements", hint: "Pre-loved: chest, length, waist, inseam", placeholder: "Chest 42in; Length 28in" },
+      fabric: { label: "Fabric & composition", hint: "Shown on the product page", placeholder: "100% Cotton denim · 12.5oz" },
+      fabricGradingNotes: true,
+      care: { show: true, placeholder: "Machine wash cold inside out. Hang dry." },
+      measureSets: ["top", "bottom"],
+      defaultMeasureSet: "top",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe fit, fabric feel, vintage era, and standout features…",
+      measureNotePlaceholder: "Measured flat, buttoned, without stretching.",
+      flawPlaceholder: "Small moth nibble (3mm) on the lower left front panel. Replaced third button."
+    },
+    footwear: {
+      hint: "Footwear intake — shoe size, material and flat-lay measurements (length, insole, heel). No garment sizes or fabric grading notes.",
+      brandNewLabel: "Brand-New Footwear · Multi-Quantity",
+      size: { label: "Shoe size", placeholder: "42 / UK 8 / US 9", presets: ["36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "One size"] },
+      sizeVariants: true,
+      quickMeasurements: { label: "Exact shoe measurements", hint: "Pre-loved: insole, outsole, heel", placeholder: "Insole 10.5in; Heel 1in" },
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Leather upper · Rubber sole" },
+      fabricGradingNotes: false,
+      care: { show: true, placeholder: "Wipe clean. Use shoe trees. Avoid soaking." },
+      measureSets: ["other"],
+      defaultMeasureSet: "other",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe fit, sole condition, leather feel, and standout features…",
+      measureNotePlaceholder: "Insole measured heel to toe, sole flat.",
+      flawPlaceholder: "Light creasing on the right toe. Sole tread still deep."
+    },
+    jewelry: {
+      hint: "Jewelry intake — length / size, material and piece measurements. No S/M/L size variants, fabric fields or garment measurements.",
+      brandNewLabel: "Brand-New Jewelry · Multi-Quantity",
+      size: { label: "Length / size", placeholder: "18 in · 45 cm · One size", presets: ["One size", "14 in", "16 in", "18 in", "20 in", "24 in", "28 in", "30 in"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Gold-plated brass · 925 silver · beads" },
+      fabricGradingNotes: false,
+      care: { show: false, placeholder: "" },
+      measureSets: ["jewelry"],
+      defaultMeasureSet: "jewelry",
+      conditions: ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"],
+      storyPlaceholder: "Describe the piece's style, era, stones or charms, and standout features…",
+      measureNotePlaceholder: "Measured end-to-end, clasp closed.",
+      flawPlaceholder: "Clasp shows light wear. One stone has a tiny chip."
+    },
+    watch: {
+      hint: "Watch intake — case / band size, material and case measurements. No garment sizes or fabric fields.",
+      brandNewLabel: "Brand-New Watches · Multi-Quantity",
+      size: { label: "Band / case size", placeholder: "40mm case · One size", presets: ["One size", "34mm", "36mm", "38mm", "40mm", "42mm", "44mm"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Stainless steel · Leather strap" },
+      fabricGradingNotes: false,
+      care: { show: false, placeholder: "" },
+      measureSets: ["watch"],
+      defaultMeasureSet: "watch",
+      conditions: ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"],
+      storyPlaceholder: "Describe the movement, dial, case finish, and standout features…",
+      measureNotePlaceholder: "Measured across the case, excluding the crown.",
+      flawPlaceholder: "Hairline scratch on the crystal. Band shows light desk wear."
+    },
+    bag: {
+      hint: "Bag intake — size, material and body measurements (width, height, depth, strap drop). No garment sizes or fabric grading notes.",
+      brandNewLabel: "Brand-New Bags · Multi-Quantity",
+      size: { label: "Size", placeholder: "Medium / 30cm", presets: ["One size", "Mini", "Small", "Medium", "Large"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Genuine leather · Canvas · Nylon" },
+      fabricGradingNotes: false,
+      care: { show: true, placeholder: "Wipe with a soft dry cloth. Store in the dust bag." },
+      measureSets: ["bag"],
+      defaultMeasureSet: "bag",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe the leather, interior, hardware, and standout features…",
+      measureNotePlaceholder: "Measured flat at the widest points, bag empty.",
+      flawPlaceholder: "Corner scuffing and light interior marks. Hardware still bright."
+    },
+    eyewear: {
+      hint: "Eyewear intake — frame size, material and frame measurements. No garment sizes or fabric fields.",
+      brandNewLabel: "Brand-New Eyewear · Multi-Quantity",
+      size: { label: "Frame size", placeholder: "Medium / One size", presets: ["One size", "Small", "Medium", "Large"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Acetate · Metal frame · Polycarbonate lenses" },
+      fabricGradingNotes: false,
+      care: { show: false, placeholder: "" },
+      measureSets: ["eyewear"],
+      defaultMeasureSet: "eyewear",
+      conditions: ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"],
+      storyPlaceholder: "Describe the frame shape, lens tint, and standout features…",
+      measureNotePlaceholder: "Measured across the frame front, hinge to hinge.",
+      flawPlaceholder: "Small scratch on the left lens. Arms slightly loose."
+    },
+    accessory: {
+      hint: "Accessory intake — size, material and dimensions (length, width, circumference). No S/M/L variants unless the piece is sized.",
+      brandNewLabel: "Brand-New Accessories · Multi-Quantity",
+      size: { label: "Size", placeholder: "M / 34in waist / One size", presets: ["One size", "XS", "S", "M", "L", "XL", "28", "30", "32", "34", "36", "38", "40"] },
+      sizeVariants: true,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Wool · Cotton · Leather" },
+      fabricGradingNotes: false,
+      care: { show: true, placeholder: "Hand wash cold or dry clean. Store away from direct sun." },
+      measureSets: ["accessory"],
+      defaultMeasureSet: "accessory",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe the fabric, pattern, fit, and standout features…",
+      measureNotePlaceholder: "Measured flat without stretching.",
+      flawPlaceholder: "Faint mark on the inner band. No pulls or tears."
+    }
+  };
+
+  /* Which intake profile a category belongs to. Unknown categories fall back
+     by name, then to apparel so new catalog entries still get full garment
+     detail capture instead of a bare form. */
+  function intakeProfileFor(category) {
+    const value = String(category || "").toLowerCase();
+    if (/necklace|chain|bracelet|bangle|ring|earring|pendant|jewel/.test(value)) return "jewelry";
+    if (/watch|timepiece/.test(value)) return "watch";
+    if (/shoe|boot|sandal|sneaker|footwear|loafer/.test(value)) return "footwear";
+    if (/bag|handbag|backpack|tote|clutch|purse/.test(value)) return "bag";
+    if (/eyewear|sunglass|glasses|frame/.test(value)) return "eyewear";
+    if (/hat|scarf|belt|cap|beanie|accessor/.test(value)) return "accessory";
+    return "apparel";
+  }
+
+  /* Size labels/presets, refined per category (rings size differently from
+     chains) and per target audience (children get age runs first). */
+  function sizeSpecFor(category, profileKey) {
+    const value = String(category || "").toLowerCase();
+    const demo = ($("#inDemo") && $("#inDemo").value) || "";
+    if (profileKey === "jewelry") {
+      if (/ring/.test(value)) return { label: "Ring / earring size", placeholder: "7 · 52 · One size", presets: ["One size", "5", "6", "7", "8", "9", "10", "11"] };
+      if (/bracelet|bangle/.test(value)) return { label: "Bracelet length / size", placeholder: "7.5 in · One size", presets: ["One size", "6.5 in", "7 in", "7.5 in", "8 in", "8.5 in", "9 in"] };
+      return { label: "Length / size", placeholder: "18 in · 45 cm · One size", presets: ["One size", "14 in", "16 in", "18 in", "20 in", "24 in", "28 in", "30 in"] };
+    }
+    const spec = INTAKE_PROFILES[profileKey].size;
+    if (demo === "Children") {
+      if (profileKey === "footwear") return { label: spec.label, placeholder: "32 / kids", presets: ["28", "30", "32", "34", "36", "38", "One size"] };
+      if (profileKey === "apparel") return { label: spec.label, placeholder: "8y / 120cm / -", presets: ["2y", "4y", "6y", "8y", "10y", "12y", "14y", "XS", "S", "M", "L", "One size"] };
+    }
+    return spec;
+  }
+
   let intakeMedia = null;
   let intakeBound = false;
   let intakeLotsLoadInFlight = null;
@@ -1831,15 +1983,49 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       ["length", "Length"],
       ["insole", "Insole length"],
       ["heel", "Heel height"]
+    ],
+    jewelry: [
+      ["length", "Chain / piece length"],
+      ["pendant", "Pendant / stone size"],
+      ["width", "Width / thickness"]
+    ],
+    watch: [
+      ["case_diameter", "Case diameter"],
+      ["band_width", "Band width"],
+      ["band_length", "Band length"]
+    ],
+    bag: [
+      ["width", "Width"],
+      ["height", "Height"],
+      ["depth", "Depth"],
+      ["strap_drop", "Strap / handle drop"]
+    ],
+    eyewear: [
+      ["lens_width", "Lens width"],
+      ["bridge", "Bridge width"],
+      ["temple", "Temple arm length"]
+    ],
+    accessory: [
+      ["length", "Length"],
+      ["width", "Width"],
+      ["circumference", "Head / waist circumference"]
     ]
+  };
+
+  const MEASURE_SET_LABELS = {
+    top: "Tops · Jackets · Dresses",
+    bottom: "Pants · Jeans · Skirts",
+    other: "Shoes · Boots · Sandals",
+    jewelry: "Necklaces · Bracelets · Rings · Earrings",
+    watch: "Wristwatches",
+    bag: "Bags & Handbags",
+    eyewear: "Eyewear & Sunglasses",
+    accessory: "Hats · Scarves · Belts"
   };
 
   // Categories decide which measurement set is offered by default.
   function measureSetForCategory(category) {
-    const value = String(category || "").toLowerCase();
-    if (/pant|jean|skirt|short|trouser/.test(value)) return "bottom";
-    if (/shoe|boot|sandal|footwear|accessor|bag|handbag|wallet|belt|hat|scarf|necklace|chain|bracelet|bangle|ring|earring|watch|eyewear|sunglass/.test(value)) return "other";
-    return "top";
+    return INTAKE_PROFILES[intakeProfileFor(category)].defaultMeasureSet;
   }
 
   function buildMeasureFields(setKey, existing) {
@@ -1864,6 +2050,105 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return out;
   }
 
+  /* ---- category-aware field profiles ----------------------------------
+     applyIntakeProfile() re-shapes the intake form around the chosen
+     category: only the fields that belong to that kind of stock stay on
+     screen, with matching labels, size presets, condition grades and
+     measurement sets. */
+  function intakeFieldWrap(id) {
+    const el = $("#" + id);
+    return el ? el.closest(".field") : null;
+  }
+
+  function setIntakeFieldHidden(id, hidden) {
+    const wrap = intakeFieldWrap(id);
+    if (wrap) wrap.hidden = !!hidden;
+  }
+
+  function isIntakeFieldVisible(id) {
+    const wrap = intakeFieldWrap(id);
+    return !wrap || !wrap.hidden;
+  }
+
+  function setIntakeFieldLabel(id, label, hint) {
+    const wrap = intakeFieldWrap(id);
+    if (!wrap) return;
+    const labelEl = wrap.querySelector("label");
+    if (labelEl) labelEl.innerHTML = `${label}${hint ? `<span class="fhint">${hint}</span>` : ""}`;
+  }
+
+  function rebuildIntakeSizePresets(presets) {
+    const select = $("#inSizePreset");
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = `<option value="">Preset</option>` + presets.map(s => `<option value="${s}">${s}</option>`).join("");
+    select.value = presets.includes(current) ? current : "";
+  }
+
+  function rebuildIntakeConditionOptions(options) {
+    const select = $("#inCond");
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = options.map(c => `<option>${c}</option>`).join("");
+    select.value = options.includes(current) ? current : options[0];
+  }
+
+  function rebuildMeasureSetOptions(setKeys, defaultKey) {
+    const select = $("#inMeasureSet");
+    if (!select) return defaultKey;
+    const current = select.value;
+    select.innerHTML = setKeys.map(key => `<option value="${key}">${MEASURE_SET_LABELS[key] || key}</option>`).join("");
+    select.value = setKeys.includes(current) ? current : defaultKey;
+    return select.value;
+  }
+
+  function applyIntakeProfile() {
+    if (!$("#inCat") || !$("#inMeasureSet")) return;
+    const category = $("#inCat").value;
+    const profileKey = intakeProfileFor(category);
+    const spec = INTAKE_PROFILES[profileKey];
+    const preLoved = intakeCondition() === "PRE_LOVED";
+
+    // Inventory-type toggle wording follows the stock kind, not just apparel.
+    const brandNewToggle = document.querySelector('[data-intake-condition="BRAND_NEW"]');
+    if (brandNewToggle) brandNewToggle.textContent = spec.brandNewLabel;
+
+    const hint = $("#intakeProfileHint");
+    if (hint) { hint.hidden = false; hint.textContent = spec.hint; }
+
+    const sizeSpec = sizeSpecFor(category, profileKey);
+    setIntakeFieldLabel("inSize", sizeSpec.label);
+    if ($("#inSize")) $("#inSize").placeholder = sizeSpec.placeholder;
+    rebuildIntakeSizePresets(sizeSpec.presets);
+
+    // Brand-new multi-quantity extras only where size variants make sense.
+    setIntakeFieldHidden("inSizeVariantsField", preLoved || !spec.sizeVariants);
+    setIntakeFieldHidden("inFactoryNotesField", preLoved);
+    if (spec.quickMeasurements && preLoved) {
+      setIntakeFieldHidden("inMeasurementsField", false);
+      setIntakeFieldLabel("inMeasurementsField", spec.quickMeasurements.label, spec.quickMeasurements.hint);
+      if ($("#inMeasurements")) $("#inMeasurements").placeholder = spec.quickMeasurements.placeholder;
+    } else {
+      setIntakeFieldHidden("inMeasurementsField", true);
+    }
+
+    // Fabric questions belong to garments; other stock gets material instead.
+    setIntakeFieldLabel("inFabric", spec.fabric.label, spec.fabric.hint || "");
+    if ($("#inFabric")) $("#inFabric").placeholder = spec.fabric.placeholder;
+    setIntakeFieldHidden("inFabricNotesField", !spec.fabricGradingNotes);
+    setIntakeFieldHidden("inCare", !spec.care.show);
+    if (spec.care.show && $("#inCare")) $("#inCare").placeholder = spec.care.placeholder;
+
+    rebuildIntakeConditionOptions(spec.conditions);
+
+    const setKey = rebuildMeasureSetOptions(spec.measureSets, spec.defaultMeasureSet);
+    buildMeasureFields(setKey);
+
+    if ($("#inStory")) $("#inStory").placeholder = spec.storyPlaceholder;
+    if ($("#inMeasureNote")) $("#inMeasureNote").placeholder = spec.measureNotePlaceholder;
+    if ($("#inFlaws")) $("#inFlaws").placeholder = spec.flawPlaceholder;
+  }
+
   // The condition controls must be local console helpers, not undefined
   // globals: opening Catalog Intake directly should never interrupt boot.
   function intakeCondition() {
@@ -1879,8 +2164,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
     });
-    ["inSizeVariantsField", "inFactoryNotesField"].forEach(id => { $("#" + id).hidden = preLoved; });
-    $("#inMeasurementsField").hidden = !preLoved;
+    // Size variants, factory notes and quick measurements depend on both the
+    // inventory type and the category profile — applyIntakeProfile owns them.
+    applyIntakeProfile();
     const qty = $("#inQty");
     qty.readOnly = preLoved || partnerSource;
     if (preLoved || partnerSource) { qty.value = "1"; qty.max = "1"; }
@@ -2048,9 +2334,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       await setView("partners");
       if (viewReady && currentView === "partners") openPartnerEditor();
     });
-    $("#inDemo").addEventListener("change", () => { $("#inSku").value = newIntakeSku(); paintTag(); });
+    $("#inDemo").addEventListener("change", () => { $("#inSku").value = newIntakeSku(); applyIntakeProfile(); paintTag(); });
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
-    $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; paintTag(); });
+    $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; applyIntakeProfile(); paintTag(); });
     $("#inStockLot").addEventListener("change", () => {
       syncIntakeLotGradeUI();
       const lot = findIntakeLot($("#inStockLot").value);
@@ -2075,13 +2361,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     // System Parameters default stops auto-refreshing it.
     $("#inTransport").addEventListener("input", () => { $("#inTransport").dataset.auto = "0"; });
     $("#inMeasureSet").addEventListener("change", () => buildMeasureFields($("#inMeasureSet").value));
-    $("#inCat").addEventListener("change", () => {
-      const suggested = measureSetForCategory($("#inCat").value);
-      if ($("#inMeasureSet").value !== suggested) {
-        $("#inMeasureSet").value = suggested;
-        buildMeasureFields(suggested);
-      }
-    });
+    // Re-shape the whole detail block whenever the category changes: the
+    // relevant fields, labels, presets and measurement set follow it.
+    $("#inCat").addEventListener("change", applyIntakeProfile);
     buildMeasureFields($("#inMeasureSet").value);
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
@@ -2147,12 +2429,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       item_condition: intakeCondition(),
       quantity_type: intakeCondition(),
       condition: $("#inCond").value,
-      size_variants: $("#inSizeVariants").value.split(",").map(value => value.trim()).filter(Boolean),
-      factory_tag_notes: $("#inFactoryNotes").value.trim(),
-      measurements: $("#inMeasurements").value.split(";").reduce((out, pair) => {
-        const parts = pair.split(":"); if (parts[0] && parts[1]) out[parts[0].trim()] = parts.slice(1).join(":").trim(); return out;
-      }, {}),
-      fabric_grading_notes: $("#inFabricNotes").value.trim(),
+      // Fields hidden by the category profile never leak stale values.
+      size_variants: isIntakeFieldVisible("inSizeVariants") ? $("#inSizeVariants").value.split(",").map(value => value.trim()).filter(Boolean) : [],
+      factory_tag_notes: isIntakeFieldVisible("inFactoryNotes") ? $("#inFactoryNotes").value.trim() : "",
+      fabric_grading_notes: isIntakeFieldVisible("inFabricNotes") ? $("#inFabricNotes").value.trim() : "",
       cost_price: partnerSource ? 0 : (Number($("#inCost").value) || 0),
       stock_lot_id: partnerSource ? "" : $("#inStockLot").value,
       lot_grade_id: partnerSource ? "" : (($('#inLotGradeField') && !$('#inLotGradeField').hidden && $('#inLotGrade')) ? $('#inLotGrade').value : ""),
@@ -2163,8 +2443,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
       // Product detail page specifications
-      fabric: $("#inFabric").value.trim(),
-      care_notes: $("#inCare").value.trim(),
+      fabric: isIntakeFieldVisible("inFabric") ? $("#inFabric").value.trim() : "",
+      care_notes: isIntakeFieldVisible("inCare") ? $("#inCare").value.trim() : "",
       measurements: readMeasurements(),
       flaw_notes: $("#inFlaws").value.trim(),
       flaw_photo_index: Number($("#inFlawPhoto").value),
