@@ -1883,7 +1883,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                                            if str(key).lower() == "x-adonai-media-preview"), "")
                     if preview_header != "1":
                         staff_info = None
-            return media.route_request(method, clean_path, body_bytes, headers, staff_info)
+            return media.route_request(method, clean_path, body_bytes, headers, staff_info, query_params)
 
         if clean_path.startswith("/api/consignment/"):
             return route_consignment(method, clean_path, query_params, body, headers)
@@ -2040,7 +2040,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     if public_availability:
                         # Storefront channel: the internal transport allocation
                         # never leaves the server, shoppers see one delivery fee.
-                        data = access_control.sanitize_storefront_pricing(data)
+                        # The internal costing and staff fields go with it.
+                        data = access_control.sanitize_storefront_product(data)
                     data["authoritative_stock_count"] = data["in_stock_count"]
                     data["in_stock_count"] = max(0, data["in_stock_count"] - held.get(product.id, 0))
                     data["available_count"] = data["in_stock_count"]
@@ -2483,7 +2484,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 data = access_control.sanitize_product(prod.to_dict(), access_control.state(headers, session))
                 # This is the shopper-facing product-detail channel, so the
                 # internal transport allocation is replaced by one delivery fee.
-                data = access_control.sanitize_storefront_pricing(data)
+                data = access_control.sanitize_storefront_product(data)
                 held = (
                     session.query(func.coalesce(func.sum(InventoryLock.quantity), 0))
                     .filter(

@@ -163,6 +163,21 @@ STOREFRONT_INTERNAL_PRICING = (
     "checkout_transport_portion",
 )
 
+# Internal costing, staff paperwork and lot bookkeeping never belong in a
+# shopper-facing payload. They were only removed when the operator had put
+# the Stock area behind a password; a store with no area passwords — the
+# common case — was publishing its cost price and staff notes on the public
+# product list. The public channel always drops them.
+STOREFRONT_INTERNAL_FIELDS = (
+    "cost_price",
+    "profit",
+    "gross_profit",
+    "staff_notes",
+    "stock_lot_id",
+    "lot_grade_id",
+    "fulfillment_notes",
+)
+
 
 def sanitize_storefront_pricing(data):
     """Replace the internal transport allocation with a single delivery charge."""
@@ -175,6 +190,18 @@ def sanitize_storefront_pricing(data):
         data.pop(key, None)
     data["delivery_fee"] = delivery_fee
     return data
+
+
+def sanitize_storefront_product(data):
+    """Full public-channel scrub for a shopper-facing product payload.
+
+    Drops the internal costing, staff and lot fields, then replaces the
+    transport allocation with the single delivery charge a shopper sees.
+    """
+    data = dict(data or {})
+    for key in STOREFRONT_INTERNAL_FIELDS:
+        data.pop(key, None)
+    return sanitize_storefront_pricing(data)
 
 
 def sanitize_sale(data, access):

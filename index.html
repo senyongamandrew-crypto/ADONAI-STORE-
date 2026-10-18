@@ -50,38 +50,76 @@
 <body>
 
 <!-- ============ HEADER ============ -->
-<header class="site-head">
+<header class="site-head site-head--hero">
   <div class="wrap head-row">
-    <a class="brand" href="./" aria-label="Adonai Store Home">
+    <a class="brand" href="./" aria-label="Adonai Store home">
       <img class="brand-logo-img" src="assets/adonai-logo-horizontal.svg" alt="Adonai Store" width="190" height="44" />
     </a>
     <div class="head-actions">
-      <button class="head-pill" id="installBtn">Install App</button>
-      <button class="cart-btn" id="cartBtn" data-action="open-cart">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6"/></svg>
-        Cart <span class="cart-count" id="cartCount">0</span>
+      <!-- Secondary action: installing the app is a convenience, not a sale. -->
+      <button class="head-pill head-install" id="installBtn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.5v11m0 0 4-4m-4 4-4-4" />
+          <path d="M4.5 16.5v2A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-2" />
+        </svg>
+        <span class="head-install-label">Install App</span>
       </button>
+      <!-- Primary action: the cart, with the count riding the icon. -->
+      <button class="cart-btn" id="cartBtn" data-action="open-cart" type="button" aria-label="Cart">
+        <span class="cart-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" />
+            <path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6" />
+          </svg>
+          <span class="cart-count is-empty" id="cartCount">0</span>
+        </span>
+        <span class="cart-label" aria-hidden="true">Cart</span>
+      </button>
+      <!-- The count, spoken. The header script keeps this in step with the
+           badge and with the cart button's own accessible name. -->
+      <span class="cart-status" id="cartStatus" role="status" aria-live="polite" aria-atomic="true"></span>
     </div>
   </div>
 </header>
 
 <!-- ============ MASTHEAD ============ -->
-<!-- The copy lives in .masthead-inner: from 701px up that column carries its
-     own cream scrim, so the headline and paragraph stay legible no matter
-     how the editorial photo is cropped at tablet / split-screen widths. -->
-<section class="masthead wrap">
-  <div class="masthead-inner">
-    <p class="eyebrow">Kampala · Brand-new + curated vintage</p>
-    <h1>Factory-fresh styles and one-of-one finds.</h1>
-    <p class="lede">
-      Factory-tagged apparel and hand-inspected vintage pieces that exist once.
-      <span class="lede-more">Brand-New Apparel with multiple quantities sits alongside Curated Pre-Loved / Vintage Garments that are unique to the rail — every order is packed, tracked and delivered across Uganda by our Kampala team.</span>
-    </p>
-    <div class="masthead-cta">
-      <!-- One order path only: the cart. Orders are written to the database,
-           reserve the piece and land in the store's POS for fulfilment. -->
-      <a class="mh-btn primary" href="#catalogDashboardRegion">Shop the live rail</a>
-      <a class="mh-btn ghost" href="#delivery">Delivery &amp; pickup</a>
+<!-- The hero is full bleed: the photograph runs all the way up behind the
+     header, so the Install App and Cart buttons sit on the image instead of
+     on a plain bar. The bar's own cream surface fades in only once the page
+     moves. The copy lives in .masthead-inner: from 701px up that column
+     carries its own cream scrim, so the headline and paragraph stay legible
+     no matter how the editorial photo is cropped at tablet / split-screen
+     widths. -->
+<section class="masthead">
+  <div class="wrap">
+    <div class="masthead-inner">
+      <p class="eyebrow">Kampala · Brand-new + curated vintage</p>
+      <h1>Factory-fresh styles and one-of-one finds.</h1>
+      <p class="lede">
+        Factory-tagged apparel and hand-inspected vintage pieces that exist once.
+      </p>
+
+      <!-- What the store stands for.
+           The banner sells two very different things — brand-new in depth and
+           curated one-of-one vintage — and a first-time visitor should leave it
+           knowing exactly that, what the vintage inspection is worth, and what
+           happens once a piece is gone. Three short lines do that; the long
+           paragraph that used to sit here said the same thing far less clearly.
+           The line above them is deliberately about service, not about the
+           stock: the lede has already named the stock, and saying it twice
+           reads as filler. -->
+      <div class="masthead-promise">
+        <p class="promise-label"><span class="promise-rule" aria-hidden="true"></span>What Adonai stands for</p>
+        <p class="promise-line">
+          Every order is packed, tracked and delivered across Uganda by our own
+          Kampala team — brand-new or one-of-one.
+        </p>
+        <ul class="promise-anchors">
+          <li><span class="promise-key">Factory-new, in depth</span><span class="promise-tail">Your size, actually in stock</span></li>
+          <li><span class="promise-key">Vintage, inspected &amp; graded</span><span class="promise-tail">Condition stated, not guessed</span></li>
+          <li><span class="promise-key">One-of-one</span><span class="promise-tail">Once it leaves, it is gone</span></li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>
@@ -163,7 +201,48 @@
     </div>
   </section>
 
-  <div class="grid card-grid" id="productGrid"></div>
+  <!-- Placeholder cards. They are in the HTML, not built by script, so the
+       rail already looks like a shop while the catalog is still in flight
+       instead of showing an empty gap. The storefront replaces them with
+       the real cards as soon as the catalog arrives. -->
+  <div class="grid card-grid" id="productGrid" aria-busy="true" aria-label="Loading current pieces">
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+  </div>
   <p class="empty" id="gridEmpty" hidden>Nothing matches those filters right now — the rail changes daily, so check back soon.</p>
 </main>
 
@@ -279,6 +358,9 @@
 <div class="toast" id="toast"></div>
 
 <script src="js/analytics.js?v=2.6"></script>
+<!-- Header behaviour: the bar's scroll elevation and the cart count badge.
+     Shared with the product page so both headers behave identically. -->
+<script src="js/header.js?v=1.0"></script>
 <!-- Scroll-lock owner. Must load before any controller that opens an
      overlay so the lock has a single, reference-counted source of truth. -->
 <script src="js/scrollLock.js?v=1.0"></script>

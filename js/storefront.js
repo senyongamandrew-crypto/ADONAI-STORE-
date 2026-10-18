@@ -10,6 +10,15 @@
   const PK = window.AdonaiPDP;
   const displayPrice = p => Number(p && (p.final_selling_price != null ? p.final_selling_price : p.selling_price)) || 0;
   const CONSENT_KEY = "adonai-consent-v1";
+  // How many cards load their photo straight away. A shopper who just opened
+  // the site is looking at the first row, so those photos must not sit in
+  // the lazy-loading queue behind everything else.
+  const EAGER_CARD_COUNT = 4;
+  // Yield to the browser between batches so the first screenful paints now
+  // and the rest of the rail fills in without blocking the page.
+  const scheduleFrame = typeof window.requestAnimationFrame === "function"
+    ? cb => window.requestAnimationFrame(() => cb())
+    : cb => setTimeout(cb, 16);
 
   /* ---------- stroke icon set ---------- */
   const svg = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -335,7 +344,13 @@
       const frame = `<span class="promo-html-viewport"><iframe src="${esc(src)}" title="" width="${width}" height="${height}" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" tabindex="-1" aria-hidden="true"></iframe></span>`;
       return `<a class="promo-card promo-card--custom promo-card--html" href="#catalogDashboardRegion" style="${sizeStyle}"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media">${frame}</span></a>`;
     }
-    return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media"><img src="${esc(src)}" alt="${esc(alt)}" class="promo-card-img" loading="lazy" decoding="async" width="560" height="180"></span></a>`;
+    return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media">${PK.pictureHTML(src, {
+      alt: alt,
+      className: "promo-card-img",
+      sizes: "(min-width: 640px) 280px, 78vw",
+      width: 560,
+      height: 180
+    })}</span></a>`;
   }
 
   function renderPromotionalRail() {
@@ -579,9 +594,8 @@
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
       term = e.target.value.trim().toLowerCase();
-      renderGrid();
+      const visibleCount = renderGrid();
       if (window.AdonaiAnalytics && term) {
-        const visibleCount = $("#productGrid").children.length;
         window.AdonaiAnalytics.trackSearch(term, visibleCount);
       }
     }, 300);
@@ -707,19 +721,27 @@
   /* ---------- product card with multi-angle preview ----------
      The photo-count indicator is the only overlay on the card image.
      Grade, discount, stock type and video belong to the product page. */
-  function mediaHTML(p, photos) {
+  function mediaHTML(p, photos, index) {
     const mainImg = photos[0] || p.image_url;
+    // The first cards are the ones a shopper actually sees on arrival, so
+    // their photo must not wait for the lazy-loading queue.
+    const eager = index < EAGER_CARD_COUNT;
     const img = mainImg
       ? PK.pictureHTML(mainImg, {
           alt: p.name,
           sizes: "(min-width: 1024px) 280px, (min-width: 640px) 45vw, 90vw",
           width: 400,
-          height: 500
+          height: 500,
+          eager: eager,
+          priority: index === 0
         })
       : "";
+    // The dots are 40x40 pixels. Pointing them at the full-resolution master
+    // made four dots on one card cost about a megabyte, so they use the
+    // dedicated tiny derivative instead.
     const dots = photos.length > 1
       ? `<div class="media-dots" title="Open the full photo set">${photos.slice(0, 4).map((src, i) =>
-          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.resolveSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
+          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.thumbSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
       : "";
     return `
       <div class="pmedia">
@@ -729,14 +751,14 @@
       </div>`;
   }
 
-  function cardHTML(p) {
+  function cardHTML(p, index) {
     const sold = p.in_stock_count <= 0;
     const photos = getProductImages(p);
     const href = esc(PK.productPath(p));
     return `
     <article class="pcard ${sold ? "sold" : ""}" data-card="${esc(p.id)}">
       <a class="pcard-link" href="${href}" aria-label="View full details, measurements and photos for ${esc(p.name)}">
-        ${mediaHTML(p, photos)}
+        ${mediaHTML(p, photos, index || 0)}
         <div class="pbody">
           <div class="phead-row">
             <span class="pdem">${esc(p.demographic || p.category)}</span>
@@ -766,6 +788,25 @@
     </article>`;
   }
 
+  /* The rail is drawn in small batches so the first screenful of cards is on
+     screen as soon as the catalog arrives, instead of after the whole
+     catalog has been turned into one giant HTML string. A newer render
+     (a filter change, a live stock update) bumps the token and abandons the
+     batches still queued. */
+  const GRID_CHUNK = 12;
+  let gridRenderToken = 0;
+  // Safety net: the placeholder must never sit there forever pretending the
+  // shop is still loading. If the catalog has not answered by now, the rail
+  // is drawn from whatever is known — including nothing.
+  let railLoadTimedOut = false;
+  window.setTimeout(() => {
+    if (railLoadTimedOut) return;
+    if (typeof DB.productsSynced === "function" && !DB.productsSynced()) {
+      railLoadTimedOut = true;
+      renderGrid();
+    }
+  }, 8000);
+
   function renderGrid() {
     const grid = $("#productGrid");
     const list = products
@@ -777,12 +818,40 @@
       .filter(p => displayPrice(p) <= fMax)
       .filter(p => matchesSearch(p, term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
+
+    // Before the first catalog response there is nothing to draw. Leave the
+    // placeholder cards in place: an empty rail reads as a broken shop,
+    // while a placeholder reads as a shop that is still loading.
+    const stillLoading = !list.length && !products.length && !railLoadTimedOut &&
+      typeof DB.productsSynced === "function" && !DB.productsSynced();
+    if (stillLoading) {
+      grid.setAttribute("aria-busy", "true");
+      const count = $("#railCount");
+      if (count) count.innerHTML = "Loading the live rail…";
+      applyFilterPanelState();
+      return 0;
+    }
+
     $("#gridEmpty").hidden = list.length > 0;
-    grid.innerHTML = list.map(cardHTML).join("");
     updateRailMeta(list.length, products.length);
     if (window.AdonaiAnalytics && list.length > 0) {
       window.AdonaiAnalytics.trackViewItemList(list, fCat !== "All" ? fCat : (fDemo !== "All" ? fDemo : "All"));
     }
+
+    const token = ++gridRenderToken;
+    grid.innerHTML = "";
+    grid.removeAttribute("aria-busy");
+    let index = 0;
+    const drawBatch = () => {
+      if (token !== gridRenderToken) return;      // a newer render took over
+      const slice = list.slice(index, index + GRID_CHUNK);
+      if (!slice.length) return;
+      grid.insertAdjacentHTML("beforeend", slice.map((p, i) => cardHTML(p, index + i)).join(""));
+      index += slice.length;
+      if (index < list.length) scheduleFrame(drawBatch);
+    };
+    drawBatch();
+    return list.length;
   }
 
   $("#productGrid").addEventListener("click", e => {
@@ -1870,6 +1939,10 @@
   }, 120000);
 
   /* ---------- real-time stock & System Parameters sync ---------- */
+  /* The first catalog answer — whether it brought pieces or not — is what
+     retires the rail's placeholder cards. */
+  DB.on("catalog", () => { renderGrid(); });
+
   DB.on("products", () => {
     const before = new Map(products.map(p => [p.id, p.in_stock_count]));
     refreshProducts();
