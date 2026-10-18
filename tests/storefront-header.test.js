@@ -41,7 +41,7 @@ const ok = label => { passed += 1; console.log("  ✓ " + label); };
  * 1. The markup contract both pages depend on.
  * ------------------------------------------------------------------ */
 for (const [name, html] of [["storefront", storefrontHtml], ["product page", productHtml]]) {
-  assert.match(html, /class="site-head"/, name + " keeps the .site-head bar");
+  assert.match(html, /class="site-head[ "]/, name + " keeps the .site-head bar");
   assert.match(html, /class="wrap head-row"/, name + " keeps the .wrap .head-row layout");
   assert.match(html, /class="brand"/, name + " keeps the .brand link");
   assert.match(html, /brand-logo-img/, name + " keeps the .brand-logo-img");
@@ -70,7 +70,7 @@ ok("the cart button keeps its open-cart contract and label");
 /* ------------------------------------------------------------------ *
  * 2. The CSS: hierarchy, surface, badge, responsive rules.
  * ------------------------------------------------------------------ */
-assert.match(headerCss, /\.site-head\s*\{[^}]*backdrop-filter/, "the bar has a blurred translucent surface");
+assert.match(headerCss, /\.site-head::after\s*\{[^}]*backdrop-filter/, "the bar's sheet has a blurred translucent surface");
 assert.match(headerCss, /\.site-head::before/, "the bar carries a brand-gold hairline");
 assert.match(headerCss, /#DA9902/, "the hairline uses the brand gold");
 assert.match(headerCss, /\.site-head\.is-scrolled/, "the bar has a scroll-elevation state");
@@ -85,6 +85,17 @@ assert.match(headerCss, /\.cart-btn:focus-visible/, "the cart has a visible focu
 assert.match(headerCss, /prefers-reduced-motion/, "the header respects reduced-motion");
 ok("the header stylesheet carries the surface, hierarchy, badge and focus states");
 
+/* The surface is a separate sheet so it can fade in: over the hero the bar
+   must be see-through, and on every other page it must be solid. */
+assert.match(headerCss, /\.site-head--hero::after\s*\{[^}]*opacity:\s*0/, "over the hero the bar starts transparent");
+assert.match(headerCss, /\.site-head--hero\.is-scrolled::after\s*\{[^}]*opacity:\s*1/, "the bar's sheet returns once the page moves");
+assert.match(headerCss, /\.site-head--hero \.head-pill\s*\{[^}]*background:\s*rgba\(255, 255, 255, \.88\)/, "the secondary button carries its own surface over the photograph");
+assert.match(storefrontHtml, /class="site-head site-head--hero"/, "the storefront opts the bar into the hero treatment");
+for (const [name, html] of [["product page", productHtml], ["404", read("404.html")], ["500", read("500.html")]]) {
+  assert.doesNotMatch(html, /site-head--hero/, name + " does not opt into the hero treatment");
+}
+ok("only the storefront floats its bar over the hero");
+
 /* The badge is decoration; the count is carried to assistive technology by
    .cart-status, so the badge itself may be display:none when empty. */
 const emptyRule = (headerCss.match(/\.cart-count\.is-empty\s*\{([^}]*)\}/) || [, ""])[1];
@@ -92,9 +103,11 @@ assert.match(emptyRule, /display:\s*none/, "the empty badge is hidden outright")
 assert.match(headerCss, /\.cart-status\s*\{[^}]*clip-path/, "the spoken count is visually hidden");
 ok("the badge is decoration and the spoken count lives in its own live region");
 
-/* Touch targets. */
+/* Touch targets. The bar's height is a variable, because the hero uses it
+   to slide up behind the bar. */
 const headRow = (headerCss.match(/\.head-row\s*\{([^}]*)\}/) || [, ""])[1];
-assert.match(headRow, /height:\s*76px/, "the desktop bar has a full-height row");
+assert.match(headRow, /height:\s*var\(--head-h\)/, "the desktop bar is as tall as --head-h");
+assert.match(headerCss, /:root\s*\{[^}]*--head-h:\s*76px/, "the desktop bar is 76px tall");
 assert.match(headerCss, /\.cart-btn\s*\{[^}]*min-height:\s*44px/, "the cart is at least a 44px touch target");
 assert.match(headerCss, /\.head-pill\s*\{[^}]*min-height:\s*42px/, "the install button is at least a 42px touch target");
 assert.match(headerCss, /\.head-install\s*\{[^}]*width:\s*42px/, "the collapsed install button keeps a 42px target");
@@ -103,7 +116,7 @@ ok("the header meets the touch-target floor");
 /* The phone breakpoint collapses the install label to an icon. */
 const mobileBlock = (headerCss.match(/@media \(max-width: 640px\)\s*\{([\s\S]*?)\n\}/) || [, ""])[1];
 assert.match(mobileBlock, /\.head-install-label\s*\{\s*display:\s*none/, "the install label is hidden on a phone");
-assert.match(mobileBlock, /\.head-row\s*\{[^}]*height:\s*66px/, "the bar tightens on a phone");
+assert.match(headerCss, /@media \(max-width: 640px\)\s*\{\s*:root\s*\{\s*--head-h:\s*66px/, "the bar tightens on a phone");
 ok("the phone breakpoint collapses Install App to an icon-only button");
 
 /* ------------------------------------------------------------------ *

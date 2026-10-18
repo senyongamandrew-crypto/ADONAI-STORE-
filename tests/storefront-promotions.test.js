@@ -19,7 +19,7 @@ const api = read("api.py");
 const db = read("js/db.js");
 const dbInit = read("db_init.py");
 
-const masthead = homepage.indexOf('class="masthead wrap"');
+const masthead = homepage.indexOf('<section class="masthead">');
 const promoRail = homepage.indexOf('id="promoRail"');
 const catalog = homepage.indexOf('id="catalogDashboardRegion"');
 assert(masthead >= 0 && masthead < promoRail && promoRail < catalog,

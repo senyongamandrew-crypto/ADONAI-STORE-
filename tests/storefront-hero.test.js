@@ -130,4 +130,29 @@ const phoneRule = css.indexOf(phoneBlocks[0]);
 assert.ok(phoneRule > baseRule, "the phone tuning comes after the base rules");
 ok("the promise survives on a phone, trimmed but present");
 
+/* ------------------------------------------------------------------ *
+ * The hero runs full bleed, so the photograph reaches the top of the
+ * page and sits behind the buttons in the bar.
+ * ------------------------------------------------------------------ */
+const hero = doc.querySelector("section.masthead");
+assert.ok(hero, "the hero is a section of its own");
+assert.ok(!hero.classList.contains("wrap"), "the hero is not held to the narrow wrap");
+assert.ok(hero.querySelector(":scope > .wrap"), "the hero still carries a wrap for the copy");
+assert.ok(hero.querySelector(".masthead-inner"), "the copy column is intact");
+assert.ok(hero.querySelector(".wrap .masthead-inner"), "the copy column sits inside the wrap, so it stays aligned with the bar");
+ok("the hero is full bleed while the copy stays aligned with the header");
+
+/* It slides up behind the bar by exactly the bar's height. */
+const mastheadRule = (css.match(/\.masthead\s*\{([^}]*)\}/) || [, ""])[1];
+assert.match(mastheadRule, /margin:\s*calc\(-1 \* var\(--head-h\)\)/, "the hero is pulled up behind the bar");
+assert.match(mastheadRule, /padding:\s*calc\(50px \+ var\(--head-h\)\)/, "the copy keeps its 50px of room below the bar");
+assert.match(mastheadRule, /storefront-editorial-bg\.jpg/, "the hero carries the editorial photograph");
+assert.match(css, /:root\s*\{[^}]*--head-h:\s*76px/, "the bar's height is a variable the hero can use");
+ok("the hero slides up behind the bar and keeps the photograph");
+
+/* The bar has to be see-through for that to show. */
+assert.match(home, /class="site-head site-head--hero"/, "the storefront's bar floats over the hero");
+assert.match(css, /\.site-head--hero::after\s*\{[^}]*opacity:\s*0/, "the bar's surface is hidden over the hero");
+ok("the bar is transparent over the hero, so the photograph shows behind the buttons");
+
 console.log("\n✓ storefront hero promise holds (" + passed + " checks)\n");
