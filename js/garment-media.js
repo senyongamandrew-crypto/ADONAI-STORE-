@@ -6,11 +6,25 @@
   const esc = value => String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const icon = (kind) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${kind === "video" ? '<rect x="3" y="6" width="12" height="12" rx="3"/><path d="m15 10 6-3v10l-6-3"/>' : '<rect x="3" y="5" width="18" height="15" rx="3"/><circle cx="8.5" cy="10" r="1.5"/><path d="m3 17 5-4 4 3 4-6 5 7"/>'}</svg>`;
   const durationLabel = seconds => `0:${String(Math.round(Number(seconds) || 0)).padStart(2, "0")}`;
+  /* The gallery saves the same reference the server stores: a
+     host-independent /api/media/<id>. The packaged Android terminal renders
+     through DB.apiUrl(), which is why a saved URL must never already carry
+     that absolute base — it would be blocked by the web storefront's CSP
+     (img-src 'self') the moment the page is opened from another host. */
+  const MEDIA_PHOTO_REF = /(?:^|\/)(api\/media\/[a-f0-9]{32})(?:[?#]\S*)?$/i;
+  function canonicalPhotoRef(url) {
+    const value = String(url || "").trim();
+    const match = value.match(MEDIA_PHOTO_REF);
+    return match ? "/" + match[1].toLowerCase() : value;
+  }
   const urlFor = url => /^\/api\/media\//.test(String(url || "")) ? DB.apiUrl(url) : url;
+  const displaySrc = photo => photo.preview || photo.src || urlFor(photo.url);
 
   function photosFor(product) {
     const list = [product && product.image_url].concat(product && Array.isArray(product.images) ? product.images : []);
-    return list.filter((url, index) => url && typeof url === "string" && list.indexOf(url) === index).map(urlFor);
+    return list
+      .filter((url, index) => url && typeof url === "string" && list.indexOf(url) === index)
+      .map(canonicalPhotoRef);
   }
 
   function photoBlob(dataUrl, name) {
@@ -74,7 +88,7 @@
       $("[data-media-count]").textContent = `${photos.length} / ${MAX_PHOTOS}`;
       $("[data-media-photos]").innerHTML = photos.length ? photos.map((photo, index) => `
         <div class="gme-photo ${index === 0 ? "is-cover" : ""}">
-          <div class="gme-photo-image"><img src="${esc(photo.preview || photo.url)}" alt="Garment photo ${index + 1}" /><span class="gme-photo-number">${index === 0 ? "Cover" : `Photo ${index + 1}`}</span></div>
+          <div class="gme-photo-image"><img src="${esc(displaySrc(photo))}" alt="Garment photo ${index + 1}" /><span class="gme-photo-number">${index === 0 ? "Cover" : `Photo ${index + 1}`}</span></div>
           <div class="gme-photo-actions">${index > 0 ? `<button type="button" data-media-cover="${index}" title="Use photo ${index + 1} as the catalog cover">Set cover</button>` : '<span>Catalog cover</span>'}<button type="button" data-media-remove="${index}" aria-label="Remove photo ${index + 1}">Remove</button></div>
           <div class="gme-photo-order"><button type="button" data-media-move="${index}" data-direction="-1" aria-label="Move photo ${index + 1} earlier" ${index === 0 ? "disabled" : ""}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6M8 12h12"/></svg></button><span>${index + 1} of ${photos.length}</span><button type="button" data-media-move="${index}" data-direction="1" aria-label="Move photo ${index + 1} later" ${index === photos.length - 1 ? "disabled" : ""}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m10 6 6 6-6 6M4 12h12"/></svg></button></div>
         </div>`).join("") : `<div class="gme-empty">${icon("photo")}<strong>Show every detail</strong><p>Front &amp; back · fabric · label · any close-ups</p><span>Start with a clear cover photo, then add more.</span></div>`;
@@ -85,7 +99,7 @@
     const renderVideo = () => {
       const old = previousVideo(); if (old) old.pause();
       $("[data-media-video]").innerHTML = video ? `
-        <div class="gme-video-preview"><video data-media-preview controls playsinline preload="none" ${photos[0] ? `poster="${esc(photos[0].preview || photos[0].url)}"` : ""} src="${esc(video.preview || urlFor(video.url))}" aria-label="Preview garment video"></video><div class="gme-video-meta"><div><strong>Garment video ready</strong><span>${esc(video.name || "garment.mp4")} · ${durationLabel(video.duration)} · ${(Number(video.bytes) / 1024 / 1024).toFixed(1)} MB</span></div><button type="button" data-media-remove-video>Remove</button></div></div>` : "";
+        <div class="gme-video-preview"><video data-media-preview controls playsinline preload="none" ${photos[0] ? `poster="${esc(displaySrc(photos[0]))}"` : ""} src="${esc(video.preview || video.src || urlFor(video.url))}" aria-label="Preview garment video"></video><div class="gme-video-meta"><div><strong>Garment video ready</strong><span>${esc(video.name || "garment.mp4")} · ${durationLabel(video.duration)} · ${(Number(video.bytes) / 1024 / 1024).toFixed(1)} MB</span></div><button type="button" data-media-remove-video>Remove</button></div></div>` : "";
       $("[data-media-add-video]").innerHTML = `${icon("video")} ${video ? "Replace video" : "Add garment video"}`;
       renderControls();
     };
@@ -195,8 +209,10 @@
       reset(product) {
         const old = previousVideo(); if (old) old.pause();
         photos.forEach(release); release(video);
-        photos = photosFor(product).map(url => ({ url }));
-        video = product && product.video ? Object.assign({}, product.video, { url: urlFor(product.video.url) }) : null;
+        photos = photosFor(product).map(url => ({ url, src: urlFor(url) }));
+        video = product && product.video
+          ? Object.assign({}, product.video, { url: canonicalPhotoRef(product.video.url), src: urlFor(product.video.url) })
+          : null;
         failure = ""; renderPhotos(); renderVideo(); notify([]);
       },
       pause() { const element = previousVideo(); if (element) element.pause(); },

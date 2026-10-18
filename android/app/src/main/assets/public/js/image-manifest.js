@@ -5,6 +5,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1001-back.jpg": {
     "h": 1149,
     "stem": "assets/products/p1001-back",
+    "thumb": "assets/products/p1001-back-96.webp",
     "w": 928,
     "webp": [
       320,
@@ -14,6 +15,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1001-fabric.jpg": {
     "h": 1264,
     "stem": "assets/products/p1001-fabric",
+    "thumb": "assets/products/p1001-fabric-96.webp",
     "w": 848,
     "webp": [
       320,
@@ -23,6 +25,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1001-flaw.jpg": {
     "h": 1264,
     "stem": "assets/products/p1001-flaw",
+    "thumb": "assets/products/p1001-flaw-96.webp",
     "w": 848,
     "webp": [
       320,
@@ -32,6 +35,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1001.jpg": {
     "h": 1280,
     "stem": "assets/products/p1001",
+    "thumb": "assets/products/p1001-96.webp",
     "w": 1034,
     "webp": [
       320,
@@ -42,6 +46,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1002.jpg": {
     "h": 1024,
     "stem": "assets/products/p1002",
+    "thumb": "assets/products/p1002-96.webp",
     "w": 1024,
     "webp": [
       320,
@@ -52,6 +57,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1003.jpg": {
     "h": 1280,
     "stem": "assets/products/p1003",
+    "thumb": "assets/products/p1003-96.webp",
     "w": 514,
     "webp": [
       320
@@ -60,6 +66,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1004.jpg": {
     "h": 270,
     "stem": "assets/products/p1004",
+    "thumb": "assets/products/p1004-96.webp",
     "w": 340,
     "webp": [
       320
@@ -68,6 +75,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1005.jpg": {
     "h": 1024,
     "stem": "assets/products/p1005",
+    "thumb": "assets/products/p1005-96.webp",
     "w": 1024,
     "webp": [
       320,
@@ -78,6 +86,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1006.jpg": {
     "h": 1280,
     "stem": "assets/products/p1006",
+    "thumb": "assets/products/p1006-96.webp",
     "w": 960,
     "webp": [
       320,
@@ -88,6 +97,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1007.jpg": {
     "h": 1024,
     "stem": "assets/products/p1007",
+    "thumb": "assets/products/p1007-96.webp",
     "w": 768,
     "webp": [
       320,
@@ -97,6 +107,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1008.jpg": {
     "h": 300,
     "stem": "assets/products/p1008",
+    "thumb": "assets/products/p1008-96.webp",
     "w": 300,
     "webp": [
       320
@@ -105,6 +116,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1009.jpg": {
     "h": 270,
     "stem": "assets/products/p1009",
+    "thumb": "assets/products/p1009-96.webp",
     "w": 340,
     "webp": [
       320
@@ -113,6 +125,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1010.jpg": {
     "h": 180,
     "stem": "assets/products/p1010",
+    "thumb": "assets/products/p1010-96.webp",
     "w": 180,
     "webp": [
       320
@@ -121,6 +134,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1011.jpg": {
     "h": 1024,
     "stem": "assets/products/p1011",
+    "thumb": "assets/products/p1011-96.webp",
     "w": 1024,
     "webp": [
       320,
@@ -131,6 +145,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1012.jpg": {
     "h": 270,
     "stem": "assets/products/p1012",
+    "thumb": "assets/products/p1012-96.webp",
     "w": 340,
     "webp": [
       320
@@ -139,6 +154,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1013.jpg": {
     "h": 691,
     "stem": "assets/products/p1013",
+    "thumb": "assets/products/p1013-96.webp",
     "w": 461,
     "webp": [
       320
@@ -147,6 +163,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1014.jpg": {
     "h": 480,
     "stem": "assets/products/p1014",
+    "thumb": "assets/products/p1014-96.webp",
     "w": 720,
     "webp": [
       320,
@@ -156,6 +173,7 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1015.jpg": {
     "h": 1280,
     "stem": "assets/products/p1015",
+    "thumb": "assets/products/p1015-96.webp",
     "w": 1280,
     "webp": [
       320,
@@ -166,7 +184,19 @@ window.ADONAI_IMAGE_MANIFEST = {
   "assets/products/p1016.jpg": {
     "h": 1280,
     "stem": "assets/products/p1016",
+    "thumb": "assets/products/p1016-96.webp",
     "w": 1005,
+    "webp": [
+      320,
+      640,
+      960
+    ]
+  },
+  "assets/storefront-editorial-bg.jpg": {
+    "h": 714,
+    "stem": "assets/storefront-editorial-bg",
+    "thumb": "assets/storefront-editorial-bg-96.webp",
+    "w": 1280,
     "webp": [
       320,
       640,

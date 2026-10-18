@@ -93,7 +93,7 @@
 
   /* ---------- Cross-Navigation: POS to Live Web Storefront (External Browser Intent) ---------- */
   // Live Render deployment of the public storefront (web + API share this service).
-  const LIVE_WEB_STOREFRONT_URL = "https://adonai-store.onrender.com";
+  const LIVE_WEB_STOREFRONT_URL = "https://www.adonaithrift-store.online";
 
   // The POS must never send staff to the URL of the shell it is running in
   // (Android APK appassets origin, Capacitor, local dev servers) — only a real
@@ -286,7 +286,7 @@
       .filter(p => activeDemo === "All" || p.demographic === activeDemo)
       .filter(p => activeCat === "All" || p.category === activeCat)
       .filter(p => activeInventory === "All" || (p.item_condition || "PRE_LOVED") === activeInventory)
-      .filter(p => !term || [p.name, p.brand, p.category, p.desc, p.size, p.color, p.sku, p.barcode_id, p.condition, p.item_condition].join(" ").toLowerCase().includes(term))
+      .filter(p => !term || [p.name, p.brand, p.category, p.desc, p.size, p.color, p.sku, p.barcode_id, p.condition, p.item_condition, p.subcategory, (Array.isArray(p.search_tags) ? p.search_tags : []).join(" ")].join(" ").toLowerCase().includes(term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#tileGrid").innerHTML = list.length ? list.map(p => {
       const out = p.in_stock_count <= 0;

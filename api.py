@@ -47,6 +47,7 @@ from security import (
     rate_limiting_disabled,
     safe_identifier,
     safe_image_url,
+    canonical_image_url,
     verify_pin,
 )
 from models import (
@@ -1587,7 +1588,7 @@ def consignment_partner_detail(session, partner):
         rate = product.commission_rate if product.commission_rate is not None else partner.default_commission_rate
         item_rows.append({
             "id": product.id, "name": product.name, "sku": product.sku,
-            "image_url": product.image_url or "", "selling_price": int(product.selling_price or 0),
+            "image_url": canonical_image_url(product.image_url), "selling_price": int(product.selling_price or 0),
             "base_price": float(product.base_price or 0), "in_stock_count": int(product.in_stock_count or 0),
             "inventory_status": product.inventory_status or "AVAILABLE",
             "sold": sold_by_product.get(product.id, {}).get("sold", 0),

@@ -7,7 +7,7 @@ const csstree = require("css-tree");
 const source = file => fs.readFileSync(path.join(__dirname, "..", file), "utf8");
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
 
-function fixture(product = null) {
+function fixture(product = null, apiBase = "") {
   const dom = new JSDOM('<div id="gallery"></div>', { url: "https://store.example/admin.html", runScripts: "outside-only" });
   const win = dom.window, root = win.document.getElementById("gallery");
   const state = { uploads: [], deleted: [], revoked: [], duration: 22, pending: null, sequence: 0 };
@@ -25,7 +25,7 @@ function fixture(product = null) {
   win.URL.revokeObjectURL = url => state.revoked.push(url);
   win.Intake = { compressImage: async () => "data:image/jpeg;base64,YWJj" };
   win.DB = {
-    apiUrl: value => value,
+    apiUrl: value => apiBase + value,
     async uploadMedia(file, kind, signal) {
       state.uploads.push({ file, kind, signal });
       if (state.pending) await state.pending;
@@ -68,6 +68,26 @@ function fixture(product = null) {
     assert.equal(edit.state.deleted.length, 0, "closing an edit never deletes already saved media");
     console.log("✓ full 12-photo / video editing, cover and order controls, saved-media preservation");
   } finally { edit.win.close(); }
+
+  // The packaged Android terminal resolves media against the web origin for
+  // display, but the value it SAVES must stay host-independent: an absolute
+  // URL is blocked by the storefront's `img-src 'self'` CSP as soon as the
+  // page is served from the apex domain or a custom domain.
+  const hosted = fixture({
+    image_url: "/api/media/" + "a".repeat(32),
+    images: ["/api/media/" + "a".repeat(32), "/api/media/" + "b".repeat(32)]
+  }, "https://www.adonaithrift-store.online");
+  try {
+    assert.equal(
+      hosted.root.querySelector(".gme-photo img").getAttribute("src"),
+      "https://www.adonaithrift-store.online/api/media/" + "a".repeat(32),
+      "the editor preview still loads from the app's API base"
+    );
+    const saved = hosted.editor.snapshot();
+    assert.deepEqual(Array.from(saved.images), ["/api/media/" + "a".repeat(32), "/api/media/" + "b".repeat(32)]);
+    assert.equal(saved.image_url, "/api/media/" + "a".repeat(32));
+    console.log("✓ gallery saves host-independent media references even when the app renders absolute URLs");
+  } finally { hosted.close(); }
 
   const upload = fixture();
   try {

@@ -274,6 +274,74 @@ def safe_identifier(value) -> str | None:
 
 DATA_IMAGE_MAX_LEN = 4_000_000  # ~3 MB photo as base64
 
+# ---------------------------------------------------------------------------
+# MEDIA REFERENCES
+#
+# A garment photo uploaded through the POS lives at /api/media/<32 hex> and a
+# promo creative at /api/promo-media/<32 hex>. Those paths identify THIS
+# application no matter which hostname served the page, so an absolute URL
+# that carries one is rewritten to its root-relative form before it is stored
+# or served.
+#
+# Why this matters: the Android terminal calls DB.apiUrl(), which prefixes the
+# configured web origin outside the browser. Editing a gallery there used to
+# save https://www.<store>/api/media/<id> into products.image_url. A storefront
+# served from the apex domain, a custom domain or a preview host then had
+# every one of those cards blocked by the page's Content-Security-Policy
+# (img-src 'self'), which is exactly the "product images do not load" report.
+# The database keeps one form now: /api/media/<id>. Each runtime resolves it
+# against the origin it is actually running on.
+# ---------------------------------------------------------------------------
+STORE_ASSET_HOSTS = frozenset({
+    "adonaithrift-store.online",
+    "www.adonaithrift-store.online",
+})
+
+_MEDIA_ID = r"[0-9a-f]{32}"
+# A width hint (?w=320) and cache-busting query are render-time concerns, not
+# part of the stored reference, so they are dropped by the rewrite.
+_QUERY_TAIL = r"(?:\?[^#\s]*)?(?:#\S*)?$"
+_HOSTED_MEDIA_RE = re.compile(
+    rf"^(?:https?:)?//[^/\\\s]+/+((?:api)/(?:media|promo-media)/{_MEDIA_ID})/?{_QUERY_TAIL}",
+    re.IGNORECASE,
+)
+_BARE_MEDIA_RE = re.compile(
+    rf"^/?((?:api)/(?:media|promo-media)/{_MEDIA_ID})/?{_QUERY_TAIL}",
+    re.IGNORECASE,
+)
+_HOSTED_ASSET_RE = re.compile(
+    rf"^(?:https?:)?//(?P<host>[^/\\\s]+)/+(?P<path>assets/[^?#\s]*)/?{_QUERY_TAIL}",
+    re.IGNORECASE,
+)
+
+
+def canonical_image_url(value) -> str:
+    """Return the durable, host-independent form of an image reference.
+
+    * ``https://any-host/api/media/<id>`` and ``//any-host/api/media/<id>``
+      become ``/api/media/<id>`` (same for ``/api/promo-media/``).
+    * A bundled catalogue photo on the store's own domain
+      (``https://www.<store>/assets/products/p1001.jpg``) becomes
+      ``/assets/products/p1001.jpg``; the asset is served by every runtime.
+    * Anything else — external CDNs, data URLs, already-relative paths — is
+      returned unchanged.
+    """
+    url = str(value if value is not None else "").strip()
+    if not url:
+        return ""
+    match = _HOSTED_MEDIA_RE.match(url)
+    if match:
+        return "/" + match.group(1).lower()
+    match = _BARE_MEDIA_RE.match(url)
+    if match:
+        return "/" + match.group(1).lower()
+    match = _HOSTED_ASSET_RE.match(url)
+    if match:
+        host = match.group("host").rsplit("@", 1)[-1].split(":")[0].lower()
+        if host in STORE_ASSET_HOSTS or ("onrender.com" in host and "adonai" in host):
+            return "/" + match.group("path")
+    return url
+
 
 def safe_image_url(value, max_len: int = 1000) -> str:
     """Only allow http(s) URLs, data:image/* payloads (camera intake photos),
@@ -288,7 +356,7 @@ def safe_image_url(value, max_len: int = 1000) -> str:
         if _CONTROL_CHARS_RE.search(url):
             return ""
         return url[:DATA_IMAGE_MAX_LEN]
-    url = clean_text(url, max_len)
+    url = canonical_image_url(clean_text(url, max_len))
     lowered = url.lower()
     if lowered.startswith(("http://", "https://")):
         return url

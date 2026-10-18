@@ -111,7 +111,22 @@
     { key: "leg_opening", label: "Leg Opening", group: "bottom" },
     // Footwear
     { key: "insole", label: "Insole Length", group: "feet" },
-    { key: "heel", label: "Heel Height", group: "feet" }
+    { key: "heel", label: "Heel Height", group: "feet" },
+    // Jewelry & watches
+    { key: "pendant", label: "Pendant / Stone Size", group: "jewelry" },
+    { key: "case_diameter", label: "Case Diameter", group: "watch" },
+    { key: "band_width", label: "Band Width", group: "watch" },
+    { key: "band_length", label: "Band Length", group: "watch" },
+    // Bags
+    { key: "height", label: "Height", group: "bag" },
+    { key: "depth", label: "Depth", group: "bag" },
+    { key: "strap_drop", label: "Strap / Handle Drop", group: "bag" },
+    // Eyewear
+    { key: "lens_width", label: "Lens Width", group: "eyewear" },
+    { key: "bridge", label: "Bridge Width", group: "eyewear" },
+    { key: "temple", label: "Temple Arm Length", group: "eyewear" },
+    // Hats, scarves & belts
+    { key: "circumference", label: "Head / Waist Circumference", group: "accessory" }
   ];
 
   const MEASUREMENT_GROUPS = {
@@ -129,13 +144,13 @@
     Boots: "feet",
     Sandals: "feet",
     "Accessories": "any",
-    "Bags & Handbags": "none",
-    "Necklaces & Chains": "none",
-    "Bracelets & Bangles": "none",
-    "Rings & Earrings": "none",
-    Watches: "none",
-    "Eyewear & Sunglasses": "none",
-    "Hats, Scarves & Belts": "none"
+    "Bags & Handbags": "bag",
+    "Necklaces & Chains": "jewelry",
+    "Bracelets & Bangles": "jewelry",
+    "Rings & Earrings": "jewelry",
+    Watches: "watch",
+    "Eyewear & Sunglasses": "eyewear",
+    "Hats, Scarves & Belts": "accessory"
   };
 
   const titleCase = key => String(key || "")
@@ -222,7 +237,7 @@
   function productUrl(product) {
     const origin = (global.location && global.location.origin && global.location.origin !== "null")
       ? global.location.origin
-      : "https://adonai-store.onrender.com";
+      : "https://www.adonaithrift-store.online";
     return origin + productPath(product);
   }
 
@@ -364,13 +379,24 @@
   }
 
   /**
-   * Resolve an asset reference to a root-relative URL.
+   * Resolve an asset reference to a URL that this runtime can load.
    * PDP permalinks live at /product/<slug>, so a bare "assets/…" path would
    * otherwise resolve against /product/ and 404.
    */
+  const MEDIA_REFERENCE = /^(?:https?:\/\/[^/]+)?\/?api\/(?:media|promo-media)\/[0-9a-f]{32}\/?(?:[?#]\S*)?$/i;
+
   function resolveSrc(src) {
     const value = String(src || "").trim();
     if (!value) return "";
+    // /api/media/<id> and /api/promo-media/<id> identify this application,
+    // not a particular hostname. Records written by the Android terminal
+    // carry the absolute web origin; the storefront may be served from the
+    // apex domain, a custom domain or a preview host, where img-src 'self'
+    // would block a foreign host. Always resolve against the current origin.
+    if (MEDIA_REFERENCE.test(value)) {
+      const path = "/" + value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").toLowerCase();
+      return global.DB && typeof global.DB.apiUrl === "function" ? global.DB.apiUrl(path) : path;
+    }
     if (/^(https?:|data:|blob:|\/)/i.test(value)) return value;
     return "/" + value.replace(/^\.?\//, "");
   }
@@ -378,6 +404,62 @@
   function imageEntry(src) {
     const key = normalizeAssetKey(src);
     return MANIFEST()[key] || null;
+  }
+
+  /* Garment photos uploaded through the POS live in the media API rather
+     than the bundled asset folder. The server keeps a durable small
+     re-encode of each one for ?w=… (built at upload), so they can carry a
+     responsive srcset exactly like a bundled asset instead of always
+     shipping the full-resolution master. */
+  const MEDIA_API_URL = /^(?:https?:\/\/[^/]+)?\/?api\/media\/[0-9a-f]{32}\/?$/i;
+  // 480 serves the two-column phone rail at device-pixel-ratio 2: without
+  // it, phones jumped from the 320w candidate straight to 640w and pulled
+  // roughly double the pixels the card actually displays.
+  const MEDIA_API_WIDTHS = [320, 480, 640, 960];
+
+  function isMediaApiUrl(src) {
+    return MEDIA_API_URL.test(String(src || "").trim());
+  }
+
+  /** Append (or replace) the ?w= width hint on a media API URL. */
+  function mediaApiUrl(src, width) {
+    const value = String(src || "").trim();
+    if (!value) return "";
+    if (!width) return value;
+    const [base, query] = value.split("?");
+    const kept = (query || "")
+      .split("&")
+      .filter(part => part && part.split("=")[0] !== "w");
+    kept.push("w=" + encodeURIComponent(String(width)));
+    return `${base}?${kept.join("&")}`;
+  }
+
+  /** Responsive candidate list for a media API photo. */
+  function mediaApiSrcset(src) {
+    return MEDIA_API_WIDTHS
+      .map(w => `${esc(mediaApiUrl(src, w))} ${w}w`)
+      .join(", ");
+  }
+
+  /**
+   * Smallest sensible source for a 40x40 photo-count dot.
+   *
+   * The dots used to point straight at the full-resolution master JPEG, so
+   * four dots on a single card pulled about a megabyte of originals. This
+   * resolves the tiny derivative instead: a bundled 96px WebP, or a 96px
+   * re-encode of a media API photo.
+   */
+  function thumbSrc(src) {
+    const value = String(src || "").trim();
+    if (!value) return "";
+    const entry = imageEntry(value);
+    if (entry && entry.thumb) return resolveSrc(entry.thumb);
+    if (isMediaApiUrl(value)) return mediaApiUrl(resolveSrc(value), 96);
+    if (entry && entry.webp && entry.webp.length) {
+      const smallest = entry.webp.slice().sort((a, b) => a - b)[0];
+      return resolveSrc(`${entry.stem}-${smallest}.webp`);
+    }
+    return resolveSrc(value);
   }
 
   /** Collected gallery photos (main image first, de-duplicated). */
@@ -400,7 +482,9 @@
     const alt = esc(opts.alt || "");
     const sizes = opts.sizes || "100vw";
     const loading = opts.eager ? "eager" : "lazy";
-    const fetchPriority = opts.eager ? "high" : "auto";
+    // Only the single largest-content image asks for high priority; the rest
+    // of the first row loads eagerly but lets the browser decide the order.
+    const fetchPriority = opts.priority ? "high" : "auto";
     const className = opts.className ? ` class="${esc(opts.className)}"` : "";
     const entry = imageEntry(src);
     const width = opts.width || (entry && entry.w) || 800;
@@ -410,7 +494,19 @@
       `<img src="${esc(resolved)}" alt="${alt}" width="${width}" height="${height}" ` +
       `loading="${loading}" decoding="async" fetchpriority="${fetchPriority}"${className} />`;
 
-    if (!entry || !entry.webp || !entry.webp.length) return imgTag;
+    if (!entry || !entry.webp || !entry.webp.length) {
+      // A photo held by the media API is re-encoded by the server, so it can
+      // still ship a responsive srcset and stop every card from downloading
+      // the full-resolution master.
+      if (isMediaApiUrl(src)) {
+        return (
+          `<img src="${esc(resolved)}" srcset="${mediaApiSrcset(resolved)}" ` +
+          `sizes="${esc(sizes)}" alt="${alt}" width="${width}" height="${height}" ` +
+          `loading="${loading}" decoding="async" fetchpriority="${fetchPriority}"${className} />`
+        );
+      }
+      return imgTag;
+    }
 
     const srcset = entry.webp
       .map(w => `${esc(resolveSrc(entry.stem))}-${w}.webp ${w}w`)
@@ -421,6 +517,60 @@
       imgTag +
       `</picture>`
     );
+  }
+
+  /* ----------------------------------------------------------
+     8b. PHOTO SETTLING
+     A card photo on a slow network used to sit there as a blank
+     white frame with its raw alt text showing — shoppers read
+     that as "the shop is broken". Photos now start invisible
+     over their card's own placeholder (CSS), fade in when they
+     land, retry once against the full-size master if a resized
+     candidate fails, and only then give up to the placeholder.
+     ---------------------------------------------------------- */
+  function settleImage(img) {
+    if (img && img.tagName === "IMG") img.classList.add("is-loaded");
+  }
+
+  function failImage(img) {
+    if (!img || img.tagName !== "IMG") return;
+    // The promo strip degrades its own broken creatives; do not fight it.
+    if (img.closest && img.closest(".promo-card--custom")) return;
+    if (img.dataset.masterRetry) {
+      img.classList.add("img-broken");
+      return;
+    }
+    img.dataset.masterRetry = "1";
+    const picture = img.closest ? img.closest("picture") : null;
+    if (picture) picture.querySelectorAll("source").forEach(source => source.remove());
+    img.removeAttribute("srcset");
+    img.removeAttribute("sizes");
+    // The authored src is always the master; for a media-API thumbnail it
+    // may still carry its own ?w= hint, which the retry drops. A bundled
+    // 96px dot falls back to its 320px sibling instead.
+    let master = img.getAttribute("src") || "";
+    const base = master.split("?")[0];
+    if (master !== base && isMediaApiUrl(base)) master = base;
+    else if (/-96\.webp$/i.test(master)) master = master.replace(/-96\.webp$/i, "-320.webp");
+    if (master) img.src = master;
+    else img.classList.add("img-broken");
+  }
+
+  /** Mark every already-complete photo under a root as landed. */
+  function settleImages(root) {
+    const scope = root && root.querySelectorAll ? root : global.document;
+    if (!scope) return;
+    scope.querySelectorAll("img").forEach(img => {
+      if (img.complete && img.naturalWidth > 0) settleImage(img);
+    });
+  }
+
+  if (global.document && typeof global.document.addEventListener === "function") {
+    // Image load/error events do not bubble, but they do capture, so one
+    // pair of delegated listeners covers every photo on the page —
+    // including cards rendered after boot.
+    global.document.addEventListener("load", event => settleImage(event.target), true);
+    global.document.addEventListener("error", event => failImage(event.target), true);
   }
 
   /* ----------------------------------------------------------
@@ -474,8 +624,12 @@
     storeWhatsAppNumber,
     productImages,
     pictureHTML,
+    settleImages,
     resolveSrc,
     imageEntry,
+    thumbSrc,
+    isMediaApiUrl,
+    mediaApiUrl,
     PAYMENT_METHODS,
     paymentChips
   };

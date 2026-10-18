@@ -137,7 +137,7 @@
   // Live Render deployment — the public storefront and the API are served by the
   // same service. Fallback base used when the POS/admin runs inside the Android
   // APK shell (appassets origin) or another non-web container.
-  const DEFAULT_WEB_APP_URL = "https://adonai-store.onrender.com";
+  const DEFAULT_WEB_APP_URL = "https://www.adonaithrift-store.online";
 
   /* ---------- factory Day-1 seed (v7) ----------
      Clean 'Day 1' state: the catalog, sales, ledger, guest book and rider
@@ -206,6 +206,13 @@
     product.inner_packaging = product.inner_packaging || "";
     product.fabric_grading_notes = product.fabric_grading_notes || (product.item_condition === "BRAND_NEW" ? "Factory-fresh condition." : "Hand-inspected and laundered.");
     product.inventory_status = Number(product.in_stock_count || 0) > 0 ? "AVAILABLE" : "OUT_OF_STOCK";
+    // Dynamic category schema (category_field_schemas): older cached rows
+    // predate these keys, so default them instead of breaking renderers.
+    product.subcategory = product.subcategory || "";
+    product.attributes = product.attributes && typeof product.attributes === "object" && !Array.isArray(product.attributes) ? product.attributes : {};
+    product.search_tags = Array.isArray(product.search_tags) ? product.search_tags : [];
+    product.specifications = Array.isArray(product.specifications) ? product.specifications : [];
+    product.fulfillment_notes = product.fulfillment_notes || "";
     return product;
   }
 
@@ -217,7 +224,10 @@
     if (raw) { try { state = JSON.parse(raw); ok = valid(state); } catch (e) { ok = false; } }
     if (!raw || !ok) { state = seedState(); save(); }
     if (state && Array.isArray(state.products)) {
-      state.products.forEach(normalizeProductPolicy);
+      // Heal cached rows too: an older POS session may have stored absolute
+      // media URLs in localStorage, and those would stay broken on the
+      // storefront until the next catalog sync replaced them.
+      state.products = state.products.map(product => normalizeProductMedia(normalizeProductPolicy(product)));
       if (Array.isArray(state.sales)) state.sales = state.sales.map(normalizeSaleRecord);
       if (state.settings) {
         if (String(state.settings.email || "").trim().toLowerCase() === LEGACY_STORE_EMAIL) {
@@ -327,13 +337,52 @@
   }
 
   let productSyncInFlight = null;
+  // True once the server has answered the product pull at least once. The
+  // storefront needs this to tell "the rail is genuinely empty" apart from
+  // "the rail has not loaded yet", so it can hold its placeholder instead of
+  // showing an empty grid to a shopper who has only just arrived.
+  let productsSynced = false;
+  // The storefront is holding a placeholder until the first catalog answer
+  // arrives. This fires exactly once per page load — success, empty result
+  // or a failed request — so the rail never stays stuck on a placeholder.
+  function markProductsSynced() {
+    if (productsSynced) return;
+    productsSynced = true;
+    broadcast("catalog");
+  }
+  /* ----------------------------------------------------------
+     MEDIA REFERENCE RESOLUTION
+
+     A photo reference belongs to the store, not to a hostname. Rows used to
+     be written from the Android terminal as
+     https://www.<store>/api/media/<id> because DB.apiUrl() prefixes the web
+     origin outside the browser. The storefront may be served from the apex
+     domain or a custom domain, and its Content-Security-Policy only allows
+     images from 'self' — so those cards showed a broken-image glyph.
+
+     Everything is now normalized to the host-independent
+     /api/media/<id> path on the way in, and apiUrl() re-applies this
+     runtime's own base (relative on the web, absolute in the packaged app).
+     ---------------------------------------------------------- */
+  const MEDIA_REFERENCE = /^(?:https?:)?\/\/[^/]+\/+((?:api)\/(?:media|promo-media)\/[a-f0-9]{32})\/?(?:[?#]\S*)?$/i;
+  const BARE_MEDIA_REFERENCE = /^\/?((?:api)\/(?:media|promo-media)\/[a-f0-9]{32})\/?(?:[?#]\S*)?$/i;
+
+  function canonicalMediaRef(value) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return "";
+    const hosted = raw.match(MEDIA_REFERENCE);
+    if (hosted) return apiUrl("/" + hosted[1].toLowerCase());
+    const bare = raw.match(BARE_MEDIA_REFERENCE);
+    if (bare) return apiUrl("/" + bare[1].toLowerCase());
+    return raw;
+  }
+
   function normalizeProductMedia(product) {
     if (!product) return product;
-    const mediaUrl = value => /^\/api\/media\/[a-f0-9]{32}$/.test(String(value || "")) ? apiUrl(value) : value;
     return Object.assign({}, product, {
-      image_url: mediaUrl(product.image_url),
-      images: Array.isArray(product.images) ? product.images.map(mediaUrl) : [],
-      video: product.video ? Object.assign({}, product.video, { url: mediaUrl(product.video.url) }) : null
+      image_url: canonicalMediaRef(product.image_url),
+      images: Array.isArray(product.images) ? product.images.map(canonicalMediaRef) : [],
+      video: product.video ? Object.assign({}, product.video, { url: canonicalMediaRef(product.video.url) }) : null
     });
   }
 
@@ -347,18 +396,22 @@
       .then(async response => {
         let data = null;
         try { data = await response.json(); } catch (e) {}
-        if (!response.ok || !data || !Array.isArray(data.products)) return false;
+        if (!response.ok || !data || !Array.isArray(data.products)) {
+          markProductsSynced();
+          return false;
+        }
         reload();
         const before = JSON.stringify(state.products || []);
         const normalized = data.products.map(normalizeProductMedia);
         const after = JSON.stringify(normalized);
+        markProductsSynced();
         if (before === after) return false;
         state.products = normalized;
         save();
         broadcast("products");
         return true;
       })
-      .catch(() => false)
+      .catch(() => { markProductsSynced(); return false; })
       .finally(() => { productSyncInFlight = null; });
     return productSyncInFlight;
   }
@@ -1350,6 +1403,15 @@
       if (!data.media || !data.media.id) throw new Error("The upload did not complete. Please try again.");
       return Object.assign({}, data.media, { url: apiUrl(data.media.url) });
     },
+    async uploadPromotionHtml(file, signal) {
+      if (!file || !/\.html?$/i.test(String(file.name || ""))) throw new Error("Choose an .html or .htm banner file");
+      const data = await apiRequest("/api/promo-media/html", {
+        method: "POST", body: file, signal, timeoutMs: 60000,
+        headers: { "Content-Type": file.type || "text/html", "X-File-Name": encodeURIComponent(file.name || "promotion.html") }
+      }, true);
+      if (!data.creative || !data.creative.id) throw new Error("The HTML banner upload did not complete. Please try again.");
+      return Object.assign({}, data.creative, { url: apiUrl(data.creative.url) });
+    },
     async mediaPreview(id, signal) {
       if (!/^[a-f0-9]{32}$/.test(String(id || ""))) throw new Error("Invalid media reference");
       const controller = new AbortController();
@@ -1373,6 +1435,7 @@
     /* ----- live backend financials & POS holds ----- */
     pullProducts,
     pullOperationalData,
+    productsSynced: () => productsSynced,
     financeRequest(path, options) {
       const suffix = String(path || "").replace(/^\//, "");
       return apiRequest("/api/finance/" + suffix, options || { method: "GET" }, true);
@@ -1468,6 +1531,7 @@
     ugx(n) { return "UGX " + money(n).toLocaleString("en-US"); },
     laneOf: orderLanes,
     barcodeSVG: generateBarcodeSVG,
-    apiUrl: apiUrl
+    apiUrl: apiUrl,
+    canonicalMediaRef: canonicalMediaRef
   };
 })(typeof window !== "undefined" ? window : globalThis);

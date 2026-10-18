@@ -57,14 +57,14 @@
   }
   function websiteLabel(settings = {}) {
     // Print the configured storefront, never a temporary preview / native origin.
-    const fallback = "https://adonai-store.onrender.com/";
+    const fallback = "https://www.adonaithrift-store.online/";
     const raw = String(settings.website_url || settings.app_url || fallback).trim();
     try {
       const url = new URL(/^https?:\/\//i.test(raw) ? raw : "https://" + raw);
       const shell = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|appassets\.androidplatform\.net)$|\.e2b\.app$/i.test(url.hostname);
       if (!/^https?:$/.test(url.protocol) || url.username || url.password || shell) throw new Error("Not a public storefront");
       return url.host.replace(/^www\./i, "") + url.pathname.replace(/\/+$/, "");
-    } catch (e) { return "adonai-store.onrender.com"; }
+    } catch (e) { return "adonaithrift-store.online"; }
   }
   function tagModel(product, sample) {
     if (!product || !product.id) throw new Error("Save this garment before printing its tag.");

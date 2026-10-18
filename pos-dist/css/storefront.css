@@ -539,15 +539,35 @@ h1, h2, h3, .brand-word, .section-title {
 .pmeasure { font-size: 11.5px; color: var(--green); font-weight: 600; }
 
 .pmedia {
-  position: relative; aspect-ratio: 4 / 3.4; background: var(--tint);
+  position: relative; aspect-ratio: 4 / 3.4;
+  /* A calm studio backdrop: with the whole garment fitted inside the
+     frame (below), the margins around it read as intentional. */
+  background: linear-gradient(180deg, #FCFBF8, #F1EFE8);
   overflow: hidden; display: flex; align-items: center; justify-content: center;
 }
 .pmedia img {
-  width: 100%; height: 100%; object-fit: cover;
+  width: 100%; height: 100%;
+  /* contain, not cover: these are one-of-one pieces a shopper judges as a
+     whole. Cover cropped shoes, bags and hems out of the frame — the
+     "image is cut" complaint. The full item is always visible now. */
+  object-fit: contain;
   transition: transform .3s cubic-bezier(.32, .72, 0, 1); display: block;
 }
+.pmedia > picture { display: block; width: 100%; height: 100%; }
+/* A photo still travelling must not read as a broken shop: it stays
+   invisible over the card's category mark and fades in when it lands
+   (js/product-kit.js adds .is-loaded, or .img-broken after a failed
+   master retry — then the mark behind it remains as the placeholder). */
+.pmedia > img, .pmedia > picture > img {
+  opacity: 0;
+  transition: opacity .35s ease, transform .3s cubic-bezier(.32, .72, 0, 1);
+}
+.pmedia > img.is-loaded, .pmedia > picture > img.is-loaded { opacity: 1; }
+.pmedia img.img-broken { display: none; }
+.pmedia:has(> img.is-loaded) .media-icon,
+.pmedia:has(> picture > img.is-loaded) .media-icon { opacity: 0; }
 .pcard:hover .pmedia img { transform: scale(1.05); }
-.pmedia .media-icon { position: absolute; inset: 0; display: grid; place-items: center; color: #D1D5DB; }
+.pmedia .media-icon { position: absolute; inset: 0; display: grid; place-items: center; color: #D1D5DB; transition: opacity .35s ease; }
 .pmedia .media-icon svg { width: 54px; height: 54px; }
 
 .line-source-tag { margin-top: 4px; color: #77542f; font: 750 10px/1.4 var(--font-text); letter-spacing: .01em; }

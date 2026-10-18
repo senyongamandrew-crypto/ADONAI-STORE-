@@ -19,6 +19,15 @@
   const accessNotice = $("#terminalAccessNotice");
   if (accessNotice) accessNotice.hidden = !pinFree;
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Staff lists render garment photos into ~40px slots. Pointing those at
+  // the full-size master made every dashboard/stock list pull megabytes;
+  // the media API keeps durable small re-encodes for exactly this. Any
+  // non-media URL (bundled asset, data: photo) passes through untouched.
+  const mediaThumbSrc = (url, width = 96) => {
+    const value = String(url || "");
+    return /^(?:https?:\/\/[^/]+)?\/?api\/media\/[0-9a-f]{32}\/?$/i.test(value)
+      ? `${value}?w=${width}` : value;
+  };
   const ugx = DB.ugx;
   /* Payment channel labels used by the order panel. Kept beside the console's
      own vocabulary so staff read "Bank transfer", not a server key. */
@@ -304,7 +313,7 @@
 
   /* Cross-Navigation: Admin Console to Live Web Storefront (External Browser Intent) */
   // Live Render deployment of the public storefront (web + API share this service).
-  const LIVE_WEB_STOREFRONT_URL = "https://adonai-store.onrender.com";
+  const LIVE_WEB_STOREFRONT_URL = "https://www.adonaithrift-store.online";
 
   const isShellOrigin = origin => {
     try {
@@ -535,7 +544,7 @@
       const available = DB.listProducts().filter(p => Number(p.in_stock_count) > 0).slice(0, 8);
       dashboardProducts.innerHTML = available.length ? available.map(p => `
         <article class="dashboard-product-card">
-          <div class="dashboard-product-image">${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.remove()" />` : Icons.svg("tag", "ico-20")}</div>
+          <div class="dashboard-product-image">${p.image_url ? `<img src="${esc(mediaThumbSrc(p.image_url, 320))}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()" />` : Icons.svg("tag", "ico-20")}</div>
           <div class="dashboard-product-info"><strong>${esc(p.name)}</strong><span>${esc(p.sku || "No SKU")} · ${Number(p.in_stock_count)} in stock</span><b>${ugx(p.selling_price || p.base_price || 0)}</b></div>
         </article>`).join("") : `<p class="muted small dashboard-products-empty">No available product cards yet. Add stock from Catalog Intake.</p>`;
     }
@@ -1481,7 +1490,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const off = p.compare_price > p.selling_price ? Math.round((p.compare_price - p.selling_price) / p.compare_price * 100) : 0;
       const inStock = p.in_stock_count > 0;
       return `<div class="stock-row">
-        <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("shirt", "ico-cat")}</span>
+        <span class="ph-thumb">${p.image_url ? `<img src="${esc(mediaThumbSrc(p.image_url))}" alt="" loading="lazy" onerror="this.remove()" />` : Icons.svg("shirt", "ico-cat")}</span>
         <div class="stock-main">
           <div class="stock-title-row">
             <div class="grow">
@@ -1582,6 +1591,122 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#delPurge").addEventListener("click", () => run("permanent"));
   }
 
+  /* Edit-modal side of the dynamic category schemas. A record that was
+     saved complete must stay complete; older / partial records may be saved
+     with gaps (staff get a reminder instead of a hard block). */
+  function legacySchemaValues(schema, product) {
+    const values = {};
+    const measurements = (product && product.measurements) || {};
+    (schema.sections || []).forEach(section => (section.fields || []).forEach(field => {
+      const inches = Number(measurements[field.flat_lay_key]);
+      if (!field.flat_lay_key || field.type !== "measure" || !(inches > 0)) return;
+      const units = field.units || [];
+      if (units.includes("in")) values[field.key] = { value: inches, unit: "in" };
+      else if (units.includes("cm")) values[field.key] = { value: Math.round(inches * 2.54 * 10) / 10, unit: "cm" };
+    }));
+    return values;
+  }
+
+  function mountModalSchema(product, photos) {
+    const engine = schemaEngine();
+    const section = $("#mpSpecsSection");
+    modalBox._schemaForm = modalBox._schemaPhotoProtocol = null;
+    modalBox._schemaPhotos = (photos || []).slice();
+    if (!engine || !section) return;
+    const stored = (product && product.attributes) || {};
+    const enforce = !product || !!stored.complete;
+    const context = () => ({ subcategory: $("#mpSubCat").value, item_condition: $("#mpItemCondition").value });
+    let mountedKey = "";
+
+    const syncCoreFields = schema => {
+      const hidden = schema ? engine.hiddenCoreFields(schema) : [];
+      const setHidden = (id, flag) => { const wrap = $("#" + id) && $("#" + id).closest(".field"); if (wrap) wrap.hidden = flag; };
+      setHidden("mpSize", hidden.includes("size"));
+      setHidden("mpFabric", hidden.includes("fabric"));
+      // Inch flat-lay text only for legacy / un-schema'd records.
+      setHidden("mpMeasure", !!schema);
+    };
+    const status = () => {
+      const form = modalBox._schemaForm;
+      const box = $("#mpSpecsStatus");
+      if (!form || !box) return;
+      const required = form.requiredStatus();
+      const angles = modalBox._schemaPhotoProtocol ? modalBox._schemaPhotoProtocol.status() : { requiredMapped: 0, required: 0 };
+      box.textContent = `${required.done}/${required.total} required · ${angles.requiredMapped}/${angles.required} angles${enforce ? "" : " · gaps allowed for this older record"}`;
+    };
+    const remount = () => {
+      const subs = engine.subcategoriesFor($("#mpCat").value);
+      const select = $("#mpSubCat");
+      const previous = select.value || (product && product.category === $("#mpCat").value ? product.subcategory : "");
+      select.innerHTML = subs.map(sub => `<option>${esc(sub)}</option>`).join("");
+      select.value = subs.includes(previous) ? previous : (subs[0] || "");
+      $("#mpSubCatField").hidden = !subs.length;
+      const resolved = engine.resolve($("#mpCat").value, select.value);
+      if (!resolved) {
+        section.hidden = true;
+        if (modalBox._schemaForm) modalBox._schemaForm.destroy();
+        modalBox._schemaForm = modalBox._schemaPhotoProtocol = null; mountedKey = "";
+        syncCoreFields(null);
+        return;
+      }
+      section.hidden = false;
+      syncCoreFields(resolved.schema);
+      if (mountedKey === resolved.key && modalBox._schemaForm) {
+        modalBox._schemaForm.setContext(context());
+        modalBox._schemaPhotoProtocol.setContext(context());
+        return;
+      }
+      const sameAsStored = stored.schema_key === resolved.key;
+      const initial = modalBox._schemaForm && mountedKey === resolved.key ? modalBox._schemaForm.read()
+        : sameAsStored ? { values: stored.values || {}, inspection: stored.inspection || {} }
+        : { values: legacySchemaValues(resolved.schema, product) };
+      if (modalBox._schemaForm) modalBox._schemaForm.destroy();
+      mountedKey = resolved.key;
+      $("#mpSpecsTitle").textContent = `${resolved.schema.label} specifications`;
+      modalBox._schemaForm = engine.mountForm($("#mpSpecs"), { schema: resolved.schema, context: context(), values: initial, onChange: status });
+      modalBox._schemaPhotoProtocol = engine.mountPhotoProtocol($("#mpPhotoProtocol"), {
+        schema: resolved.schema, context: context(), photos: modalBox._schemaPhotos,
+        angles: sameAsStored ? (stored.photo_angles || {}) : {}, onChange: status
+      });
+      status();
+    };
+    modalBox._schemaEnforce = enforce;
+    modalBox._schemaMeasureKeys = () => {
+      const form = modalBox._schemaForm;
+      const keys = [];
+      if (form) (form.schema.sections || []).forEach(sec => (sec.fields || []).forEach(field => { if (field.flat_lay_key) keys.push(field.flat_lay_key); }));
+      return keys;
+    };
+    $("#mpCat").addEventListener("change", () => { $("#mpSubCat").value = ""; remount(); });
+    $("#mpSubCat").addEventListener("change", remount);
+    $("#mpItemCondition").addEventListener("change", remount);
+    remount();
+  }
+
+  /** Attributes for the modal save, or {error} when a required field blocks it. */
+  function collectModalSchema(product) {
+    const engine = schemaEngine();
+    const form = modalBox._schemaForm;
+    if (!engine || !form || $("#mpSpecsSection").hidden) return null;
+    const strict = form.validate({ enforceRequired: true });
+    const result = modalBox._schemaEnforce ? strict : form.validate({ enforceRequired: false });
+    if (!result.ok) {
+      const messages = Object.values(result.errors);
+      form.focusFirstError();
+      return { error: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}` };
+    }
+    if (!strict.ok) form.showErrors({}); // older record: gaps are reminders, not blockers
+    const attributes = { schema_key: form.schema.key, values: result.values, photo_angles: modalBox._schemaPhotoProtocol ? modalBox._schemaPhotoProtocol.read() : {} };
+    if (engine.inspectionApplies(form.schema, form.context)) attributes.inspection = result.inspection;
+    const projections = engine.project(form.schema, result.values);
+    // Rebuild the inch card: drop flat-lay keys this form owns, keep any
+    // others (and the note), then add the freshly projected inches.
+    const measurements = Object.assign({}, (product && product.measurements) || {});
+    modalBox._schemaMeasureKeys().forEach(key => { delete measurements[key]; });
+    Object.assign(measurements, projections.measurements || {});
+    return { subcategory: $("#mpSubCat").value, attributes, projections, measurements, missing: Object.keys(strict.errors).length };
+  }
+
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
@@ -1599,13 +1724,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div class="field"><label>Category</label><select id="mpCat" class="sel-full">${DB.CATEGORIES.map(c => `<option ${p && p.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
         <div class="field"><label>Demographic</label><select id="mpDemo" class="sel-full">${DB.DEMOGRAPHICS.map(d => `<option ${p && p.demographic === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
       </div>
+      <div class="field" id="mpSubCatField" hidden><label for="mpSubCat">Sub-group / style<span class="fhint">Selects the specification form</span></label><select id="mpSubCat" class="sel-full"></select></div>
       <div class="fgrid">
         <div class="field"><label>Size</label><input id="mpSize" class="sel-full" value="${v("size", "-")}" /></div>
         <div class="field"><label>Condition</label><select id="mpCond" class="sel-full">${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
       </div>
       <div class="fgrid">
-        <div class="field"><label>Cost (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
-        <div class="field"><label>Base price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
+        <div class="field"><label>Unit COGS (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
+        <div class="field"><label>Target retail price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
       </div>
       <div class="fgrid">
         <div class="field"><label>Total transport (UGX)<span class="fhint">50% embedded · 50% at checkout · defaults to System Parameters base fee</span></label><input id="mpTransport" type="number" min="0" class="sel-full" ${p ? "" : `data-auto="1" placeholder="${globalBaseDeliveryFee()}"`} value="${p ? (p.total_transport_cost || 0) : globalBaseDeliveryFee()}" /></div>
@@ -1618,8 +1744,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       <h4 class="sec" style="margin:18px 0 8px">Product page details</h4>
       <div class="field"><label>Fabric &amp; composition</label><input id="mpFabric" class="sel-full" value="${v("fabric")}" placeholder="100% Cotton denim · 12.5oz" /></div>
       <div class="field"><label>Care instructions</label><input id="mpCare" class="sel-full" value="${v("care_notes")}" placeholder="Machine wash cold inside out." /></div>
-      <div class="field"><label>Flat-lay measurements<span class="fhint">inches · one per line as name: value</span></label>
+      <div class="field" id="mpMeasureField"><label>Flat-lay measurements<span class="fhint">inches · one per line as name: value</span></label>
         <textarea id="mpMeasure" class="sel-full" placeholder="shoulder: 18.5&#10;chest: 22&#10;sleeve: 25&#10;length: 26">${measurementsToText(p && p.measurements)}</textarea></div>
+      <section class="mp-specs" id="mpSpecsSection" hidden>
+        <div class="mp-specs-head"><strong id="mpSpecsTitle">Category specifications</strong><span id="mpSpecsStatus"></span></div>
+        <div id="mpSpecs"></div>
+        <div id="mpPhotoProtocol" class="intake-photo-protocol"></div>
+      </section>
+      <div class="field"><label>Search tags<span class="fhint">Comma-separated · clear to regenerate automatically</span></label><input id="mpSearchTags" class="sel-full" maxlength="600" value="${p ? esc((p.search_tags || []).join(", ")) : ""}" /></div>
+      <div class="field"><label>Pickup &amp; delivery notes</label><textarea id="mpFulfillment" class="sel-full" maxlength="600" placeholder="Pickup and delivery details shown on the product page">${v("fulfillment_notes")}</textarea></div>
       <div class="field"><label>Flaw &amp; condition notes</label><textarea id="mpFlaws" class="sel-full" placeholder="Describe every flaw a shopper would want to know about.">${v("flaw_notes")}</textarea></div>
       <div class="field"><label>Which photo shows the flaw?</label>
         <select id="mpFlawPhoto" class="sel-full"><option value="-1">No flaw close-up</option>${modalImages.map((url, i) => `<option value="${i}" ${p && Number(p.flaw_photo_index) === i ? "selected" : ""}>Photo ${i + 1}${i === 0 ? " · Cover" : ""}</option>`).join("")}</select></div>
@@ -1628,9 +1761,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
+    mountModalSchema(p, modalImages);
     modalBox._mediaEditor = GarmentMedia.mount($("#mpMedia"), {
       product: p,
-      onChange: (urls, previous) => syncFlawPhotoOptions($("#mpFlawPhoto"), urls, previous),
+      onChange: (urls, previous) => {
+        syncFlawPhotoOptions($("#mpFlawPhoto"), urls, previous);
+        modalBox._schemaPhotos = urls.slice();
+        if (modalBox._schemaPhotoProtocol) modalBox._schemaPhotoProtocol.setPhotos(urls);
+      },
       onBusy: busy => { const button = $("[data-save-prod]", modalBox); if (button) button.disabled = busy || !!modalBox._mediaSaving; },
       onError: message => toast(message, false)
     });
@@ -1662,6 +1800,158 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     "Accessories": ["Accessories", "Hats, Scarves & Belts"],
     "Kids": ["Children Wear"]
   };
+
+  /* Category-aware intake profiles. Once staff pick the category group /
+     category, Catalog Intake asks only the details that belong to that kind
+     of stock: a necklace gets length and material questions — never S/M/L
+     size variants, fabric composition or garment grading notes. */
+  const INTAKE_PROFILES = {
+    apparel: {
+      hint: "Garment intake — size, fabric & composition, care and flat-lay measurements. Garment sizes (S–XL) and fabric fields are only asked for apparel.",
+      brandNewLabel: "Brand-New Apparel · Multi-Quantity",
+      size: { label: "Size", placeholder: "L / 42 / -", presets: ["XS", "S", "M", "L", "XL", "2XL", "28", "30", "32", "34", "36", "40", "42", "43", "44", "8y", "10y", "One size"] },
+      sizeVariants: true,
+      quickMeasurements: { label: "Exact garment measurements", hint: "Pre-loved: chest, length, waist, inseam", placeholder: "Chest 42in; Length 28in" },
+      fabric: { label: "Fabric & composition", hint: "Shown on the product page", placeholder: "100% Cotton denim · 12.5oz" },
+      fabricGradingNotes: true,
+      care: { show: true, placeholder: "Machine wash cold inside out. Hang dry." },
+      measureSets: ["top", "bottom"],
+      defaultMeasureSet: "top",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe fit, fabric feel, vintage era, and standout features…",
+      measureNotePlaceholder: "Measured flat, buttoned, without stretching.",
+      flawPlaceholder: "Small moth nibble (3mm) on the lower left front panel. Replaced third button."
+    },
+    footwear: {
+      hint: "Footwear intake — shoe size, material and flat-lay measurements (length, insole, heel). No garment sizes or fabric grading notes.",
+      brandNewLabel: "Brand-New Footwear · Multi-Quantity",
+      size: { label: "Shoe size", placeholder: "42 / UK 8 / US 9", presets: ["36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "One size"] },
+      sizeVariants: true,
+      quickMeasurements: { label: "Exact shoe measurements", hint: "Pre-loved: insole, outsole, heel", placeholder: "Insole 10.5in; Heel 1in" },
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Leather upper · Rubber sole" },
+      fabricGradingNotes: false,
+      care: { show: true, placeholder: "Wipe clean. Use shoe trees. Avoid soaking." },
+      measureSets: ["other"],
+      defaultMeasureSet: "other",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe fit, sole condition, leather feel, and standout features…",
+      measureNotePlaceholder: "Insole measured heel to toe, sole flat.",
+      flawPlaceholder: "Light creasing on the right toe. Sole tread still deep."
+    },
+    jewelry: {
+      hint: "Jewelry intake — length / size, material and piece measurements. No S/M/L size variants, fabric fields or garment measurements.",
+      brandNewLabel: "Brand-New Jewelry · Multi-Quantity",
+      size: { label: "Length / size", placeholder: "18 in · 45 cm · One size", presets: ["One size", "14 in", "16 in", "18 in", "20 in", "24 in", "28 in", "30 in"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Gold-plated brass · 925 silver · beads" },
+      fabricGradingNotes: false,
+      care: { show: false, placeholder: "" },
+      measureSets: ["jewelry"],
+      defaultMeasureSet: "jewelry",
+      conditions: ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"],
+      storyPlaceholder: "Describe the piece's style, era, stones or charms, and standout features…",
+      measureNotePlaceholder: "Measured end-to-end, clasp closed.",
+      flawPlaceholder: "Clasp shows light wear. One stone has a tiny chip."
+    },
+    watch: {
+      hint: "Watch intake — case / band size, material and case measurements. No garment sizes or fabric fields.",
+      brandNewLabel: "Brand-New Watches · Multi-Quantity",
+      size: { label: "Band / case size", placeholder: "40mm case · One size", presets: ["One size", "34mm", "36mm", "38mm", "40mm", "42mm", "44mm"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Stainless steel · Leather strap" },
+      fabricGradingNotes: false,
+      care: { show: false, placeholder: "" },
+      measureSets: ["watch"],
+      defaultMeasureSet: "watch",
+      conditions: ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"],
+      storyPlaceholder: "Describe the movement, dial, case finish, and standout features…",
+      measureNotePlaceholder: "Measured across the case, excluding the crown.",
+      flawPlaceholder: "Hairline scratch on the crystal. Band shows light desk wear."
+    },
+    bag: {
+      hint: "Bag intake — size, material and body measurements (width, height, depth, strap drop). No garment sizes or fabric grading notes.",
+      brandNewLabel: "Brand-New Bags · Multi-Quantity",
+      size: { label: "Size", placeholder: "Medium / 30cm", presets: ["One size", "Mini", "Small", "Medium", "Large"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Genuine leather · Canvas · Nylon" },
+      fabricGradingNotes: false,
+      care: { show: true, placeholder: "Wipe with a soft dry cloth. Store in the dust bag." },
+      measureSets: ["bag"],
+      defaultMeasureSet: "bag",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe the leather, interior, hardware, and standout features…",
+      measureNotePlaceholder: "Measured flat at the widest points, bag empty.",
+      flawPlaceholder: "Corner scuffing and light interior marks. Hardware still bright."
+    },
+    eyewear: {
+      hint: "Eyewear intake — frame size, material and frame measurements. No garment sizes or fabric fields.",
+      brandNewLabel: "Brand-New Eyewear · Multi-Quantity",
+      size: { label: "Frame size", placeholder: "Medium / One size", presets: ["One size", "Small", "Medium", "Large"] },
+      sizeVariants: false,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Acetate · Metal frame · Polycarbonate lenses" },
+      fabricGradingNotes: false,
+      care: { show: false, placeholder: "" },
+      measureSets: ["eyewear"],
+      defaultMeasureSet: "eyewear",
+      conditions: ["Brand New with Tags (BNWT)", "Grade A — Excellent", "Grade B — Good", "Vintage / Collector"],
+      storyPlaceholder: "Describe the frame shape, lens tint, and standout features…",
+      measureNotePlaceholder: "Measured across the frame front, hinge to hinge.",
+      flawPlaceholder: "Small scratch on the left lens. Arms slightly loose."
+    },
+    accessory: {
+      hint: "Accessory intake — size, material and dimensions (length, width, circumference). No S/M/L variants unless the piece is sized.",
+      brandNewLabel: "Brand-New Accessories · Multi-Quantity",
+      size: { label: "Size", placeholder: "M / 34in waist / One size", presets: ["One size", "XS", "S", "M", "L", "XL", "28", "30", "32", "34", "36", "38", "40"] },
+      sizeVariants: true,
+      quickMeasurements: null,
+      fabric: { label: "Material / composition", hint: "Shown on the product page", placeholder: "Wool · Cotton · Leather" },
+      fabricGradingNotes: false,
+      care: { show: true, placeholder: "Hand wash cold or dry clean. Store away from direct sun." },
+      measureSets: ["accessory"],
+      defaultMeasureSet: "accessory",
+      conditions: ["Grade A — Excellent", "Grade B — Good", "Vintage / Collector", "Factory Fresh"],
+      storyPlaceholder: "Describe the fabric, pattern, fit, and standout features…",
+      measureNotePlaceholder: "Measured flat without stretching.",
+      flawPlaceholder: "Faint mark on the inner band. No pulls or tears."
+    }
+  };
+
+  /* Which intake profile a category belongs to. Unknown categories fall back
+     by name, then to apparel so new catalog entries still get full garment
+     detail capture instead of a bare form. */
+  function intakeProfileFor(category) {
+    const value = String(category || "").toLowerCase();
+    if (/necklace|chain|bracelet|bangle|ring|earring|pendant|jewel/.test(value)) return "jewelry";
+    if (/watch|timepiece/.test(value)) return "watch";
+    if (/shoe|boot|sandal|sneaker|footwear|loafer/.test(value)) return "footwear";
+    if (/bag|handbag|backpack|tote|clutch|purse/.test(value)) return "bag";
+    if (/eyewear|sunglass|glasses|frame/.test(value)) return "eyewear";
+    if (/hat|scarf|belt|cap|beanie|accessor/.test(value)) return "accessory";
+    return "apparel";
+  }
+
+  /* Size labels/presets, refined per category (rings size differently from
+     chains) and per target audience (children get age runs first). */
+  function sizeSpecFor(category, profileKey) {
+    const value = String(category || "").toLowerCase();
+    const demo = ($("#inDemo") && $("#inDemo").value) || "";
+    if (profileKey === "jewelry") {
+      if (/ring/.test(value)) return { label: "Ring / earring size", placeholder: "7 · 52 · One size", presets: ["One size", "5", "6", "7", "8", "9", "10", "11"] };
+      if (/bracelet|bangle/.test(value)) return { label: "Bracelet length / size", placeholder: "7.5 in · One size", presets: ["One size", "6.5 in", "7 in", "7.5 in", "8 in", "8.5 in", "9 in"] };
+      return { label: "Length / size", placeholder: "18 in · 45 cm · One size", presets: ["One size", "14 in", "16 in", "18 in", "20 in", "24 in", "28 in", "30 in"] };
+    }
+    const spec = INTAKE_PROFILES[profileKey].size;
+    if (demo === "Children") {
+      if (profileKey === "footwear") return { label: spec.label, placeholder: "32 / kids", presets: ["28", "30", "32", "34", "36", "38", "One size"] };
+      if (profileKey === "apparel") return { label: spec.label, placeholder: "8y / 120cm / -", presets: ["2y", "4y", "6y", "8y", "10y", "12y", "14y", "XS", "S", "M", "L", "One size"] };
+    }
+    return spec;
+  }
+
   let intakeMedia = null;
   let intakeBound = false;
   let intakeLotsLoadInFlight = null;
@@ -1831,15 +2121,49 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       ["length", "Length"],
       ["insole", "Insole length"],
       ["heel", "Heel height"]
+    ],
+    jewelry: [
+      ["length", "Chain / piece length"],
+      ["pendant", "Pendant / stone size"],
+      ["width", "Width / thickness"]
+    ],
+    watch: [
+      ["case_diameter", "Case diameter"],
+      ["band_width", "Band width"],
+      ["band_length", "Band length"]
+    ],
+    bag: [
+      ["width", "Width"],
+      ["height", "Height"],
+      ["depth", "Depth"],
+      ["strap_drop", "Strap / handle drop"]
+    ],
+    eyewear: [
+      ["lens_width", "Lens width"],
+      ["bridge", "Bridge width"],
+      ["temple", "Temple arm length"]
+    ],
+    accessory: [
+      ["length", "Length"],
+      ["width", "Width"],
+      ["circumference", "Head / waist circumference"]
     ]
+  };
+
+  const MEASURE_SET_LABELS = {
+    top: "Tops · Jackets · Dresses",
+    bottom: "Pants · Jeans · Skirts",
+    other: "Shoes · Boots · Sandals",
+    jewelry: "Necklaces · Bracelets · Rings · Earrings",
+    watch: "Wristwatches",
+    bag: "Bags & Handbags",
+    eyewear: "Eyewear & Sunglasses",
+    accessory: "Hats · Scarves · Belts"
   };
 
   // Categories decide which measurement set is offered by default.
   function measureSetForCategory(category) {
-    const value = String(category || "").toLowerCase();
-    if (/pant|jean|skirt|short|trouser/.test(value)) return "bottom";
-    if (/shoe|boot|sandal|footwear|accessor|bag|handbag|wallet|belt|hat|scarf|necklace|chain|bracelet|bangle|ring|earring|watch|eyewear|sunglass/.test(value)) return "other";
-    return "top";
+    return INTAKE_PROFILES[intakeProfileFor(category)].defaultMeasureSet;
   }
 
   function buildMeasureFields(setKey, existing) {
@@ -1855,13 +2179,308 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
   function readMeasurements() {
     const out = {};
-    document.querySelectorAll("#measureFields [data-measure]").forEach(input => {
+    const legacySet = $("#measureFields");
+    // In schema mode the inch set is hidden: its stale inputs never leak.
+    if (legacySet && !legacySet.hidden) document.querySelectorAll("#measureFields [data-measure]").forEach(input => {
       const value = Number(input.value);
       if (Number.isFinite(value) && value > 0) out[input.dataset.measure] = value;
     });
     const note = ($("#inMeasureNote") && $("#inMeasureNote").value.trim()) || "";
     if (note) out.notes = note;
     return out;
+  }
+
+  /* ---- category-aware field profiles ----------------------------------
+     applyIntakeProfile() re-shapes the intake form around the chosen
+     category: only the fields that belong to that kind of stock stay on
+     screen, with matching labels, size presets, condition grades and
+     measurement sets. */
+  function intakeFieldWrap(id) {
+    const el = $("#" + id);
+    return el ? el.closest(".field") : null;
+  }
+
+  function setIntakeFieldHidden(id, hidden) {
+    const wrap = intakeFieldWrap(id);
+    if (wrap) wrap.hidden = !!hidden;
+  }
+
+  function isIntakeFieldVisible(id) {
+    const wrap = intakeFieldWrap(id);
+    return !wrap || !wrap.hidden;
+  }
+
+  function setIntakeFieldLabel(id, label, hint) {
+    const wrap = intakeFieldWrap(id);
+    if (!wrap) return;
+    const labelEl = wrap.querySelector("label");
+    if (labelEl) labelEl.innerHTML = `${label}${hint ? `<span class="fhint">${hint}</span>` : ""}`;
+  }
+
+  function rebuildIntakeSizePresets(presets) {
+    const select = $("#inSizePreset");
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = `<option value="">Preset</option>` + presets.map(s => `<option value="${s}">${s}</option>`).join("");
+    select.value = presets.includes(current) ? current : "";
+  }
+
+  function rebuildIntakeConditionOptions(options) {
+    const select = $("#inCond");
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = options.map(c => `<option>${c}</option>`).join("");
+    select.value = options.includes(current) ? current : options[0];
+  }
+
+  function rebuildMeasureSetOptions(setKeys, defaultKey) {
+    const select = $("#inMeasureSet");
+    if (!select) return defaultKey;
+    const current = select.value;
+    select.innerHTML = setKeys.map(key => `<option value="${key}">${MEASURE_SET_LABELS[key] || key}</option>`).join("");
+    select.value = setKeys.includes(current) ? current : defaultKey;
+    return select.value;
+  }
+
+  /* ---- dynamic category schemas (category_field_schemas) ----------------
+     Category + sub-group resolve ONE JSON form (js/catalog-schemas.js). It
+     sits on top of the profile above: the schema's base profile still drives
+     labels, condition grades and care, while the schema renders the
+     category-specific attributes, inspection points and photo angles, and
+     takes over the legacy size / fabric / inch measurement controls it
+     replaces. Without the engine (older cached bundle) the profile-only
+     form keeps working exactly as before. */
+  let intakeSchemaForm = null;
+  let intakeSchemaKey = "";
+  let intakeSchemaJSON = "";
+  let intakePhotoProtocol = null;
+  let intakePhotoUrls = [];
+  let intakeTagsEdited = false;
+
+  function schemaEngine() {
+    return window.CatalogSchemas && window.CatalogSchemas.document ? window.CatalogSchemas : null;
+  }
+
+  function rebuildIntakeSubcategories() {
+    const engine = schemaEngine();
+    const select = $("#inSubCat");
+    const row = $("#inSubCatRow");
+    if (!select || !row || !$("#inCat")) return "";
+    const category = $("#inCat").value;
+    const subs = engine ? engine.subcategoriesFor(category) : [];
+    row.hidden = !subs.length;
+    const current = select.value;
+    const signature = `${category}|${subs.join("|")}`;
+    if (select.dataset.signature !== signature) {
+      select.innerHTML = subs.map(sub => `<option>${esc(sub)}</option>`).join("");
+      select.dataset.signature = signature;
+    }
+    select.value = subs.includes(current) ? current : (subs[0] || "");
+    return select.value;
+  }
+
+  function resolveIntakeSchema() {
+    const engine = schemaEngine();
+    if (!engine || !$("#inCat")) return null;
+    return engine.resolve($("#inCat").value, rebuildIntakeSubcategories());
+  }
+
+  function intakeSchemaContext() {
+    return { subcategory: ($("#inSubCat") && $("#inSubCat").value) || "", item_condition: intakeCondition() };
+  }
+
+  function renumberIntakeSections(schemaActive) {
+    const photos = $("#intakePhotosTitle");
+    const pdp = $("#intakePdpTitle");
+    if (photos) photos.textContent = schemaActive ? "5. Photos, Video & Angle Mapping" : "4. Garment Photos & Video";
+    if (pdp) pdp.textContent = schemaActive ? "6. Product Page Details (fit, care & disclosure)" : "5. Product Page Details (flat-lay measurements & disclosure)";
+  }
+
+  function intakeAutoTags() {
+    const engine = schemaEngine();
+    if (!engine) return [];
+    // Pure validation: a live refresh must not touch on-screen error state.
+    const attributes = intakeSchemaForm
+      ? Object.assign({ schema_key: intakeSchemaKey }, engine.validate(intakeSchemaForm.schema, intakeSchemaForm.read(), intakeSchemaForm.context, { enforceRequired: false }))
+      : null;
+    return engine.autoTags({
+      category: $("#inCat").value, subcategory: ($("#inSubCat") && $("#inSubCat").value) || "",
+      brand: $("#inBrand").value.trim() || "Unbranded", color: $("#inColor").value.trim(),
+      item_condition: intakeCondition(), attributes
+    });
+  }
+
+  function refreshIntakeSearchTags(force = false) {
+    const input = $("#inSearchTags");
+    if (!input || (!force && intakeTagsEdited)) return;
+    input.value = intakeAutoTags().join(", ");
+  }
+
+  function updateIntakeReadiness() {
+    const box = $("#intakeReadiness");
+    if (!box) return;
+    if (!intakeSchemaForm) { box.hidden = true; return; }
+    const specs = intakeSchemaForm.requiredStatus();
+    const angles = intakePhotoProtocol ? intakePhotoProtocol.status() : { requiredMapped: 0, required: 0, missing: [] };
+    const progress = $("#intakeSpecsProgress");
+    if (progress) {
+      progress.textContent = specs.total ? `${specs.done} / ${specs.total} required details` : "No required details";
+      progress.classList.toggle("done", specs.done === specs.total);
+    }
+    const checks = [
+      ["Title", !!$("#inTitle").value.trim(), true],
+      ["SKU / barcode", !!$("#inSku").value.trim(), true],
+      ["Retail price", Number($("#inSell").value) > 0, true],
+      [`Category details ${specs.done}/${specs.total}`, specs.done === specs.total, true],
+      [`Photo angles ${angles.requiredMapped}/${angles.required}`, angles.requiredMapped === angles.required, false]
+    ];
+    box.hidden = false;
+    box.innerHTML = `<span class="ir-label">Ready to save?</span>` + checks.map(([label, ok, blocking]) =>
+      `<span class="ir-chip ${ok ? "ok" : blocking ? "todo" : "advice"}">${ok ? "✓" : blocking ? "•" : "!"} ${esc(label)}</span>`).join("") +
+      (angles.missing.length ? `<span class="ir-note">Recommended next shot: ${esc(angles.missing[0])}</span>` : "");
+  }
+
+  function onIntakeSchemaChange() {
+    refreshIntakeSearchTags();
+    updateIntakeReadiness();
+  }
+
+  function applyIntakeSchema(resolved, preserveValues = false) {
+    const section = $("#intakeSpecsSection");
+    const engine = schemaEngine();
+    if (!section) return;
+    const legacyMeasure = $("#inMeasureSetField");
+    if (!engine || !resolved) {
+      section.hidden = true;
+      if (intakeSchemaForm) intakeSchemaForm.destroy();
+      if (intakePhotoProtocol) intakePhotoProtocol.destroy();
+      intakeSchemaForm = intakePhotoProtocol = null;
+      intakeSchemaKey = intakeSchemaJSON = "";
+      if ($("#intakePhotoProtocol")) $("#intakePhotoProtocol").hidden = true;
+      if (legacyMeasure) legacyMeasure.hidden = false;
+      if ($("#measureFields")) $("#measureFields").hidden = false;
+      setIntakeFieldHidden("inSize", false);
+      setIntakeFieldHidden("inFabric", false);
+      if ($("#intakeSchemaBadge")) $("#intakeSchemaBadge").innerHTML = "";
+      renumberIntakeSections(false);
+      updateIntakeReadiness();
+      return;
+    }
+    const { key, schema } = resolved;
+    const context = intakeSchemaContext();
+    const json = JSON.stringify(schema);
+    section.hidden = false;
+    renumberIntakeSections(true);
+    if (!intakeSchemaForm || intakeSchemaKey !== key || intakeSchemaJSON !== json) {
+      // A new sub-group form starts clean; a refreshed definition of the
+      // SAME form (server mirror update) keeps what staff already typed.
+      const carry = preserveValues && intakeSchemaForm && intakeSchemaKey === key ? intakeSchemaForm.read() : null;
+      const carryAngles = intakePhotoProtocol && intakeSchemaKey === key ? intakePhotoProtocol.read() : null;
+      if (intakeSchemaForm) intakeSchemaForm.destroy();
+      if (intakePhotoProtocol) intakePhotoProtocol.destroy();
+      intakeSchemaKey = key;
+      intakeSchemaJSON = json;
+      intakeSchemaForm = engine.mountForm($("#intakeSpecs"), { schema, context, values: carry || {}, onChange: onIntakeSchemaChange });
+      $("#intakePhotoProtocol").hidden = false;
+      intakePhotoProtocol = engine.mountPhotoProtocol($("#intakePhotoProtocol"), {
+        schema, context, photos: intakePhotoUrls, angles: carryAngles || {}, onChange: updateIntakeReadiness
+      });
+    } else {
+      intakeSchemaForm.setContext(context);
+      intakePhotoProtocol.setContext(context);
+    }
+    // Legacy controls the schema owns: no inch measurement set for jewelry,
+    // no free-text size when the schema records a scaled size, no fabric
+    // box when a structured material field projects into it.
+    const hidden = engine.hiddenCoreFields(schema);
+    setIntakeFieldHidden("inSize", hidden.includes("size"));
+    setIntakeFieldHidden("inFabric", hidden.includes("fabric"));
+    if (legacyMeasure) legacyMeasure.hidden = true;
+    if ($("#measureFields")) $("#measureFields").hidden = true;
+    setIntakeFieldHidden("inMeasurementsField", true);
+
+    const hint = $("#intakeProfileHint");
+    if (hint && schema.summary) hint.textContent = schema.summary;
+    const angles = engine.photoProtocol(schema, context);
+    const inspection = engine.inspectionApplies(schema, context);
+    const badge = $("#intakeSchemaBadge");
+    if (badge) badge.innerHTML = `<span class="isb-eyebrow">INTAKE FORM</span><strong>${esc(schema.label)}</strong>` +
+      `<span>${angles.length} photo angles${inspection ? " · condition inspection" : ""}${engine.source === "server" ? " · synced" : ""}</span>`;
+    refreshIntakeSearchTags();
+    updateIntakeReadiness();
+  }
+
+  /** Validated attributes payload for the save request, or an error message. */
+  function collectIntakeSchema() {
+    const engine = schemaEngine();
+    if (!engine || !intakeSchemaForm || $("#intakeSpecsSection").hidden) return null;
+    const result = intakeSchemaForm.validate({ enforceRequired: true });
+    if (!result.ok) {
+      const messages = Object.values(result.errors);
+      return { ok: false, message: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}${messages.length > 2 ? "…" : ""}` };
+    }
+    const attributes = { schema_key: intakeSchemaKey, values: result.values };
+    if (engine.inspectionApplies(intakeSchemaForm.schema, intakeSchemaForm.context)) attributes.inspection = result.inspection;
+    attributes.photo_angles = intakePhotoProtocol ? intakePhotoProtocol.read() : {};
+    return { ok: true, subcategory: $("#inSubCat").value, attributes, projections: engine.project(intakeSchemaForm.schema, result.values) };
+  }
+
+  function intakeSearchTagsValue() {
+    const raw = ($("#inSearchTags") && $("#inSearchTags").value) || "";
+    const engine = schemaEngine();
+    return engine ? engine.cleanTags(raw) : raw.split(",").map(tag => tag.trim().toLowerCase()).filter(Boolean).slice(0, 24);
+  }
+
+  function applyIntakeProfile() {
+    if (!$("#inCat") || !$("#inMeasureSet")) return;
+    const category = $("#inCat").value;
+    const resolvedSchema = resolveIntakeSchema();
+    // A resolved schema names its own base profile, so "Children Wear ›
+    // Kids Shoes" gets footwear grades and care rather than apparel ones.
+    const schemaProfile = resolvedSchema && resolvedSchema.schema.profile;
+    const profileKey = INTAKE_PROFILES[schemaProfile] ? schemaProfile : intakeProfileFor(category);
+    const spec = INTAKE_PROFILES[profileKey];
+    const preLoved = intakeCondition() === "PRE_LOVED";
+
+    // Inventory-type toggle wording follows the stock kind, not just apparel.
+    const brandNewToggle = document.querySelector('[data-intake-condition="BRAND_NEW"]');
+    if (brandNewToggle) brandNewToggle.textContent = spec.brandNewLabel;
+
+    const hint = $("#intakeProfileHint");
+    if (hint) { hint.hidden = false; hint.textContent = spec.hint; }
+
+    const sizeSpec = sizeSpecFor(category, profileKey);
+    setIntakeFieldLabel("inSize", sizeSpec.label);
+    if ($("#inSize")) $("#inSize").placeholder = sizeSpec.placeholder;
+    rebuildIntakeSizePresets(sizeSpec.presets);
+
+    // Brand-new multi-quantity extras only where size variants make sense.
+    setIntakeFieldHidden("inSizeVariantsField", preLoved || !spec.sizeVariants);
+    setIntakeFieldHidden("inFactoryNotesField", preLoved);
+    if (spec.quickMeasurements && preLoved) {
+      setIntakeFieldHidden("inMeasurementsField", false);
+      setIntakeFieldLabel("inMeasurementsField", spec.quickMeasurements.label, spec.quickMeasurements.hint);
+      if ($("#inMeasurements")) $("#inMeasurements").placeholder = spec.quickMeasurements.placeholder;
+    } else {
+      setIntakeFieldHidden("inMeasurementsField", true);
+    }
+
+    // Fabric questions belong to garments; other stock gets material instead.
+    setIntakeFieldLabel("inFabric", spec.fabric.label, spec.fabric.hint || "");
+    if ($("#inFabric")) $("#inFabric").placeholder = spec.fabric.placeholder;
+    setIntakeFieldHidden("inFabricNotesField", !spec.fabricGradingNotes);
+    setIntakeFieldHidden("inCare", !spec.care.show);
+    if (spec.care.show && $("#inCare")) $("#inCare").placeholder = spec.care.placeholder;
+
+    rebuildIntakeConditionOptions(spec.conditions);
+
+    const setKey = rebuildMeasureSetOptions(spec.measureSets, spec.defaultMeasureSet);
+    buildMeasureFields(setKey);
+
+    if ($("#inStory")) $("#inStory").placeholder = spec.storyPlaceholder;
+    if ($("#inMeasureNote")) $("#inMeasureNote").placeholder = spec.measureNotePlaceholder;
+    if ($("#inFlaws")) $("#inFlaws").placeholder = spec.flawPlaceholder;
+    applyIntakeSchema(resolvedSchema);
   }
 
   // The condition controls must be local console helpers, not undefined
@@ -1879,8 +2498,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       button.classList.toggle("active", active);
       button.setAttribute("aria-pressed", String(active));
     });
-    ["inSizeVariantsField", "inFactoryNotesField"].forEach(id => { $("#" + id).hidden = preLoved; });
-    $("#inMeasurementsField").hidden = !preLoved;
+    // Size variants, factory notes and quick measurements depend on both the
+    // inventory type and the category profile — applyIntakeProfile owns them.
+    applyIntakeProfile();
     const qty = $("#inQty");
     qty.readOnly = preLoved || partnerSource;
     if (preLoved || partnerSource) { qty.value = "1"; qty.max = "1"; }
@@ -2048,9 +2668,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       await setView("partners");
       if (viewReady && currentView === "partners") openPartnerEditor();
     });
-    $("#inDemo").addEventListener("change", () => { $("#inSku").value = newIntakeSku(); paintTag(); });
+    $("#inDemo").addEventListener("change", () => { $("#inSku").value = newIntakeSku(); applyIntakeProfile(); paintTag(); });
     $("#inSizePreset").addEventListener("change", () => { if ($("#inSizePreset").value) $("#inSize").value = $("#inSizePreset").value; paintTag(); });
-    $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; paintTag(); });
+    $("#inGroup").addEventListener("change", () => { $("#inCat").value = GROUPS[$("#inGroup").value][0]; applyIntakeProfile(); paintTag(); });
     $("#inStockLot").addEventListener("change", () => {
       syncIntakeLotGradeUI();
       const lot = findIntakeLot($("#inStockLot").value);
@@ -2075,13 +2695,26 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     // System Parameters default stops auto-refreshing it.
     $("#inTransport").addEventListener("input", () => { $("#inTransport").dataset.auto = "0"; });
     $("#inMeasureSet").addEventListener("change", () => buildMeasureFields($("#inMeasureSet").value));
-    $("#inCat").addEventListener("change", () => {
-      const suggested = measureSetForCategory($("#inCat").value);
-      if ($("#inMeasureSet").value !== suggested) {
-        $("#inMeasureSet").value = suggested;
-        buildMeasureFields(suggested);
-      }
+    // Re-shape the whole detail block whenever the category changes: the
+    // relevant fields, labels, presets and measurement set follow it.
+    $("#inCat").addEventListener("change", applyIntakeProfile);
+    if ($("#inSubCat")) $("#inSubCat").addEventListener("change", () => { applyIntakeProfile(); paintTag(); });
+    $$("[data-brand-preset]").forEach(button => button.addEventListener("click", () => {
+      $("#inBrand").value = button.dataset.brandPreset;
+      refreshIntakeSearchTags();
+      paintTag();
+    }));
+    ["inBrand", "inColor"].forEach(id => $("#" + id).addEventListener("input", () => refreshIntakeSearchTags()));
+    ["inTitle", "inSku", "inSell"].forEach(id => $("#" + id).addEventListener("input", updateIntakeReadiness));
+    if ($("#inSearchTags")) $("#inSearchTags").addEventListener("input", () => {
+      // Hand edits stick; clearing the box hands control back to automation.
+      intakeTagsEdited = $("#inSearchTags").value.trim() !== "";
+      if (!intakeTagsEdited) refreshIntakeSearchTags(true);
     });
+    if (window.CatalogSchemas && CatalogSchemas.onChange) {
+      CatalogSchemas.onChange(() => applyIntakeSchema(resolveIntakeSchema(), true));
+      CatalogSchemas.load();
+    }
     buildMeasureFields($("#inMeasureSet").value);
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
@@ -2107,6 +2740,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     intakeMedia = GarmentMedia.mount($("#photoRow"), {
       onChange: (urls, previous, video) => {
         syncFlawPhotoOptions($("#inFlawPhoto"), urls, previous);
+        intakePhotoUrls = urls.slice();
+        if (intakePhotoProtocol) intakePhotoProtocol.setPhotos(urls);
+        updateIntakeReadiness();
         $("#angleCount").textContent = `${urls.length} / 12 photos${video ? " + video" : ""}`;
       },
       onBusy: busy => ["btnIntakeSave", "btnIntakeMore", "btnIntakePrint"].forEach(id => { $("#" + id).disabled = busy || intakeSaving; }),
@@ -2118,7 +2754,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const settings = DB.getSettings() || {};
     $("#tagStoreName").textContent = settings.store_name || "ADONAI STORE";
     $("#tagTitle").textContent = $("#inTitle").value.trim() || "Garment name";
-    $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonai-store.onrender.com";
+    $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonaithrift-store.online";
     const basePrice = Number($("#inSell").value) || 0;
     const transport = intakeSource() === "partner" ? 0 : (Number($("#inTransport").value) || 0);
     const sell = basePrice + (transport * 0.5);
@@ -2140,19 +2776,17 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       brand: $("#inBrand").value.trim() || "Unbranded",
       color: $("#inColor").value.trim(),
       demographic: $("#inDemo").value, category: $("#inCat").value,
-      size: $("#inSize").value.trim() || "-",
+      size: (isIntakeFieldVisible("inSize") && $("#inSize").value.trim()) || "-",
       inventory_source: partnerSource ? "partner" : "store",
       consignment_partner_id: partnerSource ? $("#inConsignmentPartner").value : "",
       commission_rate: partnerSource ? (commissionInput === "" ? null : Number(commissionInput)) : null,
       item_condition: intakeCondition(),
       quantity_type: intakeCondition(),
       condition: $("#inCond").value,
-      size_variants: $("#inSizeVariants").value.split(",").map(value => value.trim()).filter(Boolean),
-      factory_tag_notes: $("#inFactoryNotes").value.trim(),
-      measurements: $("#inMeasurements").value.split(";").reduce((out, pair) => {
-        const parts = pair.split(":"); if (parts[0] && parts[1]) out[parts[0].trim()] = parts.slice(1).join(":").trim(); return out;
-      }, {}),
-      fabric_grading_notes: $("#inFabricNotes").value.trim(),
+      // Fields hidden by the category profile never leak stale values.
+      size_variants: isIntakeFieldVisible("inSizeVariants") ? $("#inSizeVariants").value.split(",").map(value => value.trim()).filter(Boolean) : [],
+      factory_tag_notes: isIntakeFieldVisible("inFactoryNotes") ? $("#inFactoryNotes").value.trim() : "",
+      fabric_grading_notes: isIntakeFieldVisible("inFabricNotes") ? $("#inFabricNotes").value.trim() : "",
       cost_price: partnerSource ? 0 : (Number($("#inCost").value) || 0),
       stock_lot_id: partnerSource ? "" : $("#inStockLot").value,
       lot_grade_id: partnerSource ? "" : (($('#inLotGradeField') && !$('#inLotGradeField').hidden && $('#inLotGrade')) ? $('#inLotGrade').value : ""),
@@ -2163,8 +2797,8 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       desc: $("#inStory").value.trim(),
       staff_notes: $("#inNotes").value.trim(),
       // Product detail page specifications
-      fabric: $("#inFabric").value.trim(),
-      care_notes: $("#inCare").value.trim(),
+      fabric: isIntakeFieldVisible("inFabric") ? $("#inFabric").value.trim() : "",
+      care_notes: isIntakeFieldVisible("inCare") ? $("#inCare").value.trim() : "",
       measurements: readMeasurements(),
       flaw_notes: $("#inFlaws").value.trim(),
       flaw_photo_index: Number($("#inFlawPhoto").value),
@@ -2175,10 +2809,25 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         const sku = $("#inSku").value.trim().slice(0, 50);
         return intakeCondition() === "PRE_LOVED" ? `${sku.slice(0, 45)}-1OF1` : sku;
       })(),
+      search_tags: intakeSearchTagsValue(),
+      fulfillment_notes: (($("#inFulfillment") && $("#inFulfillment").value) || "").trim(),
       ...garmentMedia
     };
     if (!vals.name) return toast("Item title is required", false);
     if (!vals.selling_price) return toast("Set a sell price first", false);
+    // Category schema: required specification fields block the save; photo
+    // angles are guidance only (shown in the readiness strip).
+    const schemaPayload = collectIntakeSchema();
+    if (schemaPayload && !schemaPayload.ok) {
+      intakeSchemaForm.focusFirstError();
+      return toast(schemaPayload.message, false);
+    }
+    if (schemaPayload) {
+      vals.subcategory = schemaPayload.subcategory;
+      vals.attributes = schemaPayload.attributes;
+      if (schemaPayload.projections.fabric && !isIntakeFieldVisible("inFabric")) vals.fabric = schemaPayload.projections.fabric;
+      if (schemaPayload.projections.size && !isIntakeFieldVisible("inSize")) vals.size = schemaPayload.projections.size;
+    }
     if (partnerSource) {
       if (!vals.consignment_partner_id) return toast("Choose the partner supplying this item", false);
       if (!garmentMedia.images || !garmentMedia.images.length) return toast("Partner items need at least one photo", false);
@@ -2214,7 +2863,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         $("#inFlawPhoto").value = "-1";
         $("#inSell").dataset.gradeSuggested = "0";
         buildMeasureFields($("#inMeasureSet").value);
+        if (intakeSchemaForm) intakeSchemaForm.reset();
+        intakeTagsEdited = false;
+        if ($("#inSearchTags")) $("#inSearchTags").value = "";
         intakeMedia.reset();
+        if (intakePhotoProtocol) intakePhotoProtocol.reset();
+        refreshIntakeSearchTags(true);
         $("#inStockLot").value = "";
         syncIntakeLotGradeUI();
         lockIntakeCost(false);
@@ -2228,7 +2882,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       // pre-save request has settled.
       loadIntakeStockLots(true);
       if (printAfter && window.GarmentTools) await GarmentTools.openTag(p.id);
-    } catch (err) { toast(err.message, false); }
+    } catch (err) {
+      // The server re-validates the schema; point staff at the exact inputs.
+      const fieldErrors = err && err.data && err.data.field_errors;
+      if (fieldErrors && intakeSchemaForm && intakeSchemaForm.showErrors(fieldErrors)) intakeSchemaForm.focusFirstError();
+      toast(err.message, false);
+    }
     finally { intakeSaving = false; intakeMedia.setLocked(false); saveButtons.forEach(button => { button.disabled = intakeMedia.busy; }); paintTag(); }
   }
 
@@ -2247,7 +2906,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
       <div class="ch-row">
         <div class="rider-mini">
-          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
+          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(mediaThumbSrc(p.image_url))}" alt="" loading="lazy" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
           <div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div>
         </div>
         <div class="gt-recent-actions"><strong class="serif">${ugx(p.selling_price)}</strong><button class="btn sm" type="button" data-print-tag="${esc(p.id)}">${Icons.svg("printer", "ico-12")} Print tag</button></div>
@@ -3102,7 +3761,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const data = await DB.financeRequest("aging?days=" + agingDays, { method:"GET" });
       $("#agingSummary").innerHTML = `<div class="aging-stat"><span>Items at risk</span><strong>${data.count}</strong></div><div class="aging-stat"><span>Cost value at risk</span><strong>${ugx(data.value_at_risk)}</strong></div><div class="aging-stat"><span>Age threshold</span><strong>${data.days}+ days</strong></div>`;
       const rows = data.products || [];
-      host.innerHTML = rows.length ? `<div class="fin-table-scroll"><table class="fin-table"><thead><tr><th>Product</th><th>Age</th><th>Stock</th><th class="num">Unit cost</th><th class="num">Live price</th><th class="num">Value at risk</th><th>Action</th></tr></thead><tbody>${rows.map(row => `<tr><td><div class="aging-product">${row.image_url ? `<img class="aging-thumb" src="${esc(row.image_url)}" alt="" onerror="this.style.display='none'"/>` : `<span class="aging-thumb"></span>`}<span><strong>${esc(row.name)}</strong><br/><small class="muted">${esc(row.sku)} · ${esc(row.category)}</small></span></div></td><td>${row.age_days} days</td><td>${row.in_stock_count}</td><td class="num">${ugx(row.cost_price)}</td><td class="num">${ugx(row.selling_price)}</td><td class="num">${ugx(row.stock_value)}</td><td><div class="aging-action"><button data-aging-markdown="${esc(row.id)}" data-name="${esc(row.name)}" data-price="${row.selling_price}">Markdown</button><button class="danger" data-aging-writeoff="${esc(row.id)}" data-name="${esc(row.name)}">Write off</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="finance-empty"><div><strong>No stock beyond ${agingDays} days</strong><p class="small">Inventory is moving within this threshold.</p></div></div>`;
+      host.innerHTML = rows.length ? `<div class="fin-table-scroll"><table class="fin-table"><thead><tr><th>Product</th><th>Age</th><th>Stock</th><th class="num">Unit cost</th><th class="num">Live price</th><th class="num">Value at risk</th><th>Action</th></tr></thead><tbody>${rows.map(row => `<tr><td><div class="aging-product">${row.image_url ? `<img class="aging-thumb" src="${esc(mediaThumbSrc(row.image_url))}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : `<span class="aging-thumb"></span>`}<span><strong>${esc(row.name)}</strong><br/><small class="muted">${esc(row.sku)} · ${esc(row.category)}</small></span></div></td><td>${row.age_days} days</td><td>${row.in_stock_count}</td><td class="num">${ugx(row.cost_price)}</td><td class="num">${ugx(row.selling_price)}</td><td class="num">${ugx(row.stock_value)}</td><td><div class="aging-action"><button data-aging-markdown="${esc(row.id)}" data-name="${esc(row.name)}" data-price="${row.selling_price}">Markdown</button><button class="danger" data-aging-writeoff="${esc(row.id)}" data-name="${esc(row.name)}">Write off</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="finance-empty"><div><strong>No stock beyond ${agingDays} days</strong><p class="small">Inventory is moving within this threshold.</p></div></div>`;
     } catch (error) { host.innerHTML = financeError(error); $("#agingSummary").innerHTML = ""; }
   }
 
@@ -4163,7 +4822,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         mode: "custom",
         ids: [],
         items: saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
-          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }))
+          .slice(0, 8).map(item => ({
+            media_id: String(item.media_id).toLowerCase(),
+            type: item.type === "html" ? "html" : "image",
+            width: item.type === "html" ? Math.max(1, Math.min(2000, Number(item.width) || 728)) : 0,
+            height: item.type === "html" ? Math.max(1, Math.min(1200, Number(item.height) || 90)) : 0,
+            alt_text: String(item.alt_text || "").slice(0, 120)
+          }))
       };
     } catch (error) { /* A damaged preference safely returns to automatic selection. */ }
     return { mode: "auto", ids: [], items: [] };
@@ -4189,7 +4854,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       return;
     }
     if (promoManagerMode === "custom") {
-      summary.textContent = `${promoManagerItems.length} of 8 custom images selected. Arrange and publish the images you want on the storefront.`;
+      summary.textContent = `${promoManagerItems.length} of 8 custom banner creatives selected. Arrange and publish the images or HTML banners you want on this store's storefront.`;
       list.innerHTML = "";
       renderPromoCreativeChoices();
       return;
@@ -4219,7 +4884,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const compare = Number(product.compare_price) || 0;
       const discount = compare > current && current > 0 ? Math.round((compare - current) / compare * 100) : 0;
       const image = product.image_url
-        ? `<img src="${esc(product.image_url)}" alt="" loading="lazy" onerror="this.remove()">`
+        ? `<img src="${esc(mediaThumbSrc(product.image_url, 320))}" alt="" loading="lazy" onerror="this.remove()">`
         : Icons.svg("tag", "ico-14");
       const name = product.name || "Untitled product";
       const orderControls = isSelected ? `<span class="promo-product-order">
@@ -4272,7 +4937,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!list || !capacity || !add || !input) return;
     const count = promoManagerItems.length;
     const busy = promoUploadsInFlight > 0;
-    capacity.textContent = `${count} of 8 images`;
+    capacity.textContent = `${count} of 8 creatives`;
     add.disabled = count >= 8 || busy;
     input.disabled = busy;
     const mode = $("#storefrontPromoMode");
@@ -4280,24 +4945,34 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const save = $("#btnSavePromoSettings");
     if (save) save.disabled = busy;
     if (!count) {
-      list.innerHTML = '<p class="promo-creatives-empty">No custom images yet. Add artwork here; this works with an empty product catalog.</p>';
+      list.innerHTML = '<p class="promo-creatives-empty">No custom banner files yet. Add images or HTML artwork here; this also works with an empty product catalog.</p>';
       return;
     }
     list.innerHTML = promoManagerItems.map((item, index) => {
       const mediaId = String(item.media_id || "");
-      const src = item.preview_url || (typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`);
+      const creativeType = item.type === "html" ? "html" : "image";
+      const src = item.preview_url || (typeof DB.apiUrl === "function"
+        ? DB.apiUrl(`${creativeType === "html" ? "/api/promo-media/" : "/api/media/"}${mediaId}`)
+        : `${creativeType === "html" ? "/api/promo-media/" : "/api/media/"}${mediaId}`);
+      const label = creativeType === "html" ? `HTML banner ${index + 1}` : `Image ${index + 1}`;
+      const creativeWidth = Math.max(1, Math.min(2000, Number(item.width) || 728));
+      const creativeHeight = Math.max(1, Math.min(1200, Number(item.height) || 90));
+      const previewScale = Math.min(1, 68 / creativeWidth, 76 / creativeHeight);
+      const preview = creativeType === "html"
+        ? `<iframe src="${esc(src)}" title="" width="${creativeWidth}" height="${creativeHeight}" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" tabindex="-1" aria-hidden="true" style="--promo-preview-width:${creativeWidth}px;--promo-preview-height:${creativeHeight}px;--promo-preview-scale:${previewScale}"></iframe>`
+        : `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.opacity='.15'">`;
       return `<div class="promo-creative-row">
-        <div class="promo-creative-thumb"><img src="${esc(src)}" alt="" loading="lazy" onerror="this.style.opacity='.15'"></div>
+        <div class="promo-creative-thumb${creativeType === "html" ? " promo-creative-thumb--html" : ""}">${preview}</div>
         <div class="promo-creative-details">
-          <strong>Image ${index + 1}</strong>
-          <label for="promo-creative-alt-${index}">Alt text (for screen readers)</label>
+          <strong>${label}</strong>
+          <label for="promo-creative-alt-${index}">Accessible description</label>
           <input id="promo-creative-alt-${index}" type="text" maxlength="120" value="${esc(item.alt_text || "")}" data-promo-alt="${index}" placeholder="Optional description" ${busy ? "disabled" : ""} />
         </div>
         <div class="promo-creative-actions">
-          <button type="button" data-promo-creative-move="up" data-promo-creative-index="${index}" aria-label="Move image ${index + 1} earlier" ${index === 0 || busy ? "disabled" : ""}>↑</button>
-          <button type="button" data-promo-creative-move="down" data-promo-creative-index="${index}" aria-label="Move image ${index + 1} later" ${index === count - 1 || busy ? "disabled" : ""}>↓</button>
+          <button type="button" data-promo-creative-move="up" data-promo-creative-index="${index}" aria-label="Move ${label} earlier" ${index === 0 || busy ? "disabled" : ""}>↑</button>
+          <button type="button" data-promo-creative-move="down" data-promo-creative-index="${index}" aria-label="Move ${label} later" ${index === count - 1 || busy ? "disabled" : ""}>↓</button>
           <button type="button" data-promo-creative-replace="${index}" ${busy ? "disabled" : ""}>Replace</button>
-          <input type="file" accept="image/jpeg,image/png,image/webp" data-promo-replace-file="${index}" hidden ${busy ? "disabled" : ""} />
+          <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,text/html,.jpg,.jpeg,.png,.webp,.heic,.heif,.html,.htm" data-promo-replace-file="${index}" hidden ${busy ? "disabled" : ""} />
           <button type="button" class="promo-creative-remove" data-promo-creative-remove="${index}" ${busy ? "disabled" : ""}>Remove</button>
         </div>
       </div>`;
@@ -4320,37 +4995,54 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
   }
 
-  async function uploadPromoImages(files, replaceIndex) {
+  function promoCreativeType(file) {
+    const name = String(file && file.name || "").toLowerCase();
+    if (/\.html?$/.test(name)) return "html";
+    if (/\.(jpe?g|png|webp|heic|heif)$/.test(name)) return "image";
+    return "";
+  }
+
+  async function uploadPromoCreatives(files, replaceIndex) {
     if (promoUploadsInFlight) return;
-    const selected = (files || []).filter(file => file && /^image\/(jpeg|png|webp)$/i.test(String(file.type || "")));
+    const selected = (files || []).map(file => ({ file, type: promoCreativeType(file) })).filter(item => item.type);
     if (!selected.length) {
-      toast("Choose JPG, PNG or WebP images", false);
+      toast("Choose JPG, PNG, WebP, HEIC/HEIF or HTML banner files", false);
       return;
     }
     const isReplace = Number.isInteger(replaceIndex);
     const capacity = isReplace ? 1 : Math.max(0, 8 - promoManagerItems.length);
     if (capacity < 1) {
-      toast("Custom promotions can contain up to 8 images", false);
+      toast("Custom promotions can contain up to 8 banner files", false);
       return;
     }
-    if (selected.length > capacity) toast(`Only ${capacity} more image${capacity === 1 ? " can" : "s can"} be added`, false);
+    if (selected.length > capacity) toast(`Only ${capacity} more creative${capacity === 1 ? " can" : "s can"} be added`, false);
     const filesToUpload = selected.slice(0, capacity);
     promoUploadsInFlight += 1;
-    $("#promoManagerStatus").textContent = `Uploading ${filesToUpload.length} image${filesToUpload.length === 1 ? "" : "s"}…`;
+    $("#promoManagerStatus").textContent = `Uploading ${filesToUpload.length} banner file${filesToUpload.length === 1 ? "" : "s"}…`;
     renderPromoCreativeChoices();
     try {
-      for (const file of filesToUpload) {
-        const uploaded = await DB.uploadMedia(file, "image");
+      for (const selection of filesToUpload) {
+        const { file, type } = selection;
+        const uploaded = type === "html"
+          ? await DB.uploadPromotionHtml(file)
+          : await DB.uploadMedia(file, "image");
         const mediaId = String(uploaded && uploaded.id || "").toLowerCase();
-        if (!/^[a-f0-9]{32}$/.test(mediaId)) throw new Error("The image upload did not return a valid media reference.");
+        if (!/^[a-f0-9]{32}$/.test(mediaId)) throw new Error("The banner upload did not return a valid creative reference.");
         let previewUrl = "";
         if (window.URL && typeof window.URL.createObjectURL === "function") {
           try { previewUrl = window.URL.createObjectURL(file); } catch (error) { /* The published URL will load after saving. */ }
         }
-        const item = { media_id: mediaId, alt_text: "", preview_url: previewUrl };
+        const item = {
+          media_id: mediaId,
+          type,
+          width: type === "html" ? Math.max(1, Math.min(2000, Number(uploaded.width) || 728)) : 0,
+          height: type === "html" ? Math.max(1, Math.min(1200, Number(uploaded.height) || 90)) : 0,
+          alt_text: "",
+          preview_url: previewUrl
+        };
         if (isReplace) {
           const previous = promoManagerItems[replaceIndex];
-          if (!previous) throw new Error("That promotion image is no longer available to replace.");
+          if (!previous) throw new Error("That promotion creative is no longer available to replace.");
           releasePromoPreview(previous);
           item.alt_text = previous.alt_text || "";
           promoManagerItems[replaceIndex] = item;
@@ -4361,7 +5053,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         renderPromoProductChoices();
       }
     } catch (error) {
-      toast(error.message || "Could not upload the storefront image", false);
+      toast(error.message || "Could not upload the storefront banner file", false);
     } finally {
       promoUploadsInFlight = Math.max(0, promoUploadsInFlight - 1);
       if (promoManagerDirty) $("#promoManagerStatus").textContent = "Unpublished changes. Publish to update the storefront.";
@@ -4377,7 +5069,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const input = event.currentTarget;
     const files = Array.from(input.files || []);
     input.value = "";
-    if (files.length) uploadPromoImages(files, null);
+    if (files.length) uploadPromoCreatives(files, null);
   });
   $("#promoCreativeList").addEventListener("click", event => {
     const remove = event.target.closest("[data-promo-creative-remove]");
@@ -4413,7 +5105,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const file = replaceInput.files && replaceInput.files[0];
       const index = Number(replaceInput.dataset.promoReplaceFile);
       replaceInput.value = "";
-      if (file && Number.isInteger(index)) uploadPromoImages([file], index);
+      if (file && Number.isInteger(index)) uploadPromoCreatives([file], index);
       return;
     }
     const altInput = event.target.closest("[data-promo-alt]");
@@ -4476,12 +5168,17 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       return;
     }
     if (promoManagerMode === "custom" && promoManagerItems.length === 0) {
-      toast("Add at least one custom image, or choose another strip mode", false);
+      toast("Add at least one banner image or HTML file, or choose another strip mode", false);
       return;
     }
     const value = promoManagerMode === "auto" ? "auto"
       : promoManagerMode === "none" ? "none"
-      : promoManagerMode === "custom" ? JSON.stringify({ mode: "custom", items: promoManagerItems.slice(0, 8).map(item => ({ media_id: item.media_id, alt_text: item.alt_text || "" })) })
+      : promoManagerMode === "custom" ? JSON.stringify({ mode: "custom", items: promoManagerItems.slice(0, 8).map(item => ({
+        media_id: item.media_id,
+        type: item.type === "html" ? "html" : "image",
+        ...(item.type === "html" ? { width: item.width || 728, height: item.height || 90 } : {}),
+        alt_text: item.alt_text || ""
+      })) })
       : JSON.stringify(promoManagerIds.slice(0, 8));
     const button = $("#btnSavePromoSettings");
     const originalLabel = button.textContent;
@@ -4818,18 +5515,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         care_notes: $("#mpCare").value.trim(),
         measurements: textToMeasurements($("#mpMeasure").value),
         flaw_notes: $("#mpFlaws").value.trim(),
-        flaw_photo_index: Number($("#mpFlawPhoto").value)
+        flaw_photo_index: Number($("#mpFlawPhoto").value),
+        // Empty list asks the server to regenerate tags from the record.
+        search_tags: ($("#mpSearchTags").value || "").split(",").map(tag => tag.trim()).filter(Boolean),
+        fulfillment_notes: $("#mpFulfillment").value.trim()
       };
       if (!vals.name) return toast("Name required", false);
+      const editing = btnSaveProd.dataset.saveProd ? DB.getProduct(btnSaveProd.dataset.saveProd) : null;
+      const modalSchema = collectModalSchema(editing);
+      if (modalSchema && modalSchema.error) return toast(modalSchema.error, false);
+      if (modalSchema) {
+        vals.subcategory = modalSchema.subcategory;
+        vals.attributes = modalSchema.attributes;
+        vals.measurements = modalSchema.measurements;
+        const sizeWrap = $("#mpSize").closest(".field"), fabricWrap = $("#mpFabric").closest(".field");
+        if (sizeWrap && sizeWrap.hidden) vals.size = modalSchema.projections.size || (editing && editing.size) || "-";
+        if (fabricWrap && fabricWrap.hidden) vals.fabric = modalSchema.projections.fabric || "";
+      }
       modalBox._mediaSaving = true;
       const editor = modalBox._mediaEditor;
       editor.setLocked(true); setButtonBusy(btnSaveProd, true, "Saving…");
       try {
-        if (btnSaveProd.dataset.saveProd) { await DB.updateProduct(btnSaveProd.dataset.saveProd, vals); toast("Item updated — live everywhere"); }
+        if (btnSaveProd.dataset.saveProd) {
+          await DB.updateProduct(btnSaveProd.dataset.saveProd, vals);
+          toast(modalSchema && modalSchema.missing ? `Item updated — ${modalSchema.missing} required category detail${modalSchema.missing === 1 ? "" : "s"} still to fill` : "Item updated — live everywhere");
+        }
         else { const p = await DB.addProduct(vals); toast(`Added ${p.name} · ${p.sku}`); }
         editor.markSaved(); modalBox._mediaSaving = false;
         closeModal();
-      } catch (err) { toast(err.message, false); }
+      } catch (err) {
+        const fieldErrors = err && err.data && err.data.field_errors;
+        if (fieldErrors && modalBox._schemaForm && modalBox._schemaForm.showErrors(fieldErrors)) modalBox._schemaForm.focusFirstError();
+        toast(err.message, false);
+      }
       finally { modalBox._mediaSaving = false; editor.setLocked(false); setButtonBusy(btnSaveProd, false); }
       return;
     }

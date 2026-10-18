@@ -520,6 +520,17 @@ Vendored decoder provenance / licenses: `js/vendor/ZXING-LICENSE.txt`.
   access policy and expire after 24 hours (cleaned on the next upload).
   Attachment / replacement is atomic with the product save; a file cannot
   be attached to a second garment or deleted directly while still linked.
+- **Photo references are host-independent.** A stored gallery entry is
+  `/api/media/<id>` (and promo artwork `/api/promo-media/<id>`), never an
+  absolute URL. The server rewrites any hosted form on the way in and out
+  (`security.canonical_image_url`), a boot pass repairs rows written by older
+  builds (`repair_product_media_urls`), and the POS gallery saves only the
+  relative path even though it renders through `DB.apiUrl()`. This is what
+  keeps cards loading when the storefront is served from the apex domain, a
+  custom domain or a preview host: the page CSP is `img-src 'self'`, so an
+  absolute URL naming another host renders as a broken image. Products with
+  images from an external CDN (e.g. Unsplash) are left untouched and remain
+  subject to the CSP allowlist in `serve.py`.
 - Uploads and removal share the existing effective **Stock** authorization;
   published customer media needs no password. Register access, barcode tags,
   garment prices, transport allocation, reservations and payments are unchanged.
@@ -531,8 +542,10 @@ Vendored decoder provenance / licenses: `js/vendor/ZXING-LICENSE.txt`.
   explicitly permits multi-selection for photo inputs; rebuild the APK to
   install native changes (browser phone uploads need no APK).
 
-Checks: `npm run test:garment-media` (also in `npm test`) and
-`.venv/bin/python -m unittest discover -s tests -p test_product_media.py -v`.
+Checks: `npm run test:garment-media` (also in `npm test`),
+`.venv/bin/python -m unittest discover -s tests -p test_product_media.py -v` and
+`.venv/bin/python -m unittest discover -s tests -p test_media_urls.py -v`
+(host-independent photo references).
 All backend media tests write to isolated temporary databases, not store stock.
 
 ## Daily receipts, end-of-day printing and saved audit history
