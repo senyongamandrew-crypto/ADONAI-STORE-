@@ -19,6 +19,15 @@
   const accessNotice = $("#terminalAccessNotice");
   if (accessNotice) accessNotice.hidden = !pinFree;
   const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // Staff lists render garment photos into ~40px slots. Pointing those at
+  // the full-size master made every dashboard/stock list pull megabytes;
+  // the media API keeps durable small re-encodes for exactly this. Any
+  // non-media URL (bundled asset, data: photo) passes through untouched.
+  const mediaThumbSrc = (url, width = 96) => {
+    const value = String(url || "");
+    return /^(?:https?:\/\/[^/]+)?\/?api\/media\/[0-9a-f]{32}\/?$/i.test(value)
+      ? `${value}?w=${width}` : value;
+  };
   const ugx = DB.ugx;
   /* Payment channel labels used by the order panel. Kept beside the console's
      own vocabulary so staff read "Bank transfer", not a server key. */
@@ -535,7 +544,7 @@
       const available = DB.listProducts().filter(p => Number(p.in_stock_count) > 0).slice(0, 8);
       dashboardProducts.innerHTML = available.length ? available.map(p => `
         <article class="dashboard-product-card">
-          <div class="dashboard-product-image">${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.remove()" />` : Icons.svg("tag", "ico-20")}</div>
+          <div class="dashboard-product-image">${p.image_url ? `<img src="${esc(mediaThumbSrc(p.image_url, 320))}" alt="${esc(p.name)}" loading="lazy" onerror="this.remove()" />` : Icons.svg("tag", "ico-20")}</div>
           <div class="dashboard-product-info"><strong>${esc(p.name)}</strong><span>${esc(p.sku || "No SKU")} · ${Number(p.in_stock_count)} in stock</span><b>${ugx(p.selling_price || p.base_price || 0)}</b></div>
         </article>`).join("") : `<p class="muted small dashboard-products-empty">No available product cards yet. Add stock from Catalog Intake.</p>`;
     }
@@ -1481,7 +1490,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const off = p.compare_price > p.selling_price ? Math.round((p.compare_price - p.selling_price) / p.compare_price * 100) : 0;
       const inStock = p.in_stock_count > 0;
       return `<div class="stock-row">
-        <span class="ph-thumb">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("shirt", "ico-cat")}</span>
+        <span class="ph-thumb">${p.image_url ? `<img src="${esc(mediaThumbSrc(p.image_url))}" alt="" loading="lazy" onerror="this.remove()" />` : Icons.svg("shirt", "ico-cat")}</span>
         <div class="stock-main">
           <div class="stock-title-row">
             <div class="grow">
@@ -2897,7 +2906,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#recentTagged").innerHTML = DB.listProducts().slice(-6).reverse().map(p => `
       <div class="ch-row">
         <div class="rider-mini">
-          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(p.image_url)}" alt="" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
+          <span class="ph-thumb ph-mini">${p.image_url ? `<img src="${esc(mediaThumbSrc(p.image_url))}" alt="" loading="lazy" onerror="this.remove()" />` : Icons.svg("tag", "ico-14")}</span>
           <div><strong class="serif">${esc(p.name)}</strong><div class="muted small">${esc(p.sku)} · ${esc(p.demographic)}</div></div>
         </div>
         <div class="gt-recent-actions"><strong class="serif">${ugx(p.selling_price)}</strong><button class="btn sm" type="button" data-print-tag="${esc(p.id)}">${Icons.svg("printer", "ico-12")} Print tag</button></div>
@@ -3752,7 +3761,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const data = await DB.financeRequest("aging?days=" + agingDays, { method:"GET" });
       $("#agingSummary").innerHTML = `<div class="aging-stat"><span>Items at risk</span><strong>${data.count}</strong></div><div class="aging-stat"><span>Cost value at risk</span><strong>${ugx(data.value_at_risk)}</strong></div><div class="aging-stat"><span>Age threshold</span><strong>${data.days}+ days</strong></div>`;
       const rows = data.products || [];
-      host.innerHTML = rows.length ? `<div class="fin-table-scroll"><table class="fin-table"><thead><tr><th>Product</th><th>Age</th><th>Stock</th><th class="num">Unit cost</th><th class="num">Live price</th><th class="num">Value at risk</th><th>Action</th></tr></thead><tbody>${rows.map(row => `<tr><td><div class="aging-product">${row.image_url ? `<img class="aging-thumb" src="${esc(row.image_url)}" alt="" onerror="this.style.display='none'"/>` : `<span class="aging-thumb"></span>`}<span><strong>${esc(row.name)}</strong><br/><small class="muted">${esc(row.sku)} · ${esc(row.category)}</small></span></div></td><td>${row.age_days} days</td><td>${row.in_stock_count}</td><td class="num">${ugx(row.cost_price)}</td><td class="num">${ugx(row.selling_price)}</td><td class="num">${ugx(row.stock_value)}</td><td><div class="aging-action"><button data-aging-markdown="${esc(row.id)}" data-name="${esc(row.name)}" data-price="${row.selling_price}">Markdown</button><button class="danger" data-aging-writeoff="${esc(row.id)}" data-name="${esc(row.name)}">Write off</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="finance-empty"><div><strong>No stock beyond ${agingDays} days</strong><p class="small">Inventory is moving within this threshold.</p></div></div>`;
+      host.innerHTML = rows.length ? `<div class="fin-table-scroll"><table class="fin-table"><thead><tr><th>Product</th><th>Age</th><th>Stock</th><th class="num">Unit cost</th><th class="num">Live price</th><th class="num">Value at risk</th><th>Action</th></tr></thead><tbody>${rows.map(row => `<tr><td><div class="aging-product">${row.image_url ? `<img class="aging-thumb" src="${esc(mediaThumbSrc(row.image_url))}" alt="" loading="lazy" onerror="this.style.display='none'"/>` : `<span class="aging-thumb"></span>`}<span><strong>${esc(row.name)}</strong><br/><small class="muted">${esc(row.sku)} · ${esc(row.category)}</small></span></div></td><td>${row.age_days} days</td><td>${row.in_stock_count}</td><td class="num">${ugx(row.cost_price)}</td><td class="num">${ugx(row.selling_price)}</td><td class="num">${ugx(row.stock_value)}</td><td><div class="aging-action"><button data-aging-markdown="${esc(row.id)}" data-name="${esc(row.name)}" data-price="${row.selling_price}">Markdown</button><button class="danger" data-aging-writeoff="${esc(row.id)}" data-name="${esc(row.name)}">Write off</button></div></td></tr>`).join("")}</tbody></table></div>` : `<div class="finance-empty"><div><strong>No stock beyond ${agingDays} days</strong><p class="small">Inventory is moving within this threshold.</p></div></div>`;
     } catch (error) { host.innerHTML = financeError(error); $("#agingSummary").innerHTML = ""; }
   }
 
@@ -4875,7 +4884,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       const compare = Number(product.compare_price) || 0;
       const discount = compare > current && current > 0 ? Math.round((compare - current) / compare * 100) : 0;
       const image = product.image_url
-        ? `<img src="${esc(product.image_url)}" alt="" loading="lazy" onerror="this.remove()">`
+        ? `<img src="${esc(mediaThumbSrc(product.image_url, 320))}" alt="" loading="lazy" onerror="this.remove()">`
         : Icons.svg("tag", "ico-14");
       const name = product.name || "Untitled product";
       const orderControls = isSelected ? `<span class="promo-product-order">

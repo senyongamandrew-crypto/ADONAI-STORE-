@@ -291,6 +291,8 @@ dom.window.close();
 
 const managerBlock = admin.match(/let promoManagerDirty = false;[\s\S]*?(?=  \/\* What the payment gateway can actually do right now)/);
 assert(managerBlock, "Admin Suite storefront promotion manager has an executable settings block");
+const mediaThumbBlock = admin.match(/const mediaThumbSrc = \(url, width = 96\) => \{[\s\S]*?\n {2}\};/);
+assert(mediaThumbBlock, "Admin Suite list thumbnails resolve through the media thumbnail helper");
 const managerDom = new JSDOM(adminHtml, { runScripts: "outside-only", url: "https://adonai-preview.example/admin.html" });
 const managerWindow = managerDom.window;
 let managerSettings = { storefront_promo_ids: '["SKU-3", "SKU-2", "SKU-removed"]' };
@@ -321,6 +323,7 @@ const managerHarness = [
   'const Icons = window.Icons;',
   'const toast = window.__testToast;',
   'const Keys = window.__testKeys;',
+  mediaThumbBlock[0],
   managerBlock[0],
   'renderPromoManager(DB.getSettings());'
 ].join("\n");

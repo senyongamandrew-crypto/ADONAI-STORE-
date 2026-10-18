@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
@@ -25,7 +26,7 @@ import database
 database.IS_POSTGRES = False
 from database import get_db
 from db_init import init_db
-from models import Product, ProductMedia, StoreSetting, Inventory, NotificationEvent, PosAccessSession, PosAccessKey
+from models import Product, ProductMedia, ProductMediaDerivative, StoreSetting, Inventory, NotificationEvent, PosAccessSession, PosAccessKey
 import access_control
 import api
 import media
@@ -50,9 +51,13 @@ class MediaDerivativeTests(unittest.TestCase):
 
     def setUp(self):
         with get_db() as session:
-            for model in [ProductMedia, Inventory, Product, NotificationEvent, PosAccessSession, PosAccessKey]:
+            for model in [ProductMediaDerivative, ProductMedia, Inventory, Product, NotificationEvent, PosAccessSession, PosAccessKey]:
                 session.query(model).delete(synchronize_session=False)
             session.query(StoreSetting).filter(StoreSetting.key.in_([access_control.POLICY_KEY, "storefront_promo_ids"])).delete()
+        # Each test starts with a cold worker: nothing may be served from
+        # another test's in-memory derivative cache.
+        media._DERIVATIVE_CACHE.clear()
+        media._DERIVATIVE_CACHE_BYTES = 0
 
     # ---------------- helpers ----------------
 
@@ -87,6 +92,18 @@ class MediaDerivativeTests(unittest.TestCase):
                                      width=1400, height=1800, data=raw, uploaded_by="STF-01"))
             session.commit()
         return "b" * 32
+
+    def upload(self, data=None):
+        result = self.raw("POST", "/api/media/images",
+                          data if data is not None else self.master,
+                          headers={"x-file-name": "front.jpg"})
+        self.assertEqual(result[0], 201, result[2])
+        return json.loads(result[2])["media"]
+
+    def derivative_widths(self, source_id):
+        with get_db() as session:
+            return sorted(row[0] for row in session.query(ProductMediaDerivative.width)
+                          .filter_by(source_id=source_id).all())
 
     # ---------------- derivatives ----------------
 
@@ -157,6 +174,70 @@ class MediaDerivativeTests(unittest.TestCase):
         status, content_type, payload = self.raw("GET", "/api/media/" + media_id, query={"w": ["banana"]})
         self.assertEqual(status, 200, payload)
         self.assertIn("jpeg", content_type.lower())
+
+    # ---------------- durable derivatives ----------------
+    # Card photos used to be re-encoded by Pillow inside the shopper's own
+    # request, cached only in worker memory. After every restart the first
+    # visitors queued behind dozens of encodes and the rail sat blank. The
+    # re-encodes are stored goods now: built at upload, shared by every
+    # worker, and still there after a restart.
+
+    def test_an_uploaded_photo_stores_its_derivatives_immediately(self):
+        uploaded = self.upload()
+        # The 1400x1800 master is normalized into a 1200px box (933 wide),
+        # so every ladder width below 933 is stored; 960 would upscale.
+        self.assertEqual(self.derivative_widths(uploaded["id"]), [96, 320, 480, 640],
+                         "upload stores the responsive ladder in the same transaction")
+
+    def test_an_uploaded_photos_derivative_needs_no_encode_to_serve(self):
+        uploaded = self.upload()
+        self.product(image_url=uploaded["url"], images=[uploaded["url"]])
+        media._DERIVATIVE_CACHE.clear()
+        with mock.patch.object(media, "build_derivatives",
+                               side_effect=AssertionError("a stored derivative must not be rebuilt")):
+            status, content_type, payload = self.raw("GET", "/api/media/" + uploaded["id"],
+                                                     query={"w": ["320"]})
+        self.assertEqual(status, 200, payload)
+        self.assertIn("webp", content_type.lower())
+        with Image.open(io.BytesIO(payload)) as image:
+            self.assertEqual(image.width, 320)
+
+    def test_a_legacy_photo_persists_its_derivative_on_first_request(self):
+        product = self.product()
+        media_id = self.attach_photo(product["id"])
+        self.assertEqual(self.derivative_widths(media_id), [],
+                         "a photo stored before durable derivatives has none yet")
+        status, _, first = self.raw("GET", "/api/media/" + media_id, query={"w": ["320"]})
+        self.assertEqual(status, 200, first)
+        self.assertEqual(self.derivative_widths(media_id), [320],
+                         "the first sized request stores exactly the width it built")
+        # A cold worker (restart / a different gunicorn process) serves the
+        # stored bytes without touching Pillow again.
+        media._DERIVATIVE_CACHE.clear()
+        with mock.patch.object(media, "build_derivatives",
+                               side_effect=AssertionError("a stored derivative must not be rebuilt")):
+            status, _, second = self.raw("GET", "/api/media/" + media_id, query={"w": ["320"]})
+        self.assertEqual(status, 200, second)
+        self.assertEqual(second, first)
+
+    def test_the_480_width_is_served_for_two_column_phone_cards(self):
+        product = self.product()
+        media_id = self.attach_photo(product["id"])
+        status, content_type, payload = self.raw("GET", "/api/media/" + media_id, query={"w": ["480"]})
+        self.assertEqual(status, 200, payload)
+        self.assertIn("webp", content_type.lower())
+        with Image.open(io.BytesIO(payload)) as image:
+            self.assertEqual(image.width, 480)
+
+    def test_a_public_master_is_immutable_cacheable(self):
+        product = self.product()
+        media_id = self.attach_photo(product["id"])
+        result = self.raw("GET", "/api/media/" + media_id)
+        self.assertEqual(result[0], 200)
+        # Media ids are immutable UUIDs: a week of browser caching is safe
+        # and keeps repeat PDP views off the network entirely.
+        self.assertEqual(result.headers.get("Cache-Control"),
+                         "public, max-age=604800, immutable")
 
     def test_a_video_is_never_re_encoded(self):
         product = self.product()

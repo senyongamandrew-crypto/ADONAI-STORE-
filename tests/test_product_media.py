@@ -196,7 +196,9 @@ class ProductMediaTests(unittest.TestCase):
             public = self.raw("GET", image["url"])
         self.assertEqual(public[0], 200)
         self.assertEqual(public[1], "image/jpeg")
-        self.assertEqual(public.headers["Cache-Control"], "public, max-age=86400")
+        # Media ids are immutable UUIDs whose bytes never change, so a
+        # public master is cacheable for a week like its derivatives.
+        self.assertEqual(public.headers["Cache-Control"], "public, max-age=604800, immutable")
         normalized = json.loads(saved["settings"]["storefront_promo_ids"])
         self.assertEqual(normalized["items"][0]["alt_text"], "Seasonal storefront artwork")
         status, rejected_attachment = self.request("POST", "/api/products", {
