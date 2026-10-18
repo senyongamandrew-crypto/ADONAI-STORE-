@@ -396,11 +396,15 @@
   }
 
   /* Garment photos uploaded through the POS live in the media API rather
-     than the bundled asset folder. The server can re-encode those on the
-     fly (?w=…), so they can carry a responsive srcset exactly like a
-     bundled asset instead of always shipping the full-resolution master. */
+     than the bundled asset folder. The server keeps a durable small
+     re-encode of each one for ?w=… (built at upload), so they can carry a
+     responsive srcset exactly like a bundled asset instead of always
+     shipping the full-resolution master. */
   const MEDIA_API_URL = /^(?:https?:\/\/[^/]+)?\/?api\/media\/[0-9a-f]{32}\/?$/i;
-  const MEDIA_API_WIDTHS = [320, 640, 960];
+  // 480 serves the two-column phone rail at device-pixel-ratio 2: without
+  // it, phones jumped from the 320w candidate straight to 640w and pulled
+  // roughly double the pixels the card actually displays.
+  const MEDIA_API_WIDTHS = [320, 480, 640, 960];
 
   function isMediaApiUrl(src) {
     return MEDIA_API_URL.test(String(src || "").trim());
@@ -505,6 +509,60 @@
   }
 
   /* ----------------------------------------------------------
+     8b. PHOTO SETTLING
+     A card photo on a slow network used to sit there as a blank
+     white frame with its raw alt text showing — shoppers read
+     that as "the shop is broken". Photos now start invisible
+     over their card's own placeholder (CSS), fade in when they
+     land, retry once against the full-size master if a resized
+     candidate fails, and only then give up to the placeholder.
+     ---------------------------------------------------------- */
+  function settleImage(img) {
+    if (img && img.tagName === "IMG") img.classList.add("is-loaded");
+  }
+
+  function failImage(img) {
+    if (!img || img.tagName !== "IMG") return;
+    // The promo strip degrades its own broken creatives; do not fight it.
+    if (img.closest && img.closest(".promo-card--custom")) return;
+    if (img.dataset.masterRetry) {
+      img.classList.add("img-broken");
+      return;
+    }
+    img.dataset.masterRetry = "1";
+    const picture = img.closest ? img.closest("picture") : null;
+    if (picture) picture.querySelectorAll("source").forEach(source => source.remove());
+    img.removeAttribute("srcset");
+    img.removeAttribute("sizes");
+    // The authored src is always the master; for a media-API thumbnail it
+    // may still carry its own ?w= hint, which the retry drops. A bundled
+    // 96px dot falls back to its 320px sibling instead.
+    let master = img.getAttribute("src") || "";
+    const base = master.split("?")[0];
+    if (master !== base && isMediaApiUrl(base)) master = base;
+    else if (/-96\.webp$/i.test(master)) master = master.replace(/-96\.webp$/i, "-320.webp");
+    if (master) img.src = master;
+    else img.classList.add("img-broken");
+  }
+
+  /** Mark every already-complete photo under a root as landed. */
+  function settleImages(root) {
+    const scope = root && root.querySelectorAll ? root : global.document;
+    if (!scope) return;
+    scope.querySelectorAll("img").forEach(img => {
+      if (img.complete && img.naturalWidth > 0) settleImage(img);
+    });
+  }
+
+  if (global.document && typeof global.document.addEventListener === "function") {
+    // Image load/error events do not bubble, but they do capture, so one
+    // pair of delegated listeners covers every photo on the page —
+    // including cards rendered after boot.
+    global.document.addEventListener("load", event => settleImage(event.target), true);
+    global.document.addEventListener("error", event => failImage(event.target), true);
+  }
+
+  /* ----------------------------------------------------------
      9. PAYMENT TRUST SIGNALS
      ---------------------------------------------------------- */
   const PAYMENT_METHODS = [
@@ -555,6 +613,7 @@
     storeWhatsAppNumber,
     productImages,
     pictureHTML,
+    settleImages,
     resolveSrc,
     imageEntry,
     thumbSrc,

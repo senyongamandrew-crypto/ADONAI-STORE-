@@ -21,12 +21,13 @@ import warnings
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pillow_heif import register_heif_opener
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 register_heif_opener()
 
 import access_control
 from database import get_db
-from models import Product, ProductMedia, StorePromotionCreative, StoreSetting
+from models import Product, ProductMedia, ProductMediaDerivative, StorePromotionCreative, StoreSetting
 
 MAX_IMAGES = 12
 MAX_IMAGE_UPLOAD = 10 * 1024 * 1024
@@ -36,10 +37,16 @@ MAX_VIDEO_SECONDS = 30
 MAX_STORED_VIDEO = 12 * 1024 * 1024
 # Responsive widths the media API can re-encode a stored photo to. The
 # storefront asks for one of these with ?w=<px> so a rail card never has to
-# download the full-resolution master.
-MEDIA_WIDTHS = (96, 320, 640, 960)
+# download the full-resolution master. 480 exists for the two-column phone
+# rail at device-pixel-ratio 2: without it those phones jumped straight
+# from 320 to 640 and downloaded roughly double the pixels they show.
+MEDIA_WIDTHS = (96, 320, 480, 640, 960)
 DERIVATIVE_QUALITY = 72
-DERIVATIVE_CACHE_LIMIT = 96
+DERIVATIVE_CACHE_LIMIT = 512
+# The per-worker derivative cache is an L1 in front of the durable copies in
+# product_media_derivatives. It is budgeted by bytes as well as entries so a
+# worker on the small production instance cannot grow it without bound.
+DERIVATIVE_CACHE_MAX_BYTES = 24 * 1024 * 1024
 MEDIA_ID = re.compile(r"^[0-9a-f]{32}$")
 MEDIA_PATH = re.compile(r"^/api/media/([0-9a-f]{32})$")
 PROMO_HTML_UPLOAD_PATH = "/api/promo-media/html"
@@ -85,7 +92,16 @@ def upload_limit(path):
     return None
 
 
-def prepare_image(data):
+def _prepare_image(data):
+    """Decode and normalize an uploaded photo exactly once.
+
+    Returns (master_jpeg, width, height, derivatives), where derivatives
+    maps width -> (webp_bytes, mime) for every responsive width smaller
+    than the master. The derivatives are built here — while the photo is
+    already decoded for validation — and stored next to the master by the
+    upload route, so no shopper request ever waits for an encode: card
+    photos are served as plain database reads from the very first view.
+    """
     if not data or len(data) > MAX_IMAGE_UPLOAD:
         raise ValueError("Choose an image smaller than 10 MB.")
     try:
@@ -99,10 +115,23 @@ def prepare_image(data):
                 image = ImageOps.exif_transpose(original).convert("RGB")
                 image.thumbnail((1200, 1200))
                 output = io.BytesIO()
-                image.save(output, "JPEG", quality=82, optimize=True)
-                return output.getvalue(), image.width, image.height
+                # Progressive JPEG: a full-size view paints a soft preview
+                # first and sharpens as the bytes arrive, instead of staying
+                # blank until the final byte lands on a slow connection.
+                image.save(output, "JPEG", quality=82, optimize=True, progressive=True)
+                derivatives = {}
+                for width in MEDIA_WIDTHS:
+                    encoded = _encode_webp_at_width(image, width)
+                    if encoded is not None:
+                        derivatives[width] = (encoded, "image/webp")
+                return output.getvalue(), image.width, image.height, derivatives
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ValueError("The photo could not be read. Export it as JPG or PNG and try again.") from exc
+
+
+def prepare_image(data):
+    master, width, height, _derivatives = _prepare_image(data)
+    return master, width, height
 
 
 # ---------------------------------------------------------------------------
@@ -110,12 +139,33 @@ def prepare_image(data):
 #
 # A garment photo uploaded through the POS is stored once, full size. Serving
 # that master to every rail card meant a shopper downloaded the whole file
-# just to see a 280px thumbnail. The media API can now re-encode a stored
-# photo on demand at ?w=<px> and hand back a small WebP instead. The
-# originals stay the source of truth; derivatives are pure cache.
+# just to see a 280px thumbnail, so the media API also keeps small WebP
+# re-encodes at the widths in MEDIA_WIDTHS and hands one back for ?w=<px>.
+#
+# Those re-encodes used to be built on demand and cached only in worker
+# memory. On the small production instance the first shoppers after every
+# restart or deploy triggered dozens of simultaneous Pillow encodes through
+# a handful of threads, and rail cards sat blank while they queued. The
+# derivatives are therefore DURABLE now: they are generated at upload (while
+# the photo is already decoded) and stored in product_media_derivatives,
+# shared by every worker and surviving restarts. A photo uploaded before
+# this change fills its ladder once, on its first sized request. The
+# originals stay the source of truth; derivatives are pure cache and can
+# always be rebuilt from the master.
 # ---------------------------------------------------------------------------
 _DERIVATIVE_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
+_DERIVATIVE_CACHE_BYTES = 0
 _DERIVATIVE_LOCK = threading.Lock()
+
+# Building a derivative is the only expensive step left in a media read,
+# and it now happens at most once per photo, ever. These striped locks make
+# concurrent first requests for the same legacy photo share that one build
+# instead of every worker thread encoding the same image at once.
+_DERIVATIVE_BUILD_LOCKS = tuple(threading.Lock() for _ in range(64))
+
+
+def _derivative_build_lock(source_id):
+    return _DERIVATIVE_BUILD_LOCKS[hash(source_id) % len(_DERIVATIVE_BUILD_LOCKS)]
 
 
 def requested_width(query_params):
@@ -137,11 +187,17 @@ def requested_width(query_params):
 
 
 def _cache_derivative(key, value):
+    global _DERIVATIVE_CACHE_BYTES
     with _DERIVATIVE_LOCK:
+        previous = _DERIVATIVE_CACHE.pop(key, None)
+        if previous is not None:
+            _DERIVATIVE_CACHE_BYTES -= len(previous[0])
         _DERIVATIVE_CACHE[key] = value
-        _DERIVATIVE_CACHE.move_to_end(key)
-        while len(_DERIVATIVE_CACHE) > DERIVATIVE_CACHE_LIMIT:
-            _DERIVATIVE_CACHE.popitem(last=False)
+        _DERIVATIVE_CACHE_BYTES += len(value[0])
+        while _DERIVATIVE_CACHE and (len(_DERIVATIVE_CACHE) > DERIVATIVE_CACHE_LIMIT
+                                     or _DERIVATIVE_CACHE_BYTES > DERIVATIVE_CACHE_MAX_BYTES):
+            _oldest_key, oldest = _DERIVATIVE_CACHE.popitem(last=False)
+            _DERIVATIVE_CACHE_BYTES -= len(oldest[0])
 
 
 def _read_derivative(key):
@@ -152,10 +208,24 @@ def _read_derivative(key):
         return value
 
 
-def build_derivative(source_bytes, width):
-    """Re-encode a stored photo to a small WebP. Returns (bytes, mime) or None."""
-    if not source_bytes or width <= 0:
+def _encode_webp_at_width(image, width):
+    """WebP-encode an already-decoded RGB photo at a target width.
+
+    Returns the encoded bytes, or None when the photo is already that
+    small — a derivative must never upscale the master.
+    """
+    if image.width <= width:
         return None
+    scale = width / float(image.width)
+    size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+    resized = image.resize(size, Image.LANCZOS)
+    output = io.BytesIO()
+    resized.save(output, "WEBP", quality=DERIVATIVE_QUALITY, method=4)
+    return output.getvalue()
+
+
+def _decode_photo(source_bytes):
+    """Decode stored photo bytes to a detached RGB image, or None."""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -171,17 +241,112 @@ def build_derivative(source_bytes, width):
                     image = background
                 elif image.mode != "RGB":
                     image = image.convert("RGB")
-                if image.width <= width:
-                    # Never upscale: the master is already small enough.
-                    return None
-                scale = width / float(image.width)
-                size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
-                resized = image.resize(size, Image.LANCZOS)
-                output = io.BytesIO()
-                resized.save(output, "WEBP", quality=DERIVATIVE_QUALITY, method=4)
-                return output.getvalue(), "image/webp"
+                return image.copy()
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
         return None
+
+
+def build_derivative(source_bytes, width):
+    """Re-encode a stored photo to a small WebP. Returns (bytes, mime) or None."""
+    if not source_bytes or width <= 0:
+        return None
+    image = _decode_photo(source_bytes)
+    if image is None:
+        return None
+    encoded = _encode_webp_at_width(image, width)
+    return (encoded, "image/webp") if encoded is not None else None
+
+
+def build_derivatives(source_bytes, widths=MEDIA_WIDTHS):
+    """Re-encode a stored photo at several widths with a single decode.
+
+    Returns {width: (bytes, mime)} for every requested width below the
+    master's own width.
+    """
+    if not source_bytes:
+        return {}
+    image = _decode_photo(source_bytes)
+    if image is None:
+        return {}
+    derivatives = {}
+    for width in widths:
+        encoded = _encode_webp_at_width(image, width)
+        if encoded is not None:
+            derivatives[width] = (encoded, "image/webp")
+    return derivatives
+
+
+def _stored_derivative(session, source_id, width):
+    """The durable derivative bytes for one photo + width, or None."""
+    row = (session.query(ProductMediaDerivative.data, ProductMediaDerivative.mime_type)
+           .filter_by(source_id=source_id, width=width).first())
+    if row is None or row[0] is None:
+        return None
+    return bytes(row[0]), row[1] or "image/webp"
+
+
+def _stored_derivative_exists(session, source_id, width):
+    """Whether a durable derivative exists — metadata only, no blob read."""
+    return (session.query(ProductMediaDerivative.byte_length)
+            .filter_by(source_id=source_id, width=width).first() is not None)
+
+
+def _store_derivatives(session, source_id, derivatives):
+    """Persist freshly built derivatives next to their master.
+
+    Best-effort cache: if another worker stored the same width first, the
+    unique (source, width) constraint keeps that copy and this insert is
+    skipped — never an error for the request that built its own.
+    """
+    for width, (body, mime) in derivatives.items():
+        try:
+            with session.begin_nested():
+                session.add(ProductMediaDerivative(
+                    source_id=source_id, width=width, mime_type=mime,
+                    byte_length=len(body), data=body))
+                session.flush()
+        except IntegrityError:
+            continue
+
+
+def _resolve_derivative(session, asset, width):
+    """The derivative for one photo + width, building it at most once ever.
+
+    Order: this worker's memory, then the durable shared copy, then a
+    single-flight build from the master (a legacy photo uploaded before
+    derivatives were stored at upload). Returns (body, mime), or None when
+    the master itself should be served.
+    """
+    key = f"{asset.id}:{width}"
+    cached = _read_derivative(key)
+    if cached is not None:
+        return cached
+    stored = _stored_derivative(session, asset.id, width)
+    if stored is not None:
+        _cache_derivative(key, stored)
+        return stored
+    with _derivative_build_lock(asset.id):
+        # A sibling thread may have built and stored it while this one
+        # waited for the lock — look again before paying for an encode.
+        cached = _read_derivative(key)
+        if cached is not None:
+            return cached
+        stored = _stored_derivative(session, asset.id, width)
+        if stored is not None:
+            _cache_derivative(key, stored)
+            return stored
+        master = session.query(ProductMedia.data).filter_by(id=asset.id).scalar()
+        # Only the asked-for width is built on a shopper's request: encoding
+        # the whole ladder here would make this one shopper wait for five
+        # encodes. Each remaining width is built (and stored) on its own
+        # first request; uploads still pre-build the full ladder.
+        built = build_derivatives(bytes(master or b""), widths=(width,))
+        if not built:
+            return None
+        _store_derivatives(session, asset.id, built)
+        for built_width, value in built.items():
+            _cache_derivative(f"{asset.id}:{built_width}", value)
+        return built.get(width)
 
 
 def promotion_html_dimensions(source, filename):
@@ -462,9 +627,10 @@ def route_request(method, path, data, headers, staff, query_params=None):
                                  json.dumps({"ok": True, "creative": asset.to_dict()}).encode())
 
     if path in {"/api/media/images", "/api/media/videos"} and method == "POST":
+        derivatives = {}
         try:
             if path.endswith("images"):
-                prepared, width, height = prepare_image(data)
+                prepared, width, height, derivatives = _prepare_image(data)
                 kind, mime, duration, extension = "image", "image/jpeg", None, ".jpg"
             else:
                 prepared, duration, width, height = prepare_video(data)
@@ -492,6 +658,11 @@ def route_request(method, path, data, headers, staff, query_params=None):
                 filename=filename, byte_length=len(prepared), width=width, height=height,
                 duration=duration, data=prepared, uploaded_by=str(staff.get("id", "OPEN-TERMINAL")))
             session.add(asset); session.flush()
+            if kind == "image" and derivatives:
+                # The responsive copies are stored with the master, in the
+                # same transaction, so the very first shopper is answered
+                # with a database read — never an on-the-fly encode.
+                _store_derivatives(session, asset.id, derivatives)
             return MediaResponse(201, "application/json; charset=utf-8", json.dumps({"ok": True, "media": asset.to_dict()}).encode())
     promo_match = PROMO_HTML_PATH.fullmatch(path)
     if promo_match:
@@ -525,32 +696,42 @@ def route_request(method, path, data, headers, staff, query_params=None):
             return error("Method not allowed", 405)
 
         # A storefront card asks for a small re-encode of a stored photo. The
-        # original stays the source of truth; this only avoids shipping the
-        # full-resolution master to a 280px thumbnail.
+        # original stays the source of truth; the re-encode is durable
+        # (built at upload, or once here for an older photo), so this path
+        # is a database read — it only avoids shipping the full-resolution
+        # master to a 280px thumbnail.
         if asset.kind == "image":
             width = requested_width(query_params)
-            if width:
-                derivative = _read_derivative(f"{asset.id}:{width}")
-                if derivative is None:
-                    master = session.query(ProductMedia.data).filter_by(id=asset.id).scalar()
-                    derivative = build_derivative(bytes(master or b""), width)
-                    if derivative is not None:
-                        _cache_derivative(f"{asset.id}:{width}", derivative)
+            # asset.width is metadata: a photo already at or below the
+            # asked-for width has no derivative (never upscale), and that
+            # is known without touching any blob.
+            if width and asset.width > width:
+                etag = '"%s-w%d"' % (asset.id, width)
+                extra = {
+                    "Cache-Control": ("public, max-age=604800, immutable" if public
+                                      else "private, max-age=3600"),
+                    "ETag": etag,
+                }
+                # A returning shopper's conditional request is answered
+                # from metadata alone when the derivative is already
+                # durable — no blob is read just to say "not modified".
+                if public and header(headers, "If-None-Match") == etag and (
+                        _read_derivative(f"{asset.id}:{width}") is not None
+                        or _stored_derivative_exists(session, asset.id, width)):
+                    return MediaResponse(304, "image/webp", b"", extra)
+                derivative = _resolve_derivative(session, asset, width)
                 if derivative is not None:
                     body, mime = derivative
-                    etag = '"%s-w%d"' % (asset.id, width)
-                    extra = {
-                        "Cache-Control": ("public, max-age=604800, immutable" if public
-                                          else "private, max-age=3600"),
-                        "ETag": etag,
-                        "Content-Length": str(len(body)),
-                    }
+                    extra["Content-Length"] = str(len(body))
                     if public and header(headers, "If-None-Match") == etag:
                         return MediaResponse(304, mime, b"", extra)
                     return MediaResponse(200, mime, b"" if method == "HEAD" else body, extra)
 
         total = asset.byte_length
-        extra = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400" if public else "private, no-store"}
+        # Media ids are immutable UUIDs whose bytes are never rewritten, so
+        # a public master may be cached as aggressively as its derivatives:
+        # repeat visits and PDP views skip the network entirely for a week.
+        extra = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=604800, immutable" if public else "private, no-store"}
         etag = '"' + asset.id + '"'
         extra["ETag"] = etag
         if public and header(headers, "If-None-Match") == etag and not header(headers, "Range"):

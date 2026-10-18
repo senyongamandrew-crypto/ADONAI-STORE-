@@ -147,6 +147,7 @@
         ${total > 1 ? `<div class="pdp-dots" id="pdpDots">${Array.from({length: total}, (_, i) => `<button class="pdp-dot" data-dot="${i}" type="button" aria-label="${i === photos.length ? "Garment video" : `Photo ${i + 1}`}"></button>`).join("")}</div>` : ""}
         <p class="pdp-media-note">📷 The exact piece you receive${video ? ` · ▶ ${videoTime()} garment video — tap Video to watch` : " — real garment photos"}.</p>
       </div>`;
+    if (K.settleImages) K.settleImages($("#pdpMedia"));
     bindGallery();
   }
 
@@ -240,6 +241,7 @@
       eager: true,
       className: "plb-img"
     });
+    if (K.settleImages) K.settleImages(stage);
     stage.classList.toggle("zoomed", lightboxZoomed);
     $("#plbCounter").textContent =
       `${activePhoto + 1} / ${photos.length} · ${angleLabel(activePhoto)} — tap photo to ${lightboxZoomed ? "fit" : "zoom"}`;
@@ -616,6 +618,7 @@
           <p class="rel-price">${K.ugx(K.displayPrice(item))}</p>
         </a>`;
     }).join("");
+    if (K.settleImages) K.settleImages($("#pdpRelatedGrid"));
     $("#pdpRelated").hidden = false;
   }
 

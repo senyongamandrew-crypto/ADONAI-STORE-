@@ -536,6 +536,33 @@ class ProductMedia(Base):
                 "height": self.height, "duration": self.duration}
 
 
+class ProductMediaDerivative(Base):
+    """A durable responsive re-encode (small WebP) of one ProductMedia photo.
+
+    Derivatives used to be rebuilt by Pillow on demand and cached only in
+    worker memory. On the small production instance that meant the first
+    shoppers after every restart/deploy paid for dozens of simultaneous
+    encodes, so rail cards sat blank. They are now generated once — at
+    upload, or on the first request for a legacy photo — and stored here,
+    shared by every worker and surviving restarts. The ProductMedia master
+    stays the source of truth; a derivative is pure cache and can always be
+    rebuilt from it. Media ids are immutable UUIDs, so a stored derivative
+    never goes stale.
+    """
+    __tablename__ = "product_media_derivatives"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_id = Column(String(32), ForeignKey("product_media.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+    width = Column(Integer, nullable=False)
+    mime_type = Column(String(40), nullable=False, default="image/webp")
+    byte_length = Column(Integer, nullable=False)
+    data = deferred(Column(LargeBinary, nullable=False))
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("source_id", "width", name="uq_product_media_derivative_source_width"),
+    )
+
+
 class StorePromotionCreative(Base):
     """Standalone HTML artwork uploaded for the public storefront promo strip."""
     __tablename__ = "store_promotion_creatives"

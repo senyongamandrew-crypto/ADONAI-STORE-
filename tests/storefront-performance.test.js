@@ -210,7 +210,7 @@ assert.match(
 );
 assert.match(
   media,
-  /MEDIA_WIDTHS = \(96, 320, 640, 960\)/,
+  /MEDIA_WIDTHS = \(96, 320, 480, 640, 960\)/,
   "the media API publishes the widths the storefront asks for"
 );
 assert.match(
@@ -267,7 +267,80 @@ assert.match(
 );
 
 /* ------------------------------------------------------------------ *
- * 8. The behaviour, exercised for real in a DOM.
+ * 8. Card photos must arrive fast and never look broken.
+ *
+ * The production rail sat blank for three compounding reasons: the
+ * resized copies were encoded inside the shopper's own request (and
+ * forgotten at every restart), `sizes` overstated the card so phones
+ * downloaded the largest candidate, and a still-travelling photo
+ * rendered as an empty frame with raw alt text.
+ * ------------------------------------------------------------------ */
+assert.match(
+  media,
+  /_store_derivatives\(session, asset\.id, derivatives\)/,
+  "an upload stores its responsive copies with the master — no shopper waits for an encode"
+);
+assert.match(
+  media,
+  /_stored_derivative\(session, asset\.id, width\)/,
+  "a sized request is served from the durable copy, not a fresh encode"
+);
+assert.match(
+  read("models.py"),
+  /class ProductMediaDerivative/,
+  "the durable derivative store exists"
+);
+assert.match(
+  storefront,
+  /sizes: "\(min-width: 1280px\) 300px, \(min-width: 900px\) 30vw, \(min-width: 641px\) 45vw, 50vw"/,
+  "card sizes describe the two-column phone rail the grid actually lays out"
+);
+assert.doesNotMatch(
+  storefront,
+  /45vw, 90vw"/,
+  "sizes no longer tells a phone the card photo is nearly screen-wide"
+);
+assert.match(
+  storefront,
+  /fetchpriority="low"/,
+  "the photo-count dots never compete with the card photos"
+);
+assert.match(
+  storefront,
+  /lastGridSignature/,
+  "an unchanged live sync leaves the rendered cards (and their loading photos) alone"
+);
+assert.match(
+  productKit,
+  /MEDIA_API_WIDTHS = \[320, 480, 640, 960\]/,
+  "the srcset offers the 480w candidate the two-column phone rail needs"
+);
+assert.match(
+  productKit,
+  /function settleImages\(root\)/,
+  "the shared kit can mark landed photos"
+);
+assert.match(
+  productKit,
+  /dataset\.masterRetry/,
+  "a failed resized candidate retries once against the master before giving up"
+);
+{
+  const storefrontCss = read("css/storefront.css");
+  assert.match(
+    storefrontCss,
+    /\.pmedia img \{\s*width: 100%; height: 100%;\s*\/\* contain, not cover/,
+    "card photos fit the whole piece in frame instead of cropping it"
+  );
+  assert.match(
+    storefrontCss,
+    /\.pmedia > img\.is-loaded/,
+    "a landed card photo fades in over its placeholder"
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * 9. The behaviour, exercised for real in a DOM.
  * ------------------------------------------------------------------ */
 function renderStorefront(products, options = {}) {
   const virtualConsole = new VirtualConsole();
@@ -338,10 +411,45 @@ const demoProducts = [{
   assert.equal(grid.getAttribute("aria-busy"), null,
     "the rail is no longer marked busy");
 
+  main.dispatchEvent(new window.Event("load"));
+  assert.ok(main.classList.contains("is-loaded"),
+    "a landed photo is marked so CSS can fade it in over the placeholder");
+
+  /* A POS-uploaded photo (the production path) ships the candidates a
+     two-column phone rail needs, and a failed candidate falls back to
+     the master — never to a blank frame. */
+  const mediaUrl = "/api/media/" + "a".repeat(32);
+  const mediaProducts = [{
+    ...demoProducts[0],
+    id: "PRD-2", sku: "ADN-2", slug: "uploaded-piece-adn-2", name: "Uploaded Piece",
+    image_url: mediaUrl,
+    images: [mediaUrl, "/api/media/" + "b".repeat(32)]
+  }];
+  const second = renderStorefront(mediaProducts);
+  await new Promise(r => setTimeout(r, 500));
+  const grid2 = second.window.document.querySelector("#productGrid");
+  const uploaded = grid2.querySelector(".pmedia img");
+  assert.ok(uploaded, "the media-API card renders its photo");
+  assert.match(uploaded.getAttribute("srcset") || "", /w=480/,
+    "the media-API srcset offers the 480w candidate");
+  assert.match(uploaded.getAttribute("sizes") || "", /50vw$/,
+    "the card sizes end at the two-column phone width");
+  assert.ok(!uploaded.classList.contains("is-loaded"),
+    "a photo that has not landed yet stays over its placeholder");
+  uploaded.dispatchEvent(new second.window.Event("error"));
+  assert.equal(uploaded.getAttribute("srcset"), null,
+    "a failed resized candidate drops the srcset and retries the master");
+  assert.equal(uploaded.getAttribute("src"), mediaUrl,
+    "the retry points at the full-size master");
+  uploaded.dispatchEvent(new second.window.Event("error"));
+  assert.ok(uploaded.classList.contains("img-broken"),
+    "a photo that cannot be served at all yields to the placeholder, not a blank frame");
+
   console.log("✓ photo dots use the 96px derivative, never the full-resolution master");
   console.log("✓ the first cards load their photo eagerly, the first at high priority");
   console.log("✓ the rail paints in batches and keeps its placeholder until the catalog lands");
   console.log("✓ media API photos ship a responsive srcset and are re-encoded on request");
+  console.log("✓ card photos are durable, phone-sized, uncropped and fade in over a placeholder");
   console.log("✓ the catalog payload is gzipped and no longer publishes internal costing");
   process.exit(0);
 })().catch(error => { console.error(error); process.exit(1); });

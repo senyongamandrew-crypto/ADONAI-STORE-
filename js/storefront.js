@@ -729,7 +729,12 @@
     const img = mainImg
       ? PK.pictureHTML(mainImg, {
           alt: p.name,
-          sizes: "(min-width: 1024px) 280px, (min-width: 640px) 45vw, 90vw",
+          // sizes must describe the card the grid actually lays out
+          // (css/storefront.css): two columns on phones, ~250-300px cards
+          // above that. The old "90vw" told phones each photo was nearly
+          // screen-wide, so they downloaded the 960w candidate for a
+          // ~160px card — the single biggest image-weight bug on the rail.
+          sizes: "(min-width: 1280px) 300px, (min-width: 900px) 30vw, (min-width: 641px) 45vw, 50vw",
           width: 400,
           height: 500,
           eager: eager,
@@ -738,14 +743,20 @@
       : "";
     // The dots are 40x40 pixels. Pointing them at the full-resolution master
     // made four dots on one card cost about a megabyte, so they use the
-    // dedicated tiny derivative instead.
+    // dedicated tiny derivative instead — at low priority, so a dot can
+    // never compete with the card photos a shopper is actually looking at.
     const dots = photos.length > 1
       ? `<div class="media-dots" title="Open the full photo set">${photos.slice(0, 4).map((src, i) =>
-          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.thumbSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
+          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.thumbSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" fetchpriority="low" /></i>`).join("")}</div>`
       : "";
+    // The category mark always sits behind the photo: while the photo is
+    // still travelling (or if it cannot be served at all) the card shows a
+    // calm placeholder instead of a blank frame with raw alt text. CSS
+    // fades the mark away the moment the photo lands.
     return `
       <div class="pmedia">
-        ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
+        <span class="media-icon" aria-hidden="true">${catIcon(p.category)}</span>
+        ${img}
         ${dots}
         ${photos.length > 4 ? `<span class="media-extra-photos">+${photos.length - 4} photos</span>` : ""}
       </div>`;
@@ -795,6 +806,19 @@
      batches still queued. */
   const GRID_CHUNK = 12;
   let gridRenderToken = 0;
+  // Everything a shopper can see on the rendered rail, as one string. The
+  // live catalog sync calls renderGrid() on a timer; when this signature
+  // has not changed, the existing cards (and their in-flight photos) are
+  // left untouched.
+  let lastGridSignature = "";
+  function gridSignature(list) {
+    const head = [fDemo, fCat, fInventory, fSize, fCond, fMax, term].join("|");
+    const rows = list.map(p => [
+      p.id, p.in_stock_count, displayPrice(p), p.compare_price || 0,
+      p.image_url || "", getProductImages(p).join(",")
+    ].join(":"));
+    return head + "#" + rows.join(",");
+  }
   // Safety net: the placeholder must never sit there forever pretending the
   // shop is still loading. If the catalog has not answered by now, the rail
   // is drawn from whatever is known — including nothing.
@@ -834,6 +858,16 @@
 
     $("#gridEmpty").hidden = list.length > 0;
     updateRailMeta(list.length, products.length);
+
+    // The catalog re-syncs every few seconds while the shop is open. If
+    // nothing a shopper can see has changed, rebuilding the cards anyway
+    // would throw away every <img> still downloading and start each photo
+    // again from byte zero — on a slow connection the photos would never
+    // finish. An unchanged rail is left exactly as it is.
+    const signature = gridSignature(list);
+    if (signature === lastGridSignature) return list.length;
+    lastGridSignature = signature;
+
     if (window.AdonaiAnalytics && list.length > 0) {
       window.AdonaiAnalytics.trackViewItemList(list, fCat !== "All" ? fCat : (fDemo !== "All" ? fDemo : "All"));
     }
@@ -847,6 +881,7 @@
       const slice = list.slice(index, index + GRID_CHUNK);
       if (!slice.length) return;
       grid.insertAdjacentHTML("beforeend", slice.map((p, i) => cardHTML(p, index + i)).join(""));
+      if (PK.settleImages) PK.settleImages(grid);
       index += slice.length;
       if (index < list.length) scheduleFrame(drawBatch);
     };

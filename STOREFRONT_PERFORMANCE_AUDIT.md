@@ -139,3 +139,85 @@ Four dots on one card: **1,004,093 bytes → 10,008 bytes (100× smaller).**
 The three `test_notifications` failures that appear in a full-suite run are
 **pre-existing** — they fail identically on the unmodified code (a test
 isolation issue between test modules, unrelated to this work).
+
+---
+
+## 6. Addendum — blank card photos in production (2026-10-18)
+
+**Symptom (owner's screenshot, 18 Oct 2026):** on the live store, most rail
+cards showed an empty image frame with only the alt text visible; a couple of
+older pieces showed their photo. Loaded photos were also cropped ("the image
+is cut").
+
+**Branch:** `arena/f96f3cd2-adonai-store`
+
+### 6.1 Why the cards sat blank
+
+The §2 fix generated derivatives **on demand** and cached them **only in
+worker memory** (96 entries per process). In production (Render starter,
+4 workers × 2 threads, shared CPU) that cache is empty after every deploy,
+restart or worker recycle — and each of the 4 workers starts cold
+independently. A first visit then encoded up to 48 photos (12 cards × a
+main photo + up to 3 more dots) through 8 threads, each build decoding a
+1200px master. On a slow phone connection the queue read as "images fail
+to load". Photos that had been viewed before (warm in one worker) appeared
+— exactly the screenshot's pattern.
+
+Three smaller defects compounded it:
+
+- **`sizes` overstated the card.** `90vw` on phones while the grid is two
+  columns (~160px cards), so a DPR-2 phone fetched the **960w** candidate
+  (~5–8× the bytes of the right one).
+- **`object-fit: cover`** cropped every garment to the card's 4∶3.4 frame —
+  the owner's "image is cut".
+- **No loading or failure state.** A still-travelling photo rendered as a
+  blank white frame with raw alt text; nothing retried or fell back.
+
+### 6.2 What changed
+
+| # | Fix | Where |
+|---|-----|-------|
+| 1 | Derivatives are **generated at upload** (photo already decoded) and stored in the new `product_media_derivatives` table — durable across restarts, shared by all workers | `media.py`, `models.py` |
+| 2 | A legacy photo's first sized request builds **only that width once**, stores it, and every later request (any worker, any restart) is a plain DB read; concurrent first requests share one build (single-flight) | `media.py` |
+| 3 | New **480w** step for the two-column phone rail at DPR 2; `sizes` now matches the real grid (…`50vw` on phones) | `media.py`, `js/product-kit.js`, `js/storefront.js` |
+| 4 | Card photos use **`object-fit: contain`** on a studio backdrop — the whole piece is always in frame (PDP related items too) | `css/storefront.css`, `css/product.css` |
+| 5 | Photos **fade in over the card's category placeholder**; a failed candidate retries the master once, then yields to the placeholder — never a blank frame | `js/product-kit.js`, `js/storefront.js`, `js/product.js` |
+| 6 | An unchanged live sync **no longer rebuilds the cards**, so it cannot restart in-flight photo downloads | `js/storefront.js` |
+| 7 | Public masters are `immutable` for a week (ids are immutable UUIDs); masters encode as **progressive** JPEG; 304s answer from metadata without reading blobs | `media.py` |
+| 8 | POS/admin list thumbnails use `?w=96`/`?w=320` instead of full masters | `app.js` (run `npm run bundle:pos` before the next APK build) |
+
+### 6.3 Measured (local simulation of a first rail view: 12 pieces × 4 photos, 8 request threads)
+
+| Scenario | Wall time | Slowest photo |
+|---|---|---|
+| Cold cache, before | 1.41 s (and cold again after **every** restart) | 552 ms |
+| First-ever view of legacy photos, after | 1.60 s (once per photo+width, ever) | 579 ms |
+| **After a restart, after** | **0.11 s** | **43 ms** |
+| New upload, first shopper view | derivatives already stored (2–5 ms per photo over HTTP) | — |
+
+Local CPU is far faster than the production instance; the cold-cache gap in
+production is correspondingly larger. After deploying, each existing photo
+still pays its one-time build on its first sized view — opening the store
+once and scrolling the rail warms the whole catalog permanently.
+
+### 6.4 Guards
+
+- `tests/test_media_derivatives.py` (now 16 cases): upload stores the ladder
+  immediately; a stored derivative is served with Pillow builds rigged to
+  explode (proving no rebuild); a legacy photo persists exactly the width
+  first asked for; 480w is served; public masters are immutable.
+- `tests/storefront-performance.test.js` (new §8): durable derivatives, grid
+  -true `sizes`, low-priority dots, unchanged-sync guard, `contain` fitting,
+  and DOM-level fade-in + master-retry + placeholder behaviour.
+- `tests/test_product_media.py` cache-header expectation updated to the
+  immutable master policy; full Python + JS suites green (the 3
+  `test_notifications` full-suite failures are the pre-existing isolation
+  issue noted in §5 — they pass when the module runs alone).
+
+### 6.5 Noticed while here (not fixed in this branch)
+
+The committed `pos-dist/` and `android/…/public/` bundles are stale versus
+the web sources — including an outdated API base URL in the APK copy of
+`js/db.js`. They were left untouched to keep this fix reviewable; run
+`npm run bundle:pos`, review the sync, and commit it before the next APK
+build.
