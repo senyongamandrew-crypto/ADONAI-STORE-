@@ -52,15 +52,32 @@
 <!-- ============ HEADER ============ -->
 <header class="site-head">
   <div class="wrap head-row">
-    <a class="brand" href="./" aria-label="Adonai Store Home">
+    <a class="brand" href="./" aria-label="Adonai Store home">
       <img class="brand-logo-img" src="assets/adonai-logo-horizontal.svg" alt="Adonai Store" width="190" height="44" />
     </a>
     <div class="head-actions">
-      <button class="head-pill" id="installBtn">Install App</button>
-      <button class="cart-btn" id="cartBtn" data-action="open-cart">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6"/></svg>
-        Cart <span class="cart-count" id="cartCount">0</span>
+      <!-- Secondary action: installing the app is a convenience, not a sale. -->
+      <button class="head-pill head-install" id="installBtn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 3.5v11m0 0 4-4m-4 4-4-4" />
+          <path d="M4.5 16.5v2A1.5 1.5 0 0 0 6 20h12a1.5 1.5 0 0 0 1.5-1.5v-2" />
+        </svg>
+        <span class="head-install-label">Install App</span>
       </button>
+      <!-- Primary action: the cart, with the count riding the icon. -->
+      <button class="cart-btn" id="cartBtn" data-action="open-cart" type="button" aria-label="Cart">
+        <span class="cart-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="9" cy="20" r="1" /><circle cx="18" cy="20" r="1" />
+            <path d="M3 4h2l2.4 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L21 8H6" />
+          </svg>
+          <span class="cart-count is-empty" id="cartCount">0</span>
+        </span>
+        <span class="cart-label" aria-hidden="true">Cart</span>
+      </button>
+      <!-- The count, spoken. The header script keeps this in step with the
+           badge and with the cart button's own accessible name. -->
+      <span class="cart-status" id="cartStatus" role="status" aria-live="polite" aria-atomic="true"></span>
     </div>
   </div>
 </header>
@@ -320,6 +337,9 @@
 <div class="toast" id="toast"></div>
 
 <script src="js/analytics.js?v=2.6"></script>
+<!-- Header behaviour: the bar's scroll elevation and the cart count badge.
+     Shared with the product page so both headers behave identically. -->
+<script src="js/header.js?v=1.0"></script>
 <!-- Scroll-lock owner. Must load before any controller that opens an
      overlay so the lock has a single, reference-counted source of truth. -->
 <script src="js/scrollLock.js?v=1.0"></script>
