@@ -98,7 +98,13 @@
      Desktop: vertical thumbnail strip + sticky main stage
      Mobile:  edge-to-edge swipeable carousel with counter + dots
      ============================================================ */
-  function angleLabel(index) { return index === 0 ? "Cover" : `Photo ${index + 1}`; }
+  // Intake maps photos to the category's angle protocol ("Macro front
+  // face", "Outsole tread"…); captions fall back to Cover / Photo N.
+  function angleLabel(index) {
+    const mapped = product && product.photo_angle_labels && product.photo_angle_labels[String(index)];
+    if (mapped) return index === 0 ? `Cover · ${mapped}` : mapped;
+    return index === 0 ? "Cover" : `Photo ${index + 1}`;
+  }
   const garmentVideo = () => product && product.video && product.video.url ? product.video : null;
   const galleryCount = () => photos.length + (garmentVideo() ? 1 : 0);
   const videoTime = () => `0:${String(Math.round(Number((garmentVideo() || {}).duration) || 0)).padStart(2, "0")}`;
@@ -270,9 +276,46 @@
   /* ============================================================
      RENDER — MIDDLE COLUMN: SPECS & STORYTELLING
      ============================================================ */
+  /* Category specifications captured on the dynamic intake schema
+     (category_field_schemas): grouped by section, units included. */
+  function specificationRows() {
+    return (Array.isArray(product.specifications) ? product.specifications : []).filter(row => row && row.label && row.value);
+  }
+
+  function specificationsCard() {
+    const rows = specificationRows().filter(row => !String(row.key || "").startsWith("inspection."));
+    if (!rows.length) return "";
+    const sections = [];
+    rows.forEach(row => {
+      let group = sections.find(entry => entry.title === row.section);
+      if (!group) sections.push(group = { title: row.section, rows: [] });
+      group.rows.push(row);
+    });
+    return `
+      <div class="pdp-specs-card" id="pdpSpecs">
+        <h4>Specifications${product.subcategory ? ` · ${esc(product.subcategory)}` : ""}</h4>
+        ${sections.map(group => `
+          <div class="pdp-specs-group">
+            ${group.title ? `<p class="pdp-specs-title">${esc(group.title)}</p>` : ""}
+            <dl class="pdp-specs-grid">
+              ${group.rows.map(row => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.value)}</dd></div>`).join("")}
+            </dl>
+          </div>`).join("")}
+        <p class="measurements-foot">Measured and recorded by hand on this exact piece at intake.</p>
+      </div>`;
+  }
+
+  function inspectionList() {
+    const rows = specificationRows().filter(row => String(row.key || "").startsWith("inspection."));
+    return rows.length ? `<ul class="pdp-bullets pdp-inspection">${rows.map(row => `<li><strong>${esc(row.label)}:</strong> ${esc(row.value)}</li>`).join("")}</ul>` : "";
+  }
+
   function measurementsCard() {
     const rows = K.measurementRows(product);
     const note = K.measurementNote(product);
+    // Jewelry, bags and accessories carry their own unit-aware
+    // specifications; never show them an empty garment flat-lay card.
+    if (!rows.length && specificationRows().length) return "";
     if (!rows.length) {
       return `
         <div class="measurements-card empty">
@@ -314,6 +357,9 @@
     const story = String(product.desc || "").trim();
     const staffNote = String(product.staff_notes || "").trim();
     const size = product.size && product.size !== "-" ? product.size : "Standard";
+    const hasSpecs = specificationRows().length > 0;
+    const fulfillment = String(product.fulfillment_notes || "").trim();
+    const categoryLabel = [product.category, product.subcategory].filter(Boolean).join(" · ");
     const stockType = product.is_consignment
       ? "Partner · Vintage"
       : product.item_condition === "BRAND_NEW" ? "Brand New" : "Vintage / Pre-Loved";
@@ -339,14 +385,16 @@
       </div>
 
       <dl class="pdp-highlights">
-        <div><dt>Tagged size</dt><dd>${esc(size)}</dd></div>
+        ${size !== "Standard" || !hasSpecs ? `<div><dt>Tagged size</dt><dd>${esc(size)}</dd></div>` : ""}
         <div><dt>Colour / wash</dt><dd>${esc(product.color || "As photographed")}</dd></div>
-        <div><dt>Category</dt><dd>${esc(product.category || "—")}</dd></div>
+        <div><dt>Category</dt><dd>${esc(categoryLabel || "—")}</dd></div>
         <div><dt>Stock type</dt><dd>${esc(stockType)}</dd></div>
         <div><dt>Fits</dt><dd>${esc(product.demographic || "Unisex")}</dd></div>
-        ${fabric ? `<div><dt>Fabric composition</dt><dd>${esc(fabric)}</dd></div>` : ""}
+        ${fabric ? `<div><dt>${hasSpecs ? "Material" : "Fabric composition"}</dt><dd>${esc(fabric)}</dd></div>` : ""}
         <div><dt>Availability</dt><dd>${esc(stock.label)}</dd></div>
       </dl>
+
+      ${specificationsCard()}
 
       ${measurementsCard()}
 
@@ -390,6 +438,7 @@
             ${flaw.hasFlaws
               ? `<p>${esc(flaw.notes)}</p>`
               : `<p>No flaws were recorded during intake inspection.</p>`}
+            ${inspectionList()}
             <p class="pdp-muted">Grading scale: BNWT (tags attached) · Grade A (like new) · Grade B (gentle wear) · Vintage (collector piece valued for its era).</p>
           </div>
         </details>
@@ -405,6 +454,7 @@
         <details class="pdp-acc">
           <summary>Delivery, pickup &amp; returns<span class="acc-sign" aria-hidden="true"></span></summary>
           <div class="pdp-acc-body">
+            ${fulfillment ? `<p class="pdp-store-note"><strong>For this item:</strong> ${esc(fulfillment)}</p>` : ""}
             <ul class="pdp-bullets">
               <li><strong>Central Region (Kampala, Wakiso, Mukono):</strong> delivery is targeted for the same day when your order is confirmed by 4:00 PM; later orders target the next available delivery day.</li>
               <li><strong>Regional Uganda:</strong> dispatch is targeted within one business day after confirmation, with 1–3 business days transit to major towns; remote routes may take longer and are confirmed before dispatch.</li>

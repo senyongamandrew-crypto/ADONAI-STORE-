@@ -106,7 +106,7 @@ notification-service keys are required.
 ## 🌐 3. Cross-Navigation (POS to Website Only)
 
 - Inside the Android POS navigation drawer, staff can tap **"🌐 Open Live Web Storefront ↗"**. It is intentionally kept out of dashboard headers.
-- This launches an **external Android Intent** (`Intent.ACTION_VIEW`) through the native WebView bridge, opening your live Render store URL (`https://adonai-store.onrender.com`) in the device's default web browser (Chrome / Samsung Internet).
+- This launches an **external Android Intent** (`Intent.ACTION_VIEW`) through the native WebView bridge, opening your live public store URL (`https://www.adonaithrift-store.online`) in the device's default web browser (Chrome / Samsung Internet).
 - **Security Rule**: The public storefront has **zero return links or triggers** to the POS app. To return to the POS register, the cashier switches back to the installed Android POS app from the phone's task manager / app drawer.
 
 ---

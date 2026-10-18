@@ -155,6 +155,11 @@ def _dual_inventory_backfill_statements(
 def apply_additive_schema_migrations():
     """Add columns create_all cannot add, without changing or dropping live data."""
     additions = {
+        # Bell inbox: permanent (store-wide) deletion tombstones.
+        "notification_events": [
+            ("deleted_at", "TIMESTAMP"),
+            ("deleted_by", "VARCHAR(120)"),
+        ],
         "riders": [
             ("vehicle", "VARCHAR(100) NOT NULL DEFAULT 'Motorbike (Boda)'"),
             ("zone", "VARCHAR(100) NOT NULL DEFAULT ''"),
@@ -195,6 +200,12 @@ def apply_additive_schema_migrations():
             ("staff_notes", "TEXT"),
             ("consignment_partner_id", "VARCHAR(50)"),
             ("commission_rate", "NUMERIC(5,2)"),
+            # Dynamic, schema-driven catalog intake (category_field_schemas).
+            # `attributes` becomes JSONB on PostgreSQL (see the override below).
+            ("subcategory", "VARCHAR(100)"),
+            ("attributes", "TEXT NOT NULL DEFAULT '{}'"),
+            ("search_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("fulfillment_notes", "TEXT"),
         ],
         "order_items": [
             ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
@@ -288,6 +299,7 @@ def apply_additive_schema_migrations():
                     (name, {
                         "item_condition": "item_condition_enum NOT NULL DEFAULT 'PRE_LOVED'",
                         "quantity_type": "quantity_type_enum NOT NULL DEFAULT 'PRE_LOVED'",
+                        "attributes": "JSONB NOT NULL DEFAULT '{}'::jsonb",
                     }.get(name, declaration))
                     for name, declaration in columns
                 ]
@@ -358,6 +370,7 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_products_inventory_status ON products(inventory_status)",
             "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
             "CREATE INDEX IF NOT EXISTS ix_products_consignment_partner_id ON products(consignment_partner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_products_subcategory ON products(subcategory)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_consignment_partner_id ON order_items(consignment_partner_id)",
             # Payment-columns indexes for databases whose orders table predates
@@ -370,6 +383,12 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_orders_merchant_pay_code ON orders(merchant_pay_code)",
         ):
             run_isolated(statement, "additive index")
+        if IS_POSTGRES and _postgres_column_types(connection, "products").get("attributes") == "jsonb":
+            # Containment queries such as attributes @> '{"schema_key": "earrings"}'.
+            run_isolated(
+                "CREATE INDEX IF NOT EXISTS ix_products_attributes_gin ON products USING GIN (attributes jsonb_path_ops)",
+                "attributes GIN index",
+            )
 
     backfill_product_slugs()
 
@@ -498,6 +517,17 @@ def seed_categories(session):
         if not existing:
             session.add(Category(id=cat_id, name=name, code=code, sort_order=order, description=desc))
     logger.info("Verified standard product categories.")
+
+
+def seed_category_field_schemas(session):
+    """Mirror data/category_field_schemas.json into category_field_schemas."""
+    import catalog_schemas
+    try:
+        with session.begin_nested():
+            catalog_schemas.seed_schemas(session)
+    except Exception as exc:
+        # The bundled defaults keep intake working even if the mirror fails.
+        logger.error("Category field schema seed skipped: %s", str(exc).splitlines()[0][:400])
 
 
 def seed_users(session):
@@ -897,6 +927,7 @@ def init_db() -> bool:
         # Seed essential defaults inside an atomic transaction
         with get_db() as session:
             seed_categories(session)
+            seed_category_field_schemas(session)
             seed_users(session)
             seed_settings(session)
             if os.environ.get("ADONAI_SEED_DEMO_USERS") == "1":

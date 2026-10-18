@@ -304,7 +304,7 @@
 
   /* Cross-Navigation: Admin Console to Live Web Storefront (External Browser Intent) */
   // Live Render deployment of the public storefront (web + API share this service).
-  const LIVE_WEB_STOREFRONT_URL = "https://adonai-store.onrender.com";
+  const LIVE_WEB_STOREFRONT_URL = "https://www.adonaithrift-store.online";
 
   const isShellOrigin = origin => {
     try {
@@ -1582,6 +1582,122 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     $("#delPurge").addEventListener("click", () => run("permanent"));
   }
 
+  /* Edit-modal side of the dynamic category schemas. A record that was
+     saved complete must stay complete; older / partial records may be saved
+     with gaps (staff get a reminder instead of a hard block). */
+  function legacySchemaValues(schema, product) {
+    const values = {};
+    const measurements = (product && product.measurements) || {};
+    (schema.sections || []).forEach(section => (section.fields || []).forEach(field => {
+      const inches = Number(measurements[field.flat_lay_key]);
+      if (!field.flat_lay_key || field.type !== "measure" || !(inches > 0)) return;
+      const units = field.units || [];
+      if (units.includes("in")) values[field.key] = { value: inches, unit: "in" };
+      else if (units.includes("cm")) values[field.key] = { value: Math.round(inches * 2.54 * 10) / 10, unit: "cm" };
+    }));
+    return values;
+  }
+
+  function mountModalSchema(product, photos) {
+    const engine = schemaEngine();
+    const section = $("#mpSpecsSection");
+    modalBox._schemaForm = modalBox._schemaPhotoProtocol = null;
+    modalBox._schemaPhotos = (photos || []).slice();
+    if (!engine || !section) return;
+    const stored = (product && product.attributes) || {};
+    const enforce = !product || !!stored.complete;
+    const context = () => ({ subcategory: $("#mpSubCat").value, item_condition: $("#mpItemCondition").value });
+    let mountedKey = "";
+
+    const syncCoreFields = schema => {
+      const hidden = schema ? engine.hiddenCoreFields(schema) : [];
+      const setHidden = (id, flag) => { const wrap = $("#" + id) && $("#" + id).closest(".field"); if (wrap) wrap.hidden = flag; };
+      setHidden("mpSize", hidden.includes("size"));
+      setHidden("mpFabric", hidden.includes("fabric"));
+      // Inch flat-lay text only for legacy / un-schema'd records.
+      setHidden("mpMeasure", !!schema);
+    };
+    const status = () => {
+      const form = modalBox._schemaForm;
+      const box = $("#mpSpecsStatus");
+      if (!form || !box) return;
+      const required = form.requiredStatus();
+      const angles = modalBox._schemaPhotoProtocol ? modalBox._schemaPhotoProtocol.status() : { requiredMapped: 0, required: 0 };
+      box.textContent = `${required.done}/${required.total} required · ${angles.requiredMapped}/${angles.required} angles${enforce ? "" : " · gaps allowed for this older record"}`;
+    };
+    const remount = () => {
+      const subs = engine.subcategoriesFor($("#mpCat").value);
+      const select = $("#mpSubCat");
+      const previous = select.value || (product && product.category === $("#mpCat").value ? product.subcategory : "");
+      select.innerHTML = subs.map(sub => `<option>${esc(sub)}</option>`).join("");
+      select.value = subs.includes(previous) ? previous : (subs[0] || "");
+      $("#mpSubCatField").hidden = !subs.length;
+      const resolved = engine.resolve($("#mpCat").value, select.value);
+      if (!resolved) {
+        section.hidden = true;
+        if (modalBox._schemaForm) modalBox._schemaForm.destroy();
+        modalBox._schemaForm = modalBox._schemaPhotoProtocol = null; mountedKey = "";
+        syncCoreFields(null);
+        return;
+      }
+      section.hidden = false;
+      syncCoreFields(resolved.schema);
+      if (mountedKey === resolved.key && modalBox._schemaForm) {
+        modalBox._schemaForm.setContext(context());
+        modalBox._schemaPhotoProtocol.setContext(context());
+        return;
+      }
+      const sameAsStored = stored.schema_key === resolved.key;
+      const initial = modalBox._schemaForm && mountedKey === resolved.key ? modalBox._schemaForm.read()
+        : sameAsStored ? { values: stored.values || {}, inspection: stored.inspection || {} }
+        : { values: legacySchemaValues(resolved.schema, product) };
+      if (modalBox._schemaForm) modalBox._schemaForm.destroy();
+      mountedKey = resolved.key;
+      $("#mpSpecsTitle").textContent = `${resolved.schema.label} specifications`;
+      modalBox._schemaForm = engine.mountForm($("#mpSpecs"), { schema: resolved.schema, context: context(), values: initial, onChange: status });
+      modalBox._schemaPhotoProtocol = engine.mountPhotoProtocol($("#mpPhotoProtocol"), {
+        schema: resolved.schema, context: context(), photos: modalBox._schemaPhotos,
+        angles: sameAsStored ? (stored.photo_angles || {}) : {}, onChange: status
+      });
+      status();
+    };
+    modalBox._schemaEnforce = enforce;
+    modalBox._schemaMeasureKeys = () => {
+      const form = modalBox._schemaForm;
+      const keys = [];
+      if (form) (form.schema.sections || []).forEach(sec => (sec.fields || []).forEach(field => { if (field.flat_lay_key) keys.push(field.flat_lay_key); }));
+      return keys;
+    };
+    $("#mpCat").addEventListener("change", () => { $("#mpSubCat").value = ""; remount(); });
+    $("#mpSubCat").addEventListener("change", remount);
+    $("#mpItemCondition").addEventListener("change", remount);
+    remount();
+  }
+
+  /** Attributes for the modal save, or {error} when a required field blocks it. */
+  function collectModalSchema(product) {
+    const engine = schemaEngine();
+    const form = modalBox._schemaForm;
+    if (!engine || !form || $("#mpSpecsSection").hidden) return null;
+    const strict = form.validate({ enforceRequired: true });
+    const result = modalBox._schemaEnforce ? strict : form.validate({ enforceRequired: false });
+    if (!result.ok) {
+      const messages = Object.values(result.errors);
+      form.focusFirstError();
+      return { error: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}` };
+    }
+    if (!strict.ok) form.showErrors({}); // older record: gaps are reminders, not blockers
+    const attributes = { schema_key: form.schema.key, values: result.values, photo_angles: modalBox._schemaPhotoProtocol ? modalBox._schemaPhotoProtocol.read() : {} };
+    if (engine.inspectionApplies(form.schema, form.context)) attributes.inspection = result.inspection;
+    const projections = engine.project(form.schema, result.values);
+    // Rebuild the inch card: drop flat-lay keys this form owns, keep any
+    // others (and the note), then add the freshly projected inches.
+    const measurements = Object.assign({}, (product && product.measurements) || {});
+    modalBox._schemaMeasureKeys().forEach(key => { delete measurements[key]; });
+    Object.assign(measurements, projections.measurements || {});
+    return { subcategory: $("#mpSubCat").value, attributes, projections, measurements, missing: Object.keys(strict.errors).length };
+  }
+
   function productModal(id) {
     const p = id ? DB.getProduct(id) : null;
     const v = (k, d = "") => p ? esc(p[k] != null ? p[k] : d) : d;
@@ -1599,13 +1715,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div class="field"><label>Category</label><select id="mpCat" class="sel-full">${DB.CATEGORIES.map(c => `<option ${p && p.category === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
         <div class="field"><label>Demographic</label><select id="mpDemo" class="sel-full">${DB.DEMOGRAPHICS.map(d => `<option ${p && p.demographic === d ? "selected" : ""}>${d}</option>`).join("")}</select></div>
       </div>
+      <div class="field" id="mpSubCatField" hidden><label for="mpSubCat">Sub-group / style<span class="fhint">Selects the specification form</span></label><select id="mpSubCat" class="sel-full"></select></div>
       <div class="fgrid">
         <div class="field"><label>Size</label><input id="mpSize" class="sel-full" value="${v("size", "-")}" /></div>
         <div class="field"><label>Condition</label><select id="mpCond" class="sel-full">${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
       </div>
       <div class="fgrid">
-        <div class="field"><label>Cost (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
-        <div class="field"><label>Base price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
+        <div class="field"><label>Unit COGS (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
+        <div class="field"><label>Target retail price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
       </div>
       <div class="fgrid">
         <div class="field"><label>Total transport (UGX)<span class="fhint">50% embedded · 50% at checkout · defaults to System Parameters base fee</span></label><input id="mpTransport" type="number" min="0" class="sel-full" ${p ? "" : `data-auto="1" placeholder="${globalBaseDeliveryFee()}"`} value="${p ? (p.total_transport_cost || 0) : globalBaseDeliveryFee()}" /></div>
@@ -1618,8 +1735,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       <h4 class="sec" style="margin:18px 0 8px">Product page details</h4>
       <div class="field"><label>Fabric &amp; composition</label><input id="mpFabric" class="sel-full" value="${v("fabric")}" placeholder="100% Cotton denim · 12.5oz" /></div>
       <div class="field"><label>Care instructions</label><input id="mpCare" class="sel-full" value="${v("care_notes")}" placeholder="Machine wash cold inside out." /></div>
-      <div class="field"><label>Flat-lay measurements<span class="fhint">inches · one per line as name: value</span></label>
+      <div class="field" id="mpMeasureField"><label>Flat-lay measurements<span class="fhint">inches · one per line as name: value</span></label>
         <textarea id="mpMeasure" class="sel-full" placeholder="shoulder: 18.5&#10;chest: 22&#10;sleeve: 25&#10;length: 26">${measurementsToText(p && p.measurements)}</textarea></div>
+      <section class="mp-specs" id="mpSpecsSection" hidden>
+        <div class="mp-specs-head"><strong id="mpSpecsTitle">Category specifications</strong><span id="mpSpecsStatus"></span></div>
+        <div id="mpSpecs"></div>
+        <div id="mpPhotoProtocol" class="intake-photo-protocol"></div>
+      </section>
+      <div class="field"><label>Search tags<span class="fhint">Comma-separated · clear to regenerate automatically</span></label><input id="mpSearchTags" class="sel-full" maxlength="600" value="${p ? esc((p.search_tags || []).join(", ")) : ""}" /></div>
+      <div class="field"><label>Pickup &amp; delivery notes</label><textarea id="mpFulfillment" class="sel-full" maxlength="600" placeholder="Pickup and delivery details shown on the product page">${v("fulfillment_notes")}</textarea></div>
       <div class="field"><label>Flaw &amp; condition notes</label><textarea id="mpFlaws" class="sel-full" placeholder="Describe every flaw a shopper would want to know about.">${v("flaw_notes")}</textarea></div>
       <div class="field"><label>Which photo shows the flaw?</label>
         <select id="mpFlawPhoto" class="sel-full"><option value="-1">No flaw close-up</option>${modalImages.map((url, i) => `<option value="${i}" ${p && Number(p.flaw_photo_index) === i ? "selected" : ""}>Photo ${i + 1}${i === 0 ? " · Cover" : ""}</option>`).join("")}</select></div>
@@ -1628,9 +1752,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <button class="btn" data-close>Cancel</button>
         <button class="btn primary" data-save-prod="${p ? esc(p.id) : ""}">${p ? "Save changes" : "Add item"}</button>
       </div>`);
+    mountModalSchema(p, modalImages);
     modalBox._mediaEditor = GarmentMedia.mount($("#mpMedia"), {
       product: p,
-      onChange: (urls, previous) => syncFlawPhotoOptions($("#mpFlawPhoto"), urls, previous),
+      onChange: (urls, previous) => {
+        syncFlawPhotoOptions($("#mpFlawPhoto"), urls, previous);
+        modalBox._schemaPhotos = urls.slice();
+        if (modalBox._schemaPhotoProtocol) modalBox._schemaPhotoProtocol.setPhotos(urls);
+      },
       onBusy: busy => { const button = $("[data-save-prod]", modalBox); if (button) button.disabled = busy || !!modalBox._mediaSaving; },
       onError: message => toast(message, false)
     });
@@ -2041,7 +2170,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
 
   function readMeasurements() {
     const out = {};
-    document.querySelectorAll("#measureFields [data-measure]").forEach(input => {
+    const legacySet = $("#measureFields");
+    // In schema mode the inch set is hidden: its stale inputs never leak.
+    if (legacySet && !legacySet.hidden) document.querySelectorAll("#measureFields [data-measure]").forEach(input => {
       const value = Number(input.value);
       if (Number.isFinite(value) && value > 0) out[input.dataset.measure] = value;
     });
@@ -2102,10 +2233,203 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return select.value;
   }
 
+  /* ---- dynamic category schemas (category_field_schemas) ----------------
+     Category + sub-group resolve ONE JSON form (js/catalog-schemas.js). It
+     sits on top of the profile above: the schema's base profile still drives
+     labels, condition grades and care, while the schema renders the
+     category-specific attributes, inspection points and photo angles, and
+     takes over the legacy size / fabric / inch measurement controls it
+     replaces. Without the engine (older cached bundle) the profile-only
+     form keeps working exactly as before. */
+  let intakeSchemaForm = null;
+  let intakeSchemaKey = "";
+  let intakeSchemaJSON = "";
+  let intakePhotoProtocol = null;
+  let intakePhotoUrls = [];
+  let intakeTagsEdited = false;
+
+  function schemaEngine() {
+    return window.CatalogSchemas && window.CatalogSchemas.document ? window.CatalogSchemas : null;
+  }
+
+  function rebuildIntakeSubcategories() {
+    const engine = schemaEngine();
+    const select = $("#inSubCat");
+    const row = $("#inSubCatRow");
+    if (!select || !row || !$("#inCat")) return "";
+    const category = $("#inCat").value;
+    const subs = engine ? engine.subcategoriesFor(category) : [];
+    row.hidden = !subs.length;
+    const current = select.value;
+    const signature = `${category}|${subs.join("|")}`;
+    if (select.dataset.signature !== signature) {
+      select.innerHTML = subs.map(sub => `<option>${esc(sub)}</option>`).join("");
+      select.dataset.signature = signature;
+    }
+    select.value = subs.includes(current) ? current : (subs[0] || "");
+    return select.value;
+  }
+
+  function resolveIntakeSchema() {
+    const engine = schemaEngine();
+    if (!engine || !$("#inCat")) return null;
+    return engine.resolve($("#inCat").value, rebuildIntakeSubcategories());
+  }
+
+  function intakeSchemaContext() {
+    return { subcategory: ($("#inSubCat") && $("#inSubCat").value) || "", item_condition: intakeCondition() };
+  }
+
+  function renumberIntakeSections(schemaActive) {
+    const photos = $("#intakePhotosTitle");
+    const pdp = $("#intakePdpTitle");
+    if (photos) photos.textContent = schemaActive ? "5. Photos, Video & Angle Mapping" : "4. Garment Photos & Video";
+    if (pdp) pdp.textContent = schemaActive ? "6. Product Page Details (fit, care & disclosure)" : "5. Product Page Details (flat-lay measurements & disclosure)";
+  }
+
+  function intakeAutoTags() {
+    const engine = schemaEngine();
+    if (!engine) return [];
+    // Pure validation: a live refresh must not touch on-screen error state.
+    const attributes = intakeSchemaForm
+      ? Object.assign({ schema_key: intakeSchemaKey }, engine.validate(intakeSchemaForm.schema, intakeSchemaForm.read(), intakeSchemaForm.context, { enforceRequired: false }))
+      : null;
+    return engine.autoTags({
+      category: $("#inCat").value, subcategory: ($("#inSubCat") && $("#inSubCat").value) || "",
+      brand: $("#inBrand").value.trim() || "Unbranded", color: $("#inColor").value.trim(),
+      item_condition: intakeCondition(), attributes
+    });
+  }
+
+  function refreshIntakeSearchTags(force = false) {
+    const input = $("#inSearchTags");
+    if (!input || (!force && intakeTagsEdited)) return;
+    input.value = intakeAutoTags().join(", ");
+  }
+
+  function updateIntakeReadiness() {
+    const box = $("#intakeReadiness");
+    if (!box) return;
+    if (!intakeSchemaForm) { box.hidden = true; return; }
+    const specs = intakeSchemaForm.requiredStatus();
+    const angles = intakePhotoProtocol ? intakePhotoProtocol.status() : { requiredMapped: 0, required: 0, missing: [] };
+    const progress = $("#intakeSpecsProgress");
+    if (progress) {
+      progress.textContent = specs.total ? `${specs.done} / ${specs.total} required details` : "No required details";
+      progress.classList.toggle("done", specs.done === specs.total);
+    }
+    const checks = [
+      ["Title", !!$("#inTitle").value.trim(), true],
+      ["SKU / barcode", !!$("#inSku").value.trim(), true],
+      ["Retail price", Number($("#inSell").value) > 0, true],
+      [`Category details ${specs.done}/${specs.total}`, specs.done === specs.total, true],
+      [`Photo angles ${angles.requiredMapped}/${angles.required}`, angles.requiredMapped === angles.required, false]
+    ];
+    box.hidden = false;
+    box.innerHTML = `<span class="ir-label">Ready to save?</span>` + checks.map(([label, ok, blocking]) =>
+      `<span class="ir-chip ${ok ? "ok" : blocking ? "todo" : "advice"}">${ok ? "✓" : blocking ? "•" : "!"} ${esc(label)}</span>`).join("") +
+      (angles.missing.length ? `<span class="ir-note">Recommended next shot: ${esc(angles.missing[0])}</span>` : "");
+  }
+
+  function onIntakeSchemaChange() {
+    refreshIntakeSearchTags();
+    updateIntakeReadiness();
+  }
+
+  function applyIntakeSchema(resolved, preserveValues = false) {
+    const section = $("#intakeSpecsSection");
+    const engine = schemaEngine();
+    if (!section) return;
+    const legacyMeasure = $("#inMeasureSetField");
+    if (!engine || !resolved) {
+      section.hidden = true;
+      if (intakeSchemaForm) intakeSchemaForm.destroy();
+      if (intakePhotoProtocol) intakePhotoProtocol.destroy();
+      intakeSchemaForm = intakePhotoProtocol = null;
+      intakeSchemaKey = intakeSchemaJSON = "";
+      if ($("#intakePhotoProtocol")) $("#intakePhotoProtocol").hidden = true;
+      if (legacyMeasure) legacyMeasure.hidden = false;
+      if ($("#measureFields")) $("#measureFields").hidden = false;
+      setIntakeFieldHidden("inSize", false);
+      setIntakeFieldHidden("inFabric", false);
+      if ($("#intakeSchemaBadge")) $("#intakeSchemaBadge").innerHTML = "";
+      renumberIntakeSections(false);
+      updateIntakeReadiness();
+      return;
+    }
+    const { key, schema } = resolved;
+    const context = intakeSchemaContext();
+    const json = JSON.stringify(schema);
+    section.hidden = false;
+    renumberIntakeSections(true);
+    if (!intakeSchemaForm || intakeSchemaKey !== key || intakeSchemaJSON !== json) {
+      // A new sub-group form starts clean; a refreshed definition of the
+      // SAME form (server mirror update) keeps what staff already typed.
+      const carry = preserveValues && intakeSchemaForm && intakeSchemaKey === key ? intakeSchemaForm.read() : null;
+      const carryAngles = intakePhotoProtocol && intakeSchemaKey === key ? intakePhotoProtocol.read() : null;
+      if (intakeSchemaForm) intakeSchemaForm.destroy();
+      if (intakePhotoProtocol) intakePhotoProtocol.destroy();
+      intakeSchemaKey = key;
+      intakeSchemaJSON = json;
+      intakeSchemaForm = engine.mountForm($("#intakeSpecs"), { schema, context, values: carry || {}, onChange: onIntakeSchemaChange });
+      $("#intakePhotoProtocol").hidden = false;
+      intakePhotoProtocol = engine.mountPhotoProtocol($("#intakePhotoProtocol"), {
+        schema, context, photos: intakePhotoUrls, angles: carryAngles || {}, onChange: updateIntakeReadiness
+      });
+    } else {
+      intakeSchemaForm.setContext(context);
+      intakePhotoProtocol.setContext(context);
+    }
+    // Legacy controls the schema owns: no inch measurement set for jewelry,
+    // no free-text size when the schema records a scaled size, no fabric
+    // box when a structured material field projects into it.
+    const hidden = engine.hiddenCoreFields(schema);
+    setIntakeFieldHidden("inSize", hidden.includes("size"));
+    setIntakeFieldHidden("inFabric", hidden.includes("fabric"));
+    if (legacyMeasure) legacyMeasure.hidden = true;
+    if ($("#measureFields")) $("#measureFields").hidden = true;
+    setIntakeFieldHidden("inMeasurementsField", true);
+
+    const hint = $("#intakeProfileHint");
+    if (hint && schema.summary) hint.textContent = schema.summary;
+    const angles = engine.photoProtocol(schema, context);
+    const inspection = engine.inspectionApplies(schema, context);
+    const badge = $("#intakeSchemaBadge");
+    if (badge) badge.innerHTML = `<span class="isb-eyebrow">INTAKE FORM</span><strong>${esc(schema.label)}</strong>` +
+      `<span>${angles.length} photo angles${inspection ? " · condition inspection" : ""}${engine.source === "server" ? " · synced" : ""}</span>`;
+    refreshIntakeSearchTags();
+    updateIntakeReadiness();
+  }
+
+  /** Validated attributes payload for the save request, or an error message. */
+  function collectIntakeSchema() {
+    const engine = schemaEngine();
+    if (!engine || !intakeSchemaForm || $("#intakeSpecsSection").hidden) return null;
+    const result = intakeSchemaForm.validate({ enforceRequired: true });
+    if (!result.ok) {
+      const messages = Object.values(result.errors);
+      return { ok: false, message: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}${messages.length > 2 ? "…" : ""}` };
+    }
+    const attributes = { schema_key: intakeSchemaKey, values: result.values };
+    if (engine.inspectionApplies(intakeSchemaForm.schema, intakeSchemaForm.context)) attributes.inspection = result.inspection;
+    attributes.photo_angles = intakePhotoProtocol ? intakePhotoProtocol.read() : {};
+    return { ok: true, subcategory: $("#inSubCat").value, attributes, projections: engine.project(intakeSchemaForm.schema, result.values) };
+  }
+
+  function intakeSearchTagsValue() {
+    const raw = ($("#inSearchTags") && $("#inSearchTags").value) || "";
+    const engine = schemaEngine();
+    return engine ? engine.cleanTags(raw) : raw.split(",").map(tag => tag.trim().toLowerCase()).filter(Boolean).slice(0, 24);
+  }
+
   function applyIntakeProfile() {
     if (!$("#inCat") || !$("#inMeasureSet")) return;
     const category = $("#inCat").value;
-    const profileKey = intakeProfileFor(category);
+    const resolvedSchema = resolveIntakeSchema();
+    // A resolved schema names its own base profile, so "Children Wear ›
+    // Kids Shoes" gets footwear grades and care rather than apparel ones.
+    const schemaProfile = resolvedSchema && resolvedSchema.schema.profile;
+    const profileKey = INTAKE_PROFILES[schemaProfile] ? schemaProfile : intakeProfileFor(category);
     const spec = INTAKE_PROFILES[profileKey];
     const preLoved = intakeCondition() === "PRE_LOVED";
 
@@ -2147,6 +2471,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if ($("#inStory")) $("#inStory").placeholder = spec.storyPlaceholder;
     if ($("#inMeasureNote")) $("#inMeasureNote").placeholder = spec.measureNotePlaceholder;
     if ($("#inFlaws")) $("#inFlaws").placeholder = spec.flawPlaceholder;
+    applyIntakeSchema(resolvedSchema);
   }
 
   // The condition controls must be local console helpers, not undefined
@@ -2364,6 +2689,23 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     // Re-shape the whole detail block whenever the category changes: the
     // relevant fields, labels, presets and measurement set follow it.
     $("#inCat").addEventListener("change", applyIntakeProfile);
+    if ($("#inSubCat")) $("#inSubCat").addEventListener("change", () => { applyIntakeProfile(); paintTag(); });
+    $$("[data-brand-preset]").forEach(button => button.addEventListener("click", () => {
+      $("#inBrand").value = button.dataset.brandPreset;
+      refreshIntakeSearchTags();
+      paintTag();
+    }));
+    ["inBrand", "inColor"].forEach(id => $("#" + id).addEventListener("input", () => refreshIntakeSearchTags()));
+    ["inTitle", "inSku", "inSell"].forEach(id => $("#" + id).addEventListener("input", updateIntakeReadiness));
+    if ($("#inSearchTags")) $("#inSearchTags").addEventListener("input", () => {
+      // Hand edits stick; clearing the box hands control back to automation.
+      intakeTagsEdited = $("#inSearchTags").value.trim() !== "";
+      if (!intakeTagsEdited) refreshIntakeSearchTags(true);
+    });
+    if (window.CatalogSchemas && CatalogSchemas.onChange) {
+      CatalogSchemas.onChange(() => applyIntakeSchema(resolveIntakeSchema(), true));
+      CatalogSchemas.load();
+    }
     buildMeasureFields($("#inMeasureSet").value);
     $("#btnIntakeSave").addEventListener("click", () => saveIntake(false));
     $("#btnIntakeMore").addEventListener("click", () => saveIntake(true));
@@ -2389,6 +2731,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     intakeMedia = GarmentMedia.mount($("#photoRow"), {
       onChange: (urls, previous, video) => {
         syncFlawPhotoOptions($("#inFlawPhoto"), urls, previous);
+        intakePhotoUrls = urls.slice();
+        if (intakePhotoProtocol) intakePhotoProtocol.setPhotos(urls);
+        updateIntakeReadiness();
         $("#angleCount").textContent = `${urls.length} / 12 photos${video ? " + video" : ""}`;
       },
       onBusy: busy => ["btnIntakeSave", "btnIntakeMore", "btnIntakePrint"].forEach(id => { $("#" + id).disabled = busy || intakeSaving; }),
@@ -2400,7 +2745,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const settings = DB.getSettings() || {};
     $("#tagStoreName").textContent = settings.store_name || "ADONAI STORE";
     $("#tagTitle").textContent = $("#inTitle").value.trim() || "Garment name";
-    $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonai-store.onrender.com";
+    $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonaithrift-store.online";
     const basePrice = Number($("#inSell").value) || 0;
     const transport = intakeSource() === "partner" ? 0 : (Number($("#inTransport").value) || 0);
     const sell = basePrice + (transport * 0.5);
@@ -2422,7 +2767,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       brand: $("#inBrand").value.trim() || "Unbranded",
       color: $("#inColor").value.trim(),
       demographic: $("#inDemo").value, category: $("#inCat").value,
-      size: $("#inSize").value.trim() || "-",
+      size: (isIntakeFieldVisible("inSize") && $("#inSize").value.trim()) || "-",
       inventory_source: partnerSource ? "partner" : "store",
       consignment_partner_id: partnerSource ? $("#inConsignmentPartner").value : "",
       commission_rate: partnerSource ? (commissionInput === "" ? null : Number(commissionInput)) : null,
@@ -2455,10 +2800,25 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         const sku = $("#inSku").value.trim().slice(0, 50);
         return intakeCondition() === "PRE_LOVED" ? `${sku.slice(0, 45)}-1OF1` : sku;
       })(),
+      search_tags: intakeSearchTagsValue(),
+      fulfillment_notes: (($("#inFulfillment") && $("#inFulfillment").value) || "").trim(),
       ...garmentMedia
     };
     if (!vals.name) return toast("Item title is required", false);
     if (!vals.selling_price) return toast("Set a sell price first", false);
+    // Category schema: required specification fields block the save; photo
+    // angles are guidance only (shown in the readiness strip).
+    const schemaPayload = collectIntakeSchema();
+    if (schemaPayload && !schemaPayload.ok) {
+      intakeSchemaForm.focusFirstError();
+      return toast(schemaPayload.message, false);
+    }
+    if (schemaPayload) {
+      vals.subcategory = schemaPayload.subcategory;
+      vals.attributes = schemaPayload.attributes;
+      if (schemaPayload.projections.fabric && !isIntakeFieldVisible("inFabric")) vals.fabric = schemaPayload.projections.fabric;
+      if (schemaPayload.projections.size && !isIntakeFieldVisible("inSize")) vals.size = schemaPayload.projections.size;
+    }
     if (partnerSource) {
       if (!vals.consignment_partner_id) return toast("Choose the partner supplying this item", false);
       if (!garmentMedia.images || !garmentMedia.images.length) return toast("Partner items need at least one photo", false);
@@ -2494,7 +2854,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         $("#inFlawPhoto").value = "-1";
         $("#inSell").dataset.gradeSuggested = "0";
         buildMeasureFields($("#inMeasureSet").value);
+        if (intakeSchemaForm) intakeSchemaForm.reset();
+        intakeTagsEdited = false;
+        if ($("#inSearchTags")) $("#inSearchTags").value = "";
         intakeMedia.reset();
+        if (intakePhotoProtocol) intakePhotoProtocol.reset();
+        refreshIntakeSearchTags(true);
         $("#inStockLot").value = "";
         syncIntakeLotGradeUI();
         lockIntakeCost(false);
@@ -2508,7 +2873,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       // pre-save request has settled.
       loadIntakeStockLots(true);
       if (printAfter && window.GarmentTools) await GarmentTools.openTag(p.id);
-    } catch (err) { toast(err.message, false); }
+    } catch (err) {
+      // The server re-validates the schema; point staff at the exact inputs.
+      const fieldErrors = err && err.data && err.data.field_errors;
+      if (fieldErrors && intakeSchemaForm && intakeSchemaForm.showErrors(fieldErrors)) intakeSchemaForm.focusFirstError();
+      toast(err.message, false);
+    }
     finally { intakeSaving = false; intakeMedia.setLocked(false); saveButtons.forEach(button => { button.disabled = intakeMedia.busy; }); paintTag(); }
   }
 
@@ -5136,18 +5506,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         care_notes: $("#mpCare").value.trim(),
         measurements: textToMeasurements($("#mpMeasure").value),
         flaw_notes: $("#mpFlaws").value.trim(),
-        flaw_photo_index: Number($("#mpFlawPhoto").value)
+        flaw_photo_index: Number($("#mpFlawPhoto").value),
+        // Empty list asks the server to regenerate tags from the record.
+        search_tags: ($("#mpSearchTags").value || "").split(",").map(tag => tag.trim()).filter(Boolean),
+        fulfillment_notes: $("#mpFulfillment").value.trim()
       };
       if (!vals.name) return toast("Name required", false);
+      const editing = btnSaveProd.dataset.saveProd ? DB.getProduct(btnSaveProd.dataset.saveProd) : null;
+      const modalSchema = collectModalSchema(editing);
+      if (modalSchema && modalSchema.error) return toast(modalSchema.error, false);
+      if (modalSchema) {
+        vals.subcategory = modalSchema.subcategory;
+        vals.attributes = modalSchema.attributes;
+        vals.measurements = modalSchema.measurements;
+        const sizeWrap = $("#mpSize").closest(".field"), fabricWrap = $("#mpFabric").closest(".field");
+        if (sizeWrap && sizeWrap.hidden) vals.size = modalSchema.projections.size || (editing && editing.size) || "-";
+        if (fabricWrap && fabricWrap.hidden) vals.fabric = modalSchema.projections.fabric || "";
+      }
       modalBox._mediaSaving = true;
       const editor = modalBox._mediaEditor;
       editor.setLocked(true); setButtonBusy(btnSaveProd, true, "Saving…");
       try {
-        if (btnSaveProd.dataset.saveProd) { await DB.updateProduct(btnSaveProd.dataset.saveProd, vals); toast("Item updated — live everywhere"); }
+        if (btnSaveProd.dataset.saveProd) {
+          await DB.updateProduct(btnSaveProd.dataset.saveProd, vals);
+          toast(modalSchema && modalSchema.missing ? `Item updated — ${modalSchema.missing} required category detail${modalSchema.missing === 1 ? "" : "s"} still to fill` : "Item updated — live everywhere");
+        }
         else { const p = await DB.addProduct(vals); toast(`Added ${p.name} · ${p.sku}`); }
         editor.markSaved(); modalBox._mediaSaving = false;
         closeModal();
-      } catch (err) { toast(err.message, false); }
+      } catch (err) {
+        const fieldErrors = err && err.data && err.data.field_errors;
+        if (fieldErrors && modalBox._schemaForm && modalBox._schemaForm.showErrors(fieldErrors)) modalBox._schemaForm.focusFirstError();
+        toast(err.message, false);
+      }
       finally { modalBox._mediaSaving = false; editor.setLocked(false); setButtonBusy(btnSaveProd, false); }
       return;
     }

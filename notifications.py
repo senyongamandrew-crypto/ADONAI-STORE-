@@ -72,9 +72,38 @@ def recent_events(limit=HISTORY_LIMIT, *, session=None):
     if session is None:
         with get_db() as db:
             return recent_events(limit, session=db)
-    return [row.to_dict() for row in session.query(NotificationEvent).order_by(
+    return [row.to_dict() for row in session.query(NotificationEvent).filter(
+        NotificationEvent.deleted_at.is_(None),
+    ).order_by(
         NotificationEvent.created_at.desc(), NotificationEvent.id.desc(),
     ).limit(limit).all()]
+
+
+DELETE_BATCH_LIMIT = 200
+
+
+def delete_events(ids, *, staff=None, session=None):
+    """Permanently remove alerts from the bell on every device.
+
+    Only the notification is removed; the order, sale, stock or expense it
+    describes is never touched. Rows become tombstones (``deleted_at``) so
+    ``backfill_history`` cannot recreate them on the next deployment.
+    Returns the number of alerts that were deleted by this call.
+    """
+    clean = []
+    for value in ids or []:
+        if isinstance(value, str) and 0 < len(value) <= 64 and value not in clean:
+            clean.append(value)
+    clean = clean[:DELETE_BATCH_LIMIT]
+    if not clean:
+        return 0
+    if session is None:
+        with get_db() as db:
+            return delete_events(clean, staff=staff, session=db)
+    who = str((staff or {}).get("name") or (staff or {}).get("id") or "staff")[:120]
+    return session.query(NotificationEvent).filter(
+        NotificationEvent.id.in_(clean), NotificationEvent.deleted_at.is_(None),
+    ).update({"deleted_at": datetime.utcnow(), "deleted_by": who}, synchronize_session=False)
 
 
 def backfill_history(session):

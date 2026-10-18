@@ -342,6 +342,31 @@ class NotificationTests(unittest.TestCase):
             self.assertEqual(self.request("GET", "/api/notifications")[0], 401)
             self.assertEqual(self.request("POST", "/api/notifications/ticket", {})[0], 401)
 
+    def test_permanent_delete_removes_alerts_everywhere_and_backfill_never_restores_them(self):
+        product = self.product()
+        other = notifications.broadcast_event("LOW_STOCK", "Stock alert", "keep me")
+        intake = next(event for event in self.history() if event["payload"].get("product_id") == product["id"])
+        status, data = self.request("POST", "/api/notifications/delete", {"ids": [intake["id"], "notif_missing", 7]})
+        self.assertEqual(status, 200, data)
+        self.assertEqual(data["deleted"], 1)
+        ids = {event["id"] for event in self.history()}
+        self.assertNotIn(intake["id"], ids)
+        self.assertIn(other["id"], ids, "only the selected alerts are deleted")
+        with get_db() as session:
+            self.assertIsNotNone(session.get(Product, product["id"]), "the product itself is never touched")
+            row = session.get(NotificationEvent, intake["id"])
+            self.assertIsNotNone(row.deleted_at, "kept as a tombstone")
+            notifications.backfill_history(session)
+        self.assertNotIn(intake["id"], {event["id"] for event in self.history()}, "redeploy backfill cannot resurrect it")
+        # Deleting again is harmless; bad requests are rejected.
+        self.assertEqual(self.request("POST", "/api/notifications/delete", {"ids": [intake["id"]]})[1]["deleted"], 0)
+        self.assertEqual(self.request("POST", "/api/notifications/delete", {"ids": []})[0], 400)
+        self.assertEqual(self.request("POST", "/api/notifications/delete", {"ids": ["x"] * 201})[0], 400)
+        self.assertEqual(self.request("POST", "/api/notifications/delete", {})[0], 400)
+        with mock.patch.dict(os.environ, {"ADONAI_REQUIRE_STAFF_AUTH": "1"}):
+            self.assertEqual(self.request("POST", "/api/notifications/delete", {"ids": [other["id"]]})[0], 401)
+        self.assertIn(other["id"], {event["id"] for event in self.history()})
+
     def test_every_business_broadcast_uses_its_existing_transaction(self):
         tree = ast.parse((ROOT / "api.py").read_text())
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)

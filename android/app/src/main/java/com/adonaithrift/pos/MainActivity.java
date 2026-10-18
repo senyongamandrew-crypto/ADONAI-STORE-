@@ -5,7 +5,10 @@ import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.app.AlertDialog;
+import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.provider.Settings;
 import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -33,6 +36,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.webkit.WebViewAssetLoader;
 
@@ -59,6 +63,10 @@ public class MainActivity extends AppCompatActivity {
     private static final int CAMERA_REQUEST_CODE = 1002;
     private static final int EXPORT_SAVE_REQUEST_CODE = 1003;
     private static final int RIDER_PERMISSION_REQUEST_CODE = 1004;
+    private static final int STORE_ALERT_PERMISSION_REQUEST_CODE = 1005;
+    // Heads-up store alerts: new orders, customer messages and store changes.
+    private static final String STORE_ALERT_CHANNEL = "store-alerts";
+    private static final String STORE_ALERT_VIEW = "store_alert_view";
     private static final String RIDER_URL = "https://" + APP_ASSET_HOST + "/assets/public/rider.html";
     private static final long MAX_EXPORT_BYTES = 32L * 1024 * 1024;
     private static final String XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -78,7 +86,7 @@ public class MainActivity extends AppCompatActivity {
     private FileExport fileExport;
     private final ExecutorService riderWorker = Executors.newSingleThreadExecutor();
     private boolean riderStartPending = false;
-    private boolean activityResumed = false;
+    private volatile boolean activityResumed = false;
 
     private static final class FileExport {
         final String id, filename, mime;
@@ -110,7 +118,115 @@ public class MainActivity extends AppCompatActivity {
                 .build();
 
         setupWebView();
-        webView.loadUrl(getIntent().getBooleanExtra("rider_mode", false) || RiderApi.prefs(this).getBoolean("rider_mode", false) ? RIDER_URL : POS_URL);
+        createStoreAlertChannel();
+        boolean riderMode = getIntent().getBooleanExtra("rider_mode", false) || RiderApi.prefs(this).getBoolean("rider_mode", false);
+        String alertUrl = storeAlertUrl(getIntent());
+        webView.loadUrl(riderMode ? RIDER_URL : (alertUrl != null ? alertUrl : POS_URL));
+    }
+
+    /* ------------------------------------------------------------------
+       Store alerts (notification bell → Android notification shade)
+       ------------------------------------------------------------------ */
+    private void createStoreAlertChannel() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        NotificationChannel channel = new NotificationChannel(STORE_ALERT_CHANNEL, "Store alerts", NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("New orders, customer messages and store changes from the notification bell.");
+        channel.enableVibration(true);
+        channel.setLockscreenVisibility(android.app.Notification.VISIBILITY_PRIVATE);
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) manager.createNotificationChannel(channel);
+    }
+
+    private String storeAlertPermissionState() {
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        boolean channelOn = Build.VERSION.SDK_INT < 26 || manager == null || manager.getNotificationChannel(STORE_ALERT_CHANNEL) == null
+                || manager.getNotificationChannel(STORE_ALERT_CHANNEL).getImportance() != NotificationManager.IMPORTANCE_NONE;
+        boolean runtime = Build.VERSION.SDK_INT < 33
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+        if (runtime && channelOn && NotificationManagerCompat.from(this).areNotificationsEnabled()) return "granted";
+        boolean asked = getSharedPreferences("adonai_store_alerts", MODE_PRIVATE).getBoolean("asked", false);
+        if (Build.VERSION.SDK_INT >= 33 && !runtime && !asked) return "default";
+        return "denied";
+    }
+
+    private void notifyStoreAlertPermission() {
+        runOnUiThread(() -> {
+            if (webView == null || !trustedAppPage || riderPageActive || isFinishing()) return;
+            webView.evaluateJavascript("window.__adonaiStoreAlertPermission && window.__adonaiStoreAlertPermission("
+                    + JSONObject.quote(storeAlertPermissionState()) + ");", null);
+        });
+    }
+
+    private void openStoreAlertSettingsScreen() {
+        Intent settings;
+        if (Build.VERSION.SDK_INT >= 26) {
+            settings = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+        } else {
+            settings = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()));
+        }
+        try { startActivity(settings.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
+    }
+
+    /** Admin workspace a tapped alert should open, or null for a normal launch. */
+    @Nullable
+    private String storeAlertUrl(@Nullable Intent intent) {
+        if (intent == null) return null;
+        String view = intent.getStringExtra(STORE_ALERT_VIEW);
+        if (view == null) return null;
+        if (view.isEmpty()) return POS_URL;
+        if (!view.matches("[a-z]{1,20}")) return null;
+        return "https://" + APP_ASSET_HOST + "/assets/public/admin.html?view=" + view;
+    }
+
+    private boolean postStoreAlert(String json) {
+        try {
+            JSONObject data = new JSONObject(json);
+            String id = data.optString("id", "alert");
+            if (!id.matches("[A-Za-z0-9_.:-]{1,80}")) return false;
+            boolean foreground = data.optBoolean("foreground", false);
+            // The bell already shows an in-app pop-up while the POS is on screen.
+            if (activityResumed && !foreground) return false;
+            if (!"granted".equals(storeAlertPermissionState())) return false;
+            String title = data.optString("title", "Adonai Store");
+            String body = data.optString("body", "");
+            if (title.length() > 120) title = title.substring(0, 120);
+            if (body.length() > 400) body = body.substring(0, 400);
+            String view = data.optString("view", "");
+            if (!view.matches("[a-z]{0,20}")) view = "";
+            String type = data.optString("type", "");
+            boolean urgent = data.optBoolean("urgent", false);
+
+            Intent open = new Intent(this, MainActivity.class)
+                    .setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    .putExtra(STORE_ALERT_VIEW, view);
+            PendingIntent tap = PendingIntent.getActivity(this, id.hashCode(), open,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            // Lock screen shows only a neutral line; names and amounts stay private.
+            android.app.Notification publicVersion = new NotificationCompat.Builder(this, STORE_ALERT_CHANNEL)
+                    .setSmallIcon(android.R.drawable.ic_popup_reminder)
+                    .setContentTitle("Adonai Store")
+                    .setContentText("New store activity").build();
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, STORE_ALERT_CHANNEL)
+                    .setSmallIcon("NEW_MESSAGE".equals(type) ? android.R.drawable.stat_notify_chat : android.R.drawable.ic_popup_reminder)
+                    .setContentTitle(title)
+                    .setContentText(body)
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
+                    .setPriority(urgent ? NotificationCompat.PRIORITY_HIGH : NotificationCompat.PRIORITY_DEFAULT)
+                    .setCategory("NEW_MESSAGE".equals(type) ? NotificationCompat.CATEGORY_MESSAGE : NotificationCompat.CATEGORY_EVENT)
+                    .setDefaults(NotificationCompat.DEFAULT_ALL)
+                    .setAutoCancel(true)
+                    .setContentIntent(tap)
+                    .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+                    .setPublicVersion(publicVersion)
+                    .setWhen(System.currentTimeMillis())
+                    .setShowWhen(true);
+            NotificationManagerCompat.from(this).notify("store-alert", id.hashCode(), builder.build());
+            return true;
+        } catch (SecurityException e) {
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -239,6 +355,7 @@ public class MainActivity extends AppCompatActivity {
                 RiderApi.status(this,"error","Allow Location and notifications to start visible duty tracking. Approximate location may be less accurate.");
             } else maybeStartRiderService();
         }
+        if (requestCode == STORE_ALERT_PERMISSION_REQUEST_CODE) notifyStoreAlertPermission();
         if (requestCode == CAMERA_REQUEST_CODE && pendingCameraRequest != null) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 grantPendingCamera();
@@ -283,11 +400,15 @@ public class MainActivity extends AppCompatActivity {
         catch (Exception e) { RiderApi.status(this,"error","Could not start visible tracking. Reopen the rider app and check phone permissions."); }
     }
 
-    @Override protected void onResume() { super.onResume(); activityResumed=true; maybeStartRiderService(); }
+    @Override protected void onResume() { super.onResume(); activityResumed=true; maybeStartRiderService(); notifyStoreAlertPermission(); }
     @Override protected void onPause() { activityResumed=false; super.onPause(); }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent); setIntent(intent);
         if (intent.getBooleanExtra("rider_mode",false) && webView!=null) webView.loadUrl(RIDER_URL);
+        else if (webView!=null && !RiderApi.prefs(this).getBoolean("rider_mode",false)) {
+            String alertUrl = storeAlertUrl(intent);
+            if (alertUrl != null) webView.loadUrl(alertUrl);
+        }
     }
 
     private boolean handleUrlNavigation(String url) {
@@ -655,6 +776,45 @@ public class MainActivity extends AppCompatActivity {
                 tagPrintView.loadDataWithBaseURL("https://" + APP_ASSET_HOST + "/",
                         html, "text/html", "UTF-8", null);
             });
+        }
+
+        /* Store alerts for the POS / Admin pages (never the rider page). */
+        @JavascriptInterface
+        public String storeAlertPermission() {
+            if (!trustedAppPage || riderPageActive) return "denied";
+            return storeAlertPermissionState();
+        }
+
+        @JavascriptInterface
+        public void requestStoreAlertPermission() {
+            if (!trustedAppPage || riderPageActive) return;
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                        && !getSharedPreferences("adonai_store_alerts", MODE_PRIVATE).getBoolean("asked", false)) {
+                    getSharedPreferences("adonai_store_alerts", MODE_PRIVATE).edit().putBoolean("asked", true).apply();
+                    ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, STORE_ALERT_PERMISSION_REQUEST_CODE);
+                } else if (!"granted".equals(storeAlertPermissionState())) {
+                    openStoreAlertSettingsScreen();
+                } else notifyStoreAlertPermission();
+            });
+        }
+
+        @JavascriptInterface
+        public void openStoreAlertSettings() {
+            if (!trustedAppPage || riderPageActive) return;
+            runOnUiThread(MainActivity.this::openStoreAlertSettingsScreen);
+        }
+
+        @JavascriptInterface
+        public boolean storeAppVisible() {
+            return activityResumed;
+        }
+
+        @JavascriptInterface
+        public boolean showStoreAlert(String json) {
+            if (!trustedAppPage || riderPageActive || json == null || json.length() > 4096) return false;
+            return postStoreAlert(json);
         }
 
         @JavascriptInterface

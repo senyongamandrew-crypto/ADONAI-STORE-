@@ -89,7 +89,7 @@ async function main() {
     assert.equal(intake.doc.querySelector("#garmentTagDialog .gt-tag-price"), null, "no price is shown on the physical tag");
     const cleanTag = intake.doc.querySelector("#garmentTagDialog .gt-hangtag");
     assert.equal(cleanTag.children.length, 5, "only business, garment, barcode, readable code and website");
-    assert.equal(cleanTag.querySelector(".gt-tag-website").textContent, "adonai-store.onrender.com");
+    assert.equal(cleanTag.querySelector(".gt-tag-website").textContent, "adonaithrift-store.online");
     assert.doesNotMatch(cleanTag.textContent, /UGX|1OF1|one.of.one|pre.loved|vintage|sample|not for sale|printer test|no catalog item|Size|Green/i);
     assert(intake.doc.querySelector("#garmentTagDialog .gt-tag-bars svg rect"));
     assert(intake.doc.querySelector("#recentTagged [data-print-tag]"));
@@ -166,7 +166,7 @@ async function main() {
     assert.equal(website({ website_url: "https://www.adonaistore.com/" }), "adonaistore.com");
     assert.equal(website({ app_url: "https://shop.example/ug/" }), "shop.example/ug");
     for (const url of ["https://10000-sandbox.e2b.app/", "http://localhost:10000/", "https://appassets.androidplatform.net/", "https://user:secret@shop.example/", "javascript:alert(1)"]) {
-      assert.equal(website({ website_url: url }), "adonai-store.onrender.com", "never print native, preview, credential or invalid URLs");
+      assert.equal(website({ website_url: url }), "adonaithrift-store.online", "never print native, preview, credential or invalid URLs");
     }
     await layout.win.GarmentTools.openTag(PRODUCT.id);
     assert.equal(layout.doc.querySelector("#gtPrintButton").disabled, true, "long codes cannot be squeezed into unreadable small labels");

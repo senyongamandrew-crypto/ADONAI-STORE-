@@ -27,8 +27,10 @@ import media
 import exports
 import dispatch
 from notifications import (
+    DELETE_BATCH_LIMIT,
     LOW_STOCK_THRESHOLD,
     broadcast_event,
+    delete_events,
     issue_stream_ticket,
     recent_events,
 )
@@ -75,6 +77,9 @@ from models import (
     normalize_measurements,
     slugify,
 )
+
+import catalog_schemas
+from catalog_schemas import SchemaValidationError
 
 logger = logging.getLogger("adonai.api")
 
@@ -632,6 +637,90 @@ def apply_pdp_fields(prod, body: dict) -> None:
         except (TypeError, ValueError):
             index = -1
         prod.flaw_photo_index = index if 0 <= index <= 11 else -1
+
+
+def schema_error_response(exc: "SchemaValidationError"):
+    """400 payload that tells the intake form exactly which inputs to fix."""
+    return json_response({"ok": False, "error": str(exc), "field_errors": exc.field_errors}, status=400)
+
+
+def _condition_value(prod_or_value) -> str:
+    value = getattr(prod_or_value, "item_condition", prod_or_value)
+    return value.value if isinstance(value, ItemCondition) else str(value or "")
+
+
+def apply_catalog_schema_result(prod, result: dict, body: dict) -> None:
+    """Persist a normalized schema result and its legacy-column projections.
+
+    Schema fields are authoritative for the columns they project into, so a
+    necklace's "Metal / material" select also fills `fabric`, a shoe's tagged
+    size fills `size`, and garment / shoe flat-lay measurements are converted
+    to inches for the existing PDP measurement card.
+    """
+    if result.get("subcategory") is not None:
+        prod.subcategory = result["subcategory"] or None
+    prod.attributes = result.get("attributes") or {}
+    projections = result.get("projections") or {}
+    if projections.get("fabric"):
+        prod.fabric = projections["fabric"]
+    if projections.get("size"):
+        prod.size = projections["size"]
+    if projections.get("measurements"):
+        merged = dict(prod.measurements or {})
+        merged.update(projections["measurements"])
+        prod.measurements = merged
+
+
+def apply_catalog_copy_fields(prod, body: dict, *, refresh_tags: bool) -> None:
+    """Search tags (edited or automated) and the localized pickup note."""
+    if "fulfillment_notes" in body:
+        prod.fulfillment_notes = clean_multiline_text(body.get("fulfillment_notes"), 600)
+    supplied = catalog_schemas.clean_tags(body.get("search_tags")) if "search_tags" in body else None
+    if supplied:
+        prod.search_tags = supplied
+    elif supplied is not None or refresh_tags or not prod.search_tags:
+        prod.search_tags = catalog_schemas.auto_search_tags(
+            category=prod.category, subcategory=prod.subcategory or "", brand=prod.brand or "",
+            color=prod.color or "", item_condition=_condition_value(prod), attributes=prod.attribute_record,
+        )
+
+
+def update_catalog_schema(prod, body: dict) -> bool:
+    """Re-validate category attributes on an edit. Returns True if touched.
+
+    * New attributes are validated against the (possibly new) category pair;
+      a record that was already complete may not regress to incomplete.
+    * A category / sub-category / condition change without new attributes
+      re-checks the stored record: same form → hidden fields are dropped;
+      different form → the stale record is cleared rather than mislabelled.
+    """
+    keys = ("attributes", "subcategory", "category", "item_condition", "inventory_type")
+    if not any(key in body for key in keys):
+        return False
+    record = prod.attribute_record
+    subcategory = clean_text(body.get("subcategory"), 100) if "subcategory" in body else (prod.subcategory or "")
+    if "subcategory" not in body and subcategory not in catalog_schemas.subcategories_for(prod.category):
+        subcategory = ""  # the stored sub-category belonged to the previous category
+    condition = _condition_value(prod)
+    if "attributes" in body:
+        result = catalog_schemas.normalize_attributes(
+            body.get("attributes") or {}, prod.category, subcategory, condition,
+            enforce_required=bool(record.get("complete")),
+        )
+        apply_catalog_schema_result(prod, result, body)
+        return True
+    key, _, resolved_sub = catalog_schemas.resolve(prod.category, subcategory)
+    prod.subcategory = resolved_sub or (subcategory or None)
+    if record.get("values"):
+        if key != record.get("schema_key"):
+            prod.attributes = {}
+        else:
+            try:
+                result = catalog_schemas.normalize_attributes(record, prod.category, resolved_sub, condition, enforce_required=False)
+                prod.attributes = result["attributes"]
+            except SchemaValidationError:
+                pass  # keep the stored record rather than silently discarding it
+    return True
 
 
 def parse_operator_datetime(value) -> datetime:
@@ -1835,6 +1924,19 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             ticket = issue_stream_ticket(staff_info)
             return json_response({"ok": True, "ticket": ticket, "expires_in": 60})
 
+        if clean_path == "/api/notifications/delete" and method == "POST":
+            # Bell inbox "Delete permanently": removes the alerts (never the
+            # orders/stock they describe) for every device. Managers/admins only.
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params, manager=True)
+            if auth_error:
+                return auth_error
+            ids = (body or {}).get("ids") if isinstance(body, dict) else None
+            if not isinstance(ids, list) or not ids or len(ids) > DELETE_BATCH_LIMIT:
+                return json_response({"ok": False, "error": f"Send 1–{DELETE_BATCH_LIMIT} notification ids."}, status=400)
+            with get_db() as session:
+                deleted = delete_events(ids, staff=staff_info, session=session)
+            return json_response({"ok": True, "deleted": deleted})
+
         if clean_path == "/api/notifications" and method == "GET":
             # Chronological alert history for the notification drawer.
             staff_info, auth_error = authenticated_or_response(headers, body, query_params)
@@ -2009,6 +2111,21 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 size_variants = body.get("size_variants") if isinstance(body.get("size_variants"), list) else []
                 color_variants = body.get("color_variants") if isinstance(body.get("color_variants"), list) else []
                 measurements = body.get("measurements") if isinstance(body.get("measurements"), dict) else {}
+                # Dynamic category schema: the category + sub-category pair
+                # resolves ONE form; its attributes are validated, hidden
+                # fields dropped and legacy columns projected server-side.
+                intake_category = clean_text(body.get("category", "Outerwear & Jackets"), 100) or "Outerwear & Jackets"
+                intake_subcategory = clean_text(body.get("subcategory", ""), 100)
+                if "attributes" in body:
+                    schema_result = catalog_schemas.normalize_attributes(
+                        body.get("attributes") or {}, intake_category, intake_subcategory, item_condition,
+                        enforce_required=True,
+                    )
+                else:
+                    _, _, resolved_sub = catalog_schemas.resolve(intake_category, intake_subcategory) if intake_subcategory else (None, None, "")
+                    schema_result = {"subcategory": resolved_sub or None, "attributes": {}, "projections": {}}
+            except SchemaValidationError as exc:
+                return schema_error_response(exc)
             except ValueError as exc:
                 return json_response({"ok": False, "error": str(exc)}, status=400)
 
@@ -2132,6 +2249,8 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     session, prod.name, sku, pid, clean_text(body.get("slug", ""), 200)
                 )
                 apply_pdp_fields(prod, body)
+                apply_catalog_schema_result(prod, schema_result, body)
+                apply_catalog_copy_fields(prod, body, refresh_tags=True)
                 session.add(prod)
                 session.flush()
                 try:
@@ -2313,6 +2432,14 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     supplied_images = body.get("images") or []
                     prod.images = [safe_image_url(u) for u in supplied_images if safe_image_url(u)][:12] if isinstance(supplied_images, list) else []
                 apply_pdp_fields(prod, body)
+                try:
+                    update_catalog_schema(prod, body)
+                except SchemaValidationError as exc:
+                    session.rollback()
+                    return schema_error_response(exc)
+                # Edits never overwrite curated tags; send search_tags: [] to
+                # ask the server to regenerate them from the current record.
+                apply_catalog_copy_fields(prod, body, refresh_tags=False)
                 if "slug" in body or "name" in body or not prod.slug:
                     prod.slug = unique_product_slug(
                         session, prod.name, prod.sku, prod.id, clean_text(body.get("slug", ""), 200)
@@ -2472,6 +2599,28 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
         # ----------------------------------------------------
         # 4. Categories API (Public)
         # ----------------------------------------------------
+        if clean_path == "/api/catalog/field-schemas" and method == "GET":
+            # Public, non-sensitive form definitions: the intake console, the
+            # Android console and storefront specification views all read the
+            # same category_field_schemas mirror. ?category=&subcategory=
+            # returns the one resolved form for that selection.
+            with get_db() as session:
+                doc = catalog_schemas.refresh_from_db(session, force=False)
+            category = clean_text(query_params.get("category", [""])[0], 100)
+            if not category:
+                return json_response(dict({"ok": True}, **catalog_schemas.public_document(doc)))
+            try:
+                key, schema, sub = catalog_schemas.resolve(category, clean_text(query_params.get("subcategory", [""])[0], 100), doc)
+            except SchemaValidationError as exc:
+                return schema_error_response(exc)
+            if not schema:
+                return json_response({"ok": False, "error": f"No intake form is registered for {category}"}, status=404)
+            return json_response({
+                "ok": True, "version": doc.get("version"), "category": category, "subcategory": sub,
+                "subcategories": catalog_schemas.subcategories_for(category, doc),
+                "schema_key": key, "schema": schema, "units": doc.get("units") or {},
+            })
+
         if clean_path == "/api/categories" and method == "GET":
             with get_db() as session:
                 cats = [c.to_dict() for c in session.query(Category).order_by(Category.sort_order.asc()).all()]

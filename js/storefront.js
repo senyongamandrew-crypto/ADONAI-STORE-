@@ -513,7 +513,10 @@
     const tokens = query.split(/\s+/).filter(Boolean);
     const searchable = [
       p.name, p.brand, p.color, p.category, p.demographic,
-      p.sku, p.barcode_id, p.size, p.condition, p.desc
+      p.sku, p.barcode_id, p.size, p.condition, p.desc,
+      // Category schema: sub-group + intake search tags ("nickel-free",
+      // "925 sterling silver", "lever-back") make specs findable.
+      p.subcategory, (Array.isArray(p.search_tags) ? p.search_tags : []).join(" ")
     ].join(" ").toLowerCase();
 
     return tokens.every(token => {

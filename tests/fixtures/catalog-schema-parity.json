@@ -1,0 +1,673 @@
+{
+ "note": "Generated from catalog_schemas.py; asserted by tests/catalog-schemas-engine.test.js and tests/test_category_field_schemas.py so the browser and server engines agree.",
+ "cases": [
+  {
+   "name": "stud earrings, extra garment key dropped",
+   "category": "Rings & Earrings",
+   "subcategory": "Stud Earrings",
+   "item_condition": "BRAND_NEW",
+   "brand": "Unbranded",
+   "color": "Silver",
+   "payload": {
+    "schema_key": "earrings",
+    "values": {
+     "length": {
+      "value": "8",
+      "unit": "mm"
+     },
+     "stud_depth": {
+      "value": 6,
+      "unit": "mm"
+     },
+     "pair_weight": {
+      "value": 1.8,
+      "unit": "g"
+     },
+     "primary_metal": "925 sterling silver",
+     "accent_material": "Cubic Zirconia",
+     "backing_type": "lever-back",
+     "nickel_free": "yes",
+     "chest": {
+      "value": 40,
+      "unit": "in"
+     }
+    }
+   },
+   "expected": {
+    "ok": true,
+    "values": {
+     "length": {
+      "value": 8.0,
+      "unit": "mm"
+     },
+     "stud_depth": {
+      "value": 6.0,
+      "unit": "mm"
+     },
+     "pair_weight": {
+      "value": 1.8,
+      "unit": "g"
+     },
+     "primary_metal": "925 Sterling Silver",
+     "accent_material": "Cubic Zirconia",
+     "backing_type": "Lever-Back",
+     "nickel_free": true
+    },
+    "inspection": {},
+    "errors": {},
+    "projections": {
+     "fabric": "925 Sterling Silver \u00b7 Cubic Zirconia"
+    },
+    "tags": [
+     "stud earrings",
+     "rings & earrings",
+     "silver",
+     "brand new",
+     "925 sterling silver",
+     "cubic zirconia",
+     "lever-back",
+     "nickel-free"
+    ],
+    "specifications": [
+     {
+      "section": "Dimensions & Units",
+      "key": "length",
+      "label": "Length",
+      "value": "8 mm"
+     },
+     {
+      "section": "Dimensions & Units",
+      "key": "stud_depth",
+      "label": "Stud depth (post length)",
+      "value": "6 mm"
+     },
+     {
+      "section": "Dimensions & Units",
+      "key": "pair_weight",
+      "label": "Total pair weight",
+      "value": "1.8 g"
+     },
+     {
+      "section": "Material & Metals",
+      "key": "primary_metal",
+      "label": "Primary metal / plating",
+      "value": "925 Sterling Silver"
+     },
+     {
+      "section": "Material & Metals",
+      "key": "accent_material",
+      "label": "Gemstone / accent material",
+      "value": "Cubic Zirconia"
+     },
+     {
+      "section": "Hardware & Fastenings",
+      "key": "backing_type",
+      "label": "Backing type",
+      "value": "Lever-Back"
+     },
+     {
+      "section": "Hypoallergenic & Safety Notices",
+      "key": "nickel_free",
+      "label": "Nickel-free status",
+      "value": "Nickel-free"
+     }
+    ]
+   }
+  },
+  {
+   "name": "earrings missing required",
+   "category": "Rings & Earrings",
+   "subcategory": "Hoop Earrings",
+   "item_condition": "BRAND_NEW",
+   "payload": {
+    "schema_key": "earrings",
+    "values": {
+     "length": {
+      "value": 8,
+      "unit": "mm"
+     }
+    }
+   },
+   "expected": {
+    "ok": false,
+    "errors": {
+     "primary_metal": "Primary metal / plating is required",
+     "backing_type": "Backing type is required",
+     "nickel_free": "Nickel-free status is required"
+    }
+   }
+  },
+  {
+   "name": "earrings in inches rejected",
+   "category": "Rings & Earrings",
+   "subcategory": "Stud Earrings",
+   "item_condition": "BRAND_NEW",
+   "payload": {
+    "schema_key": "earrings",
+    "values": {
+     "length": {
+      "value": 0.3,
+      "unit": "in"
+     },
+     "primary_metal": "Brass",
+     "backing_type": "Screw-Back",
+     "nickel_free": false
+    }
+   },
+   "expected": {
+    "ok": false,
+    "errors": {
+     "length": "Length must be recorded in mm"
+    }
+   }
+  },
+  {
+   "name": "dangle drops stud depth",
+   "category": "Rings & Earrings",
+   "subcategory": "Dangle Earrings",
+   "item_condition": "PRE_LOVED",
+   "brand": "Pandora",
+   "payload": {
+    "schema_key": "earrings",
+    "values": {
+     "length": {
+      "value": 35,
+      "unit": "mm"
+     },
+     "stud_depth": {
+      "value": 6,
+      "unit": "mm"
+     },
+     "primary_metal": "Titanium",
+     "backing_type": "Fish Hook (French Wire)",
+     "nickel_free": true
+    }
+   },
+   "expected": {
+    "ok": true,
+    "values": {
+     "length": {
+      "value": 35.0,
+      "unit": "mm"
+     },
+     "primary_metal": "Titanium",
+     "backing_type": "Fish Hook (French Wire)",
+     "nickel_free": true
+    },
+    "inspection": {},
+    "errors": {},
+    "projections": {
+     "fabric": "Titanium"
+    },
+    "tags": [
+     "dangle earrings",
+     "rings & earrings",
+     "pandora",
+     "pre-loved",
+     "titanium",
+     "fish hook (french wire)",
+     "nickel-free"
+    ],
+    "specifications": [
+     {
+      "section": "Dimensions & Units",
+      "key": "length",
+      "label": "Length",
+      "value": "35 mm"
+     },
+     {
+      "section": "Material & Metals",
+      "key": "primary_metal",
+      "label": "Primary metal / plating",
+      "value": "Titanium"
+     },
+     {
+      "section": "Hardware & Fastenings",
+      "key": "backing_type",
+      "label": "Backing type",
+      "value": "Fish Hook (French Wire)"
+     },
+     {
+      "section": "Hypoallergenic & Safety Notices",
+      "key": "nickel_free",
+      "label": "Nickel-free status",
+      "value": "Nickel-free"
+     }
+    ]
+   }
+  },
+  {
+   "name": "pre-loved chelsea boots",
+   "category": "Boots",
+   "subcategory": "Chelsea Boots",
+   "item_condition": "PRE_LOVED",
+   "brand": "Dr. Martens",
+   "color": "Black",
+   "payload": {
+    "schema_key": "footwear",
+    "values": {
+     "tagged_size": {
+      "value": "42",
+      "scale": "EU"
+     },
+     "insole_length": {
+      "value": 27,
+      "unit": "cm"
+     },
+     "shaft_height": {
+      "value": 14,
+      "unit": "cm"
+     },
+     "upper_material": "suede",
+     "fastening": "Elastic Gusset"
+    },
+    "inspection": {
+     "tread_wear": "Light wear",
+     "insole_compression": "Like new",
+     "heel_counter": "Like new",
+     "toebox_creasing": "Moderate wear"
+    }
+   },
+   "expected": {
+    "ok": true,
+    "values": {
+     "tagged_size": {
+      "value": "42",
+      "scale": "EU"
+     },
+     "insole_length": {
+      "value": 27.0,
+      "unit": "cm"
+     },
+     "shaft_height": {
+      "value": 14.0,
+      "unit": "cm"
+     },
+     "upper_material": "Suede",
+     "fastening": "Elastic Gusset"
+    },
+    "inspection": {
+     "tread_wear": "Light wear",
+     "insole_compression": "Like new",
+     "heel_counter": "Like new",
+     "toebox_creasing": "Moderate wear"
+    },
+    "errors": {},
+    "projections": {
+     "fabric": "Suede",
+     "size": "EU 42",
+     "measurements": {
+      "insole": 10.63
+     }
+    },
+    "tags": [
+     "chelsea boots",
+     "boots",
+     "dr. martens",
+     "black",
+     "pre-loved",
+     "suede",
+     "elastic gusset"
+    ],
+    "specifications": [
+     {
+      "section": "Dimensions & Sizing",
+      "key": "tagged_size",
+      "label": "Tagged size",
+      "value": "EU 42"
+     },
+     {
+      "section": "Dimensions & Sizing",
+      "key": "insole_length",
+      "label": "Insole length",
+      "value": "27 cm (10.6 in)"
+     },
+     {
+      "section": "Dimensions & Sizing",
+      "key": "shaft_height",
+      "label": "Shaft height",
+      "value": "14 cm (5.5 in)"
+     },
+     {
+      "section": "Upper & Sole Materials",
+      "key": "upper_material",
+      "label": "Upper material composition",
+      "value": "Suede"
+     },
+     {
+      "section": "Closure & Construction",
+      "key": "fastening",
+      "label": "Fastening system",
+      "value": "Elastic Gusset"
+     },
+     {
+      "section": "Condition Inspection Points",
+      "key": "inspection.tread_wear",
+      "label": "Tread depth & wear pattern",
+      "value": "Light wear"
+     },
+     {
+      "section": "Condition Inspection Points",
+      "key": "inspection.insole_compression",
+      "label": "Insole compression",
+      "value": "Like new"
+     },
+     {
+      "section": "Condition Inspection Points",
+      "key": "inspection.heel_counter",
+      "label": "Heel counter integrity",
+      "value": "Like new"
+     },
+     {
+      "section": "Condition Inspection Points",
+      "key": "inspection.toebox_creasing",
+      "label": "Creasing across toebox",
+      "value": "Moderate wear"
+     }
+    ]
+   }
+  },
+  {
+   "name": "boots inspection incomplete",
+   "category": "Boots",
+   "subcategory": "Ankle Boots",
+   "item_condition": "PRE_LOVED",
+   "payload": {
+    "schema_key": "footwear",
+    "values": {
+     "tagged_size": {
+      "value": "9",
+      "scale": "US"
+     },
+     "insole_length": {
+      "value": 26,
+      "unit": "cm"
+     },
+     "upper_material": "Canvas",
+     "fastening": "Lace-Up"
+    },
+    "inspection": {
+     "tread_wear": "Light wear",
+     "heel_counter": "Bogus"
+    }
+   },
+   "expected": {
+    "ok": false,
+    "errors": {
+     "inspection.insole_compression": "Insole compression must be rated",
+     "inspection.heel_counter": "Heel counter integrity: choose a listed rating",
+     "inspection.toebox_creasing": "Creasing across toebox must be rated"
+    }
+   }
+  },
+  {
+   "name": "pre-loved tee in cm",
+   "category": "Tops & Shirts",
+   "subcategory": "T-Shirts",
+   "item_condition": "PRE_LOVED",
+   "brand": "Uniqlo",
+   "payload": {
+    "schema_key": "tops",
+    "values": {
+     "chest": {
+      "value": 56,
+      "unit": "cm"
+     },
+     "length": {
+      "value": 70,
+      "unit": "cm"
+     },
+     "sleeve": {
+      "value": 9,
+      "unit": "in"
+     },
+     "material_composition": "100% Heavyweight Cotton",
+     "knit_weave": "Single Jersey",
+     "fit_silhouette": "Boxy"
+    }
+   },
+   "expected": {
+    "ok": true,
+    "values": {
+     "chest": {
+      "value": 56.0,
+      "unit": "cm"
+     },
+     "length": {
+      "value": 70.0,
+      "unit": "cm"
+     },
+     "sleeve": {
+      "value": 9.0,
+      "unit": "in"
+     },
+     "material_composition": "100% Heavyweight Cotton",
+     "knit_weave": "Single Jersey",
+     "fit_silhouette": "Boxy"
+    },
+    "inspection": {},
+    "errors": {},
+    "projections": {
+     "fabric": "100% Heavyweight Cotton",
+     "measurements": {
+      "chest": 22.05,
+      "length": 27.56,
+      "sleeve": 9.0
+     }
+    },
+    "tags": [
+     "t-shirts",
+     "tops & shirts",
+     "uniqlo",
+     "pre-loved",
+     "100% heavyweight cotton",
+     "single jersey",
+     "boxy"
+    ],
+    "specifications": [
+     {
+      "section": "Dimensions & Sizing",
+      "key": "chest",
+      "label": "Chest (pit-to-pit)",
+      "value": "56 cm (22 in)"
+     },
+     {
+      "section": "Dimensions & Sizing",
+      "key": "length",
+      "label": "Full length (shoulder to hem)",
+      "value": "70 cm (27.6 in)"
+     },
+     {
+      "section": "Dimensions & Sizing",
+      "key": "sleeve",
+      "label": "Sleeve length",
+      "value": "9 in (22.9 cm)"
+     },
+     {
+      "section": "Fabric & Construction",
+      "key": "material_composition",
+      "label": "Primary material composition",
+      "value": "100% Heavyweight Cotton"
+     },
+     {
+      "section": "Fabric & Construction",
+      "key": "knit_weave",
+      "label": "Fabric knit / weave type",
+      "value": "Single Jersey"
+     },
+     {
+      "section": "Fit & Design Details",
+      "key": "fit_silhouette",
+      "label": "Fit silhouette",
+      "value": "Boxy"
+     }
+    ]
+   }
+  },
+  {
+   "name": "necklace length out of range in inches",
+   "category": "Necklaces & Chains",
+   "subcategory": "Chains",
+   "item_condition": "BRAND_NEW",
+   "payload": {
+    "schema_key": "necklaces",
+    "values": {
+     "chain_length": {
+      "value": 500,
+      "unit": "in"
+     },
+     "chain_link_type": "Cuban",
+     "primary_metal": "Stainless Steel"
+    }
+   },
+   "expected": {
+    "ok": false,
+    "errors": {
+     "chain_length": "Chain length must be between 6 and 40 in"
+    }
+   }
+  },
+  {
+   "name": "clutch drops strap fields; pockets multiselect",
+   "category": "Bags & Handbags",
+   "subcategory": "Clutches & Evening Bags",
+   "item_condition": "BRAND_NEW",
+   "brand": "Custom / Handmade",
+   "payload": {
+    "schema_key": "bags",
+    "values": {
+     "height": {
+      "value": 12,
+      "unit": "cm"
+     },
+     "width": {
+      "value": 22,
+      "unit": "cm"
+     },
+     "depth": {
+      "value": 4,
+      "unit": "cm"
+     },
+     "strap_drop": {
+      "value": 50,
+      "unit": "cm"
+     },
+     "exterior_shell": "Straw / Raffia",
+     "pocket_structure": [
+      "card slots",
+      "Interior slip pockets"
+     ],
+     "main_compartments": "1"
+    }
+   },
+   "expected": {
+    "ok": true,
+    "values": {
+     "height": {
+      "value": 12.0,
+      "unit": "cm"
+     },
+     "width": {
+      "value": 22.0,
+      "unit": "cm"
+     },
+     "depth": {
+      "value": 4.0,
+      "unit": "cm"
+     },
+     "exterior_shell": "Straw / Raffia",
+     "main_compartments": 1,
+     "pocket_structure": [
+      "Card slots",
+      "Interior slip pockets"
+     ]
+    },
+    "inspection": {},
+    "errors": {},
+    "projections": {
+     "fabric": "Straw / Raffia"
+    },
+    "tags": [
+     "clutches & evening bags",
+     "bags & handbags",
+     "custom / handmade",
+     "brand new",
+     "straw / raffia"
+    ],
+    "specifications": [
+     {
+      "section": "Dimensions & Capacity",
+      "key": "height",
+      "label": "Height",
+      "value": "12 cm (4.7 in)"
+     },
+     {
+      "section": "Dimensions & Capacity",
+      "key": "width",
+      "label": "Width",
+      "value": "22 cm (8.7 in)"
+     },
+     {
+      "section": "Dimensions & Capacity",
+      "key": "depth",
+      "label": "Depth",
+      "value": "4 cm (1.6 in)"
+     },
+     {
+      "section": "Materials & Hardware",
+      "key": "exterior_shell",
+      "label": "Exterior body shell",
+      "value": "Straw / Raffia"
+     },
+     {
+      "section": "Compartments & Ergonomics",
+      "key": "main_compartments",
+      "label": "Main compartment count",
+      "value": "1"
+     },
+     {
+      "section": "Compartments & Ergonomics",
+      "key": "pocket_structure",
+      "label": "Pocket structure",
+      "value": "Card slots, Interior slip pockets"
+     }
+    ]
+   }
+  },
+  {
+   "name": "backpack fractional compartments rejected",
+   "category": "Bags & Handbags",
+   "subcategory": "Backpacks",
+   "item_condition": "BRAND_NEW",
+   "payload": {
+    "schema_key": "bags",
+    "values": {
+     "height": {
+      "value": 45,
+      "unit": "cm"
+     },
+     "width": {
+      "value": 30,
+      "unit": "cm"
+     },
+     "depth": {
+      "value": 15,
+      "unit": "cm"
+     },
+     "capacity": {
+      "value": 25,
+      "unit": "L"
+     },
+     "exterior_shell": "Cordura Nylon",
+     "main_compartments": 1.5
+    }
+   },
+   "expected": {
+    "ok": false,
+    "errors": {
+     "main_compartments": "Main compartment count must be a whole number"
+    }
+   }
+  }
+ ]
+}
