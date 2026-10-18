@@ -304,7 +304,6 @@ body.pdp-lightbox-open { overflow: hidden; }
 .measure-v { color: var(--pdp-slate-900); font-weight: 700; white-space: nowrap; }
 .measurements-note { font-size: 12px; color: var(--body); margin-top: 10px; }
 .measurements-foot { font-size: 11px; color: var(--pdp-slate-500); margin-top: 10px; }
-.measurements-card.empty p { font-size: 12.5px; color: var(--pdp-slate-500); margin-top: 6px; }
 
 /* ---------- flaw disclosure ---------- */
 .flaw-callout {

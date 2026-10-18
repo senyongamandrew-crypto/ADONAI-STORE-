@@ -312,17 +312,11 @@
 
   function measurementsCard() {
     const rows = K.measurementRows(product);
+    // A piece with no logged measurements simply has no measurements card.
+    // The old empty panel asked the shopper to message us on WhatsApp for
+    // numbers that were not on the page, so it is not shown at all.
+    if (!rows.length) return "";
     const note = K.measurementNote(product);
-    // Jewelry, bags and accessories carry their own unit-aware
-    // specifications; never show them an empty garment flat-lay card.
-    if (!rows.length && specificationRows().length) return "";
-    if (!rows.length) {
-      return `
-        <div class="measurements-card empty">
-          <h4>Exact Flat-Lay Measurements</h4>
-          <p>Measurements for this piece are not logged yet. Message us on WhatsApp and a staff member will measure it flat and send the exact numbers within minutes.</p>
-        </div>`;
-    }
     return `
       <div class="measurements-card">
         <div class="measurements-head">

@@ -158,7 +158,10 @@ assert.ok(/Free pickup at our Kampala store/.test(homepage),
 /* --------------------------------------- WhatsApp is still there, honestly */
 
 assert.ok(/missingWhatsApp/.test(productHtml), "an unavailable piece still offers to source a similar one");
-assert.ok(/measure it flat/.test(productJs), "an unmeasured piece still offers a WhatsApp measurement request");
+assert.ok(/pabWhatsApp/.test(productHtml) && /enquiryWhatsAppLink/.test(productJs),
+  "a sold-out piece still offers a WhatsApp enquiry from the mobile action bar");
+assert.equal(/measure it flat/.test(productJs), false,
+  "the product page no longer pitches a WhatsApp measurement request in an empty measurements panel");
 assert.ok(/Send WhatsApp Confirmation/.test(read("app.js")),
   "staff still send the order confirmation on WhatsApp from a real POS order");
 

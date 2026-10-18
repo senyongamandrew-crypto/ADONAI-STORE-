@@ -4,7 +4,7 @@
 
    Desktop (≥1024px): 45% media gallery · 30% specs · 25% sticky buy box
    Mobile  (≤1023px): swipeable carousel → pricing → badges → accordions
-                      → fixed bottom action bar (Cart + WhatsApp)
+                      → fixed bottom action bar (one order path: the cart)
    ============================================================ */
 (function () {
   "use strict";
@@ -98,7 +98,13 @@
      Desktop: vertical thumbnail strip + sticky main stage
      Mobile:  edge-to-edge swipeable carousel with counter + dots
      ============================================================ */
-  function angleLabel(index) { return index === 0 ? "Cover" : `Photo ${index + 1}`; }
+  // Intake maps photos to the category's angle protocol ("Macro front
+  // face", "Outsole tread"…); captions fall back to Cover / Photo N.
+  function angleLabel(index) {
+    const mapped = product && product.photo_angle_labels && product.photo_angle_labels[String(index)];
+    if (mapped) return index === 0 ? `Cover · ${mapped}` : mapped;
+    return index === 0 ? "Cover" : `Photo ${index + 1}`;
+  }
   const garmentVideo = () => product && product.video && product.video.url ? product.video : null;
   const galleryCount = () => photos.length + (garmentVideo() ? 1 : 0);
   const videoTime = () => `0:${String(Math.round(Number((garmentVideo() || {}).duration) || 0)).padStart(2, "0")}`;
@@ -270,16 +276,47 @@
   /* ============================================================
      RENDER — MIDDLE COLUMN: SPECS & STORYTELLING
      ============================================================ */
+  /* Category specifications captured on the dynamic intake schema
+     (category_field_schemas): grouped by section, units included. */
+  function specificationRows() {
+    return (Array.isArray(product.specifications) ? product.specifications : []).filter(row => row && row.label && row.value);
+  }
+
+  function specificationsCard() {
+    const rows = specificationRows().filter(row => !String(row.key || "").startsWith("inspection."));
+    if (!rows.length) return "";
+    const sections = [];
+    rows.forEach(row => {
+      let group = sections.find(entry => entry.title === row.section);
+      if (!group) sections.push(group = { title: row.section, rows: [] });
+      group.rows.push(row);
+    });
+    return `
+      <div class="pdp-specs-card" id="pdpSpecs">
+        <h4>Specifications${product.subcategory ? ` · ${esc(product.subcategory)}` : ""}</h4>
+        ${sections.map(group => `
+          <div class="pdp-specs-group">
+            ${group.title ? `<p class="pdp-specs-title">${esc(group.title)}</p>` : ""}
+            <dl class="pdp-specs-grid">
+              ${group.rows.map(row => `<div><dt>${esc(row.label)}</dt><dd>${esc(row.value)}</dd></div>`).join("")}
+            </dl>
+          </div>`).join("")}
+        <p class="measurements-foot">Measured and recorded by hand on this exact piece at intake.</p>
+      </div>`;
+  }
+
+  function inspectionList() {
+    const rows = specificationRows().filter(row => String(row.key || "").startsWith("inspection."));
+    return rows.length ? `<ul class="pdp-bullets pdp-inspection">${rows.map(row => `<li><strong>${esc(row.label)}:</strong> ${esc(row.value)}</li>`).join("")}</ul>` : "";
+  }
+
   function measurementsCard() {
     const rows = K.measurementRows(product);
+    // A piece with no logged measurements simply has no measurements card.
+    // The old empty panel asked the shopper to message us on WhatsApp for
+    // numbers that were not on the page, so it is not shown at all.
+    if (!rows.length) return "";
     const note = K.measurementNote(product);
-    if (!rows.length) {
-      return `
-        <div class="measurements-card empty">
-          <h4>Exact Flat-Lay Measurements</h4>
-          <p>Measurements for this piece are not logged yet. Message us on WhatsApp and a staff member will measure it flat and send the exact numbers within minutes.</p>
-        </div>`;
-    }
     return `
       <div class="measurements-card">
         <div class="measurements-head">
@@ -314,6 +351,12 @@
     const story = String(product.desc || "").trim();
     const staffNote = String(product.staff_notes || "").trim();
     const size = product.size && product.size !== "-" ? product.size : "Standard";
+    const hasSpecs = specificationRows().length > 0;
+    const fulfillment = String(product.fulfillment_notes || "").trim();
+    const categoryLabel = [product.category, product.subcategory].filter(Boolean).join(" · ");
+    const stockType = product.is_consignment
+      ? "Partner · Vintage"
+      : product.item_condition === "BRAND_NEW" ? "Brand New" : "Vintage / Pre-Loved";
 
     $("#pdpDetail").innerHTML = `
       <p class="pdp-eyebrow">${esc(product.brand || "Vintage / Unbranded")}</p>
@@ -336,13 +379,16 @@
       </div>
 
       <dl class="pdp-highlights">
-        <div><dt>Tagged size</dt><dd>${esc(size)}</dd></div>
+        ${size !== "Standard" || !hasSpecs ? `<div><dt>Tagged size</dt><dd>${esc(size)}</dd></div>` : ""}
         <div><dt>Colour / wash</dt><dd>${esc(product.color || "As photographed")}</dd></div>
-        <div><dt>Category</dt><dd>${esc(product.category || "—")}</dd></div>
+        <div><dt>Category</dt><dd>${esc(categoryLabel || "—")}</dd></div>
+        <div><dt>Stock type</dt><dd>${esc(stockType)}</dd></div>
         <div><dt>Fits</dt><dd>${esc(product.demographic || "Unisex")}</dd></div>
-        ${fabric ? `<div><dt>Fabric composition</dt><dd>${esc(fabric)}</dd></div>` : ""}
+        ${fabric ? `<div><dt>${hasSpecs ? "Material" : "Fabric composition"}</dt><dd>${esc(fabric)}</dd></div>` : ""}
         <div><dt>Availability</dt><dd>${esc(stock.label)}</dd></div>
       </dl>
+
+      ${specificationsCard()}
 
       ${measurementsCard()}
 
@@ -386,6 +432,7 @@
             ${flaw.hasFlaws
               ? `<p>${esc(flaw.notes)}</p>`
               : `<p>No flaws were recorded during intake inspection.</p>`}
+            ${inspectionList()}
             <p class="pdp-muted">Grading scale: BNWT (tags attached) · Grade A (like new) · Grade B (gentle wear) · Vintage (collector piece valued for its era).</p>
           </div>
         </details>
@@ -401,6 +448,7 @@
         <details class="pdp-acc">
           <summary>Delivery, pickup &amp; returns<span class="acc-sign" aria-hidden="true"></span></summary>
           <div class="pdp-acc-body">
+            ${fulfillment ? `<p class="pdp-store-note"><strong>For this item:</strong> ${esc(fulfillment)}</p>` : ""}
             <ul class="pdp-bullets">
               <li><strong>Central Region (Kampala, Wakiso, Mukono):</strong> delivery is targeted for the same day when your order is confirmed by 4:00 PM; later orders target the next available delivery day.</li>
               <li><strong>Regional Uganda:</strong> dispatch is targeted within one business day after confirmation, with 1–3 business days transit to major towns; remote routes may take longer and are confirmed before dispatch.</li>
@@ -447,9 +495,15 @@
     const stock = K.stockState(product);
     const price = K.displayPrice(product);
     const estimate = K.deliveryEstimate(zone, settings);
-    const waLink = stock.sold
-      ? K.enquiryWhatsAppLink(product, settings)
-      : K.generateWhatsAppLink(product, settings, { zone });
+    /* Ordering has exactly ONE path: Add to Cart → checkout → the order is
+       written to the database, reserves the piece and appears in the POS.
+       The previous "Order via WhatsApp" button next to it wrote nothing at
+       all — no order, no stock reservation — so a one-of-one piece could be
+       promised to two shoppers at once and the sale would only exist once a
+       staff member re-typed it. WhatsApp is kept only where it is NOT an
+       order: a piece that is gone (sourcing a similar one) and a question
+       about measurements that were never logged. */
+    const waEnquiry = K.enquiryWhatsAppLink(product, settings);
 
     $("#pdpBuyBox").innerHTML = `
       <div class="pdp-buybox">
@@ -467,10 +521,11 @@
           <button class="pdp-btn primary block" id="buyCart" type="button" ${stock.sold ? "disabled" : ""}>
             ${stock.sold ? "Sold — no longer available" : "Add to Cart"}
           </button>
-          <a class="pdp-btn whatsapp block ${stock.sold ? "muted" : ""}" id="buyWhatsApp" href="${esc(waLink)}" target="_blank" rel="noopener">
+          ${stock.sold ? `
+          <a class="pdp-btn outline block" id="buyEnquiry" href="${esc(waEnquiry)}" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.6 0-3.1-.4-4.4-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Z"/><path d="M17.5 14.4c-.3-.2-1.7-.9-2-1-.3-.1-.5-.1-.7.1-.2.3-.7 1-.9 1.2-.2.2-.3.2-.6.1-.3-.2-1.3-.5-2.4-1.5-.9-.8-1.5-1.8-1.6-2.1-.2-.3 0-.4.1-.6l.5-.5c.1-.2.2-.3.3-.5 0-.2 0-.4-.1-.5 0-.2-.7-1.6-.9-2.2-.2-.5-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.5s1.1 2.9 1.2 3.1c.2.2 2.1 3.2 5 4.4.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 2-1.4.2-.7.2-1.3.2-1.4-.1-.2-.3-.2-.6-.3Z"/></svg>
-            ${stock.sold ? "Ask for something similar" : "Order via WhatsApp"}
-          </a>
+            Ask for something similar
+          </a>` : ""}
         </div>
 
         <div class="buybox-delivery">
@@ -496,7 +551,7 @@
           <ul class="trust-list">
             <li>✓ Inspect the piece before you pay</li>
             <li>✓ <a href="/return-policy">48-hour defect / grading return policy</a></li>
-            <li>✓ Real-time WhatsApp rider tracking</li>
+            <li>✓ Delivery updates on WhatsApp</li>
           </ul>
         </div>
       </div>`;
@@ -526,10 +581,16 @@
     cartBtn.disabled = stock.sold;
     cartBtn.textContent = stock.sold ? "Sold Out" : "Add to Cart";
 
+    /* WhatsApp appears in this bar only for a sold piece, where there is no
+       order left to place. It is never a second "order" button competing
+       with the cart on a piece a shopper can actually buy. */
     const wa = $("#pabWhatsApp");
-    wa.href = stock.sold
-      ? K.enquiryWhatsAppLink(product, settings)
-      : K.generateWhatsAppLink(product, settings, { zone });
+    if (wa) {
+      wa.hidden = !stock.sold;
+      if (stock.sold) wa.href = K.enquiryWhatsAppLink(product, settings);
+    }
+    const barButtons = bar.querySelector(".pdp-actionbar-btns");
+    if (barButtons) barButtons.classList.toggle("single", !stock.sold);
   }
 
   /* ============================================================
@@ -543,14 +604,12 @@
 
     $("#pdpRelatedGrid").innerHTML = list.map(item => {
       const image = K.productImages(item)[0];
-      const grade = K.gradeFor(item);
       return `
         <a class="rel-card" href="${esc(K.productPath(item))}">
           <div class="rel-media">
             ${image
               ? K.pictureHTML(image, { alt: item.name, sizes: "(min-width: 1024px) 220px, 45vw", width: 400, height: 500 })
               : `<span class="rel-noimg">No photo</span>`}
-            <span class="rel-grade" style="--grade:${grade.color}">${esc(grade.short)}</span>
           </div>
           <p class="rel-name">${esc(item.name)}</p>
           <p class="rel-meta">${esc(item.size && item.size !== "-" ? "Size " + item.size : "One size")} · ${esc(item.brand || "Vintage")}</p>
