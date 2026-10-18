@@ -137,7 +137,7 @@
   // Live Render deployment — the public storefront and the API are served by the
   // same service. Fallback base used when the POS/admin runs inside the Android
   // APK shell (appassets origin) or another non-web container.
-  const DEFAULT_WEB_APP_URL = "https://adonai-store.onrender.com";
+  const DEFAULT_WEB_APP_URL = "https://www.adonaithrift-store.online";
 
   /* ---------- factory Day-1 seed (v7) ----------
      Clean 'Day 1' state: the catalog, sales, ledger, guest book and rider
@@ -206,6 +206,13 @@
     product.inner_packaging = product.inner_packaging || "";
     product.fabric_grading_notes = product.fabric_grading_notes || (product.item_condition === "BRAND_NEW" ? "Factory-fresh condition." : "Hand-inspected and laundered.");
     product.inventory_status = Number(product.in_stock_count || 0) > 0 ? "AVAILABLE" : "OUT_OF_STOCK";
+    // Dynamic category schema (category_field_schemas): older cached rows
+    // predate these keys, so default them instead of breaking renderers.
+    product.subcategory = product.subcategory || "";
+    product.attributes = product.attributes && typeof product.attributes === "object" && !Array.isArray(product.attributes) ? product.attributes : {};
+    product.search_tags = Array.isArray(product.search_tags) ? product.search_tags : [];
+    product.specifications = Array.isArray(product.specifications) ? product.specifications : [];
+    product.fulfillment_notes = product.fulfillment_notes || "";
     return product;
   }
 

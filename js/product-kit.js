@@ -237,7 +237,7 @@
   function productUrl(product) {
     const origin = (global.location && global.location.origin && global.location.origin !== "null")
       ? global.location.origin
-      : "https://adonai-store.onrender.com";
+      : "https://www.adonaithrift-store.online";
     return origin + productPath(product);
   }
 

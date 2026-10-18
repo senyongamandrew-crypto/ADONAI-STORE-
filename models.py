@@ -23,10 +23,17 @@ from sqlalchemy import (
     Text,
     CheckConstraint,
     UniqueConstraint,
+    JSON,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, deferred
 
+import catalog_schemas
 from database import Base
+
+# Category-specific intake records live in JSONB on PostgreSQL (indexable with
+# GIN) and in a JSON-encoded TEXT column on the local SQLite fallback.
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 # ============================================================================
 # Product Detail Page (PDP) support helpers
@@ -160,7 +167,44 @@ class Category(Base):
             "name": self.name,
             "code": self.code,
             "sort_order": self.sort_order,
-            "description": self.description or ""
+            "description": self.description or "",
+            # Ordered sub-categories from the dynamic intake taxonomy.
+            "subcategories": catalog_schemas.subcategories_for(self.name),
+        }
+
+
+class CategoryFieldSchema(Base):
+    """One dynamic intake form per product class (earrings, footwear, ...).
+
+    Seeded from data/category_field_schemas.json. `definition` carries the
+    sections, fields, units, validation rules, photo protocol and inspection
+    points; `applies_to` maps it onto category / sub-category pairs. Rows an
+    operator customises directly are marked source='custom' and survive seeds.
+    """
+    __tablename__ = "category_field_schemas"
+
+    schema_key = Column(String(60), primary_key=True)
+    version = Column(Integer, nullable=False, default=1)
+    label = Column(String(120), nullable=False)
+    category_group = Column(String(120), nullable=True)
+    profile = Column(String(30), nullable=True)
+    categories = Column(JSONType, nullable=False, default=list)
+    subcategories = Column(JSONType, nullable=False, default=list)
+    applies_to = Column(JSONType, nullable=False, default=list)
+    definition = Column(JSONType, nullable=False, default=dict)
+    source = Column(String(20), nullable=False, default="system")
+    active = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "schema_key": self.schema_key, "version": self.version, "label": self.label,
+            "category_group": self.category_group or "", "profile": self.profile or "",
+            "categories": self.categories or [], "subcategories": self.subcategories or [],
+            "applies_to": self.applies_to or [], "definition": self.definition or {},
+            "source": self.source or "system", "active": bool(self.active),
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -228,6 +272,9 @@ class Product(Base):
     color = Column(String(50), nullable=True)
     demographic = Column(String(50), nullable=False, index=True)  # Men, Women, Children
     category = Column(String(100), nullable=False, index=True)
+    # Sub-category from the dynamic intake taxonomy (e.g. "Stud Earrings").
+    # Together with `category` it resolves the category_field_schemas form.
+    subcategory = Column(String(100), nullable=True, index=True)
     size = Column(String(20), nullable=True)
     # `condition` remains the human-readable grade (for example Grade A).
     # `item_condition` is the inventory policy discriminator and is shared by
@@ -278,6 +325,12 @@ class Product(Base):
     flaw_photo_index = Column(Integer, default=-1)        # gallery index of the flaw close-up
     care_notes = Column(Text, nullable=True)              # washing / care instructions
     staff_notes = Column(Text, nullable=True)             # floor-staff + shopper note
+    # ---- Dynamic, schema-driven intake ------------------------------------
+    # Category-specific attributes validated against category_field_schemas:
+    # {schema_key, schema_version, complete, values, inspection, photo_angles}.
+    attributes = Column(JSONType, nullable=False, default=dict)
+    search_tags_json = Column(Text, default="[]")          # storefront + POS search tags
+    fulfillment_notes = Column(Text, nullable=True)       # localized pickup / delivery note
     # Additive financial-ledger fields.  These are also installed safely by the
     # Render migration for databases that already contain the products table.
     stock_lot_id = Column(String(64), nullable=True, index=True)
@@ -342,6 +395,28 @@ class Product(Base):
         self.color_variants_json = json.dumps(value if isinstance(value, list) else [])
 
     @property
+    def search_tags(self):
+        try:
+            value = json.loads(self.search_tags_json) if self.search_tags_json else []
+            return value if isinstance(value, list) else []
+        except Exception:
+            return []
+
+    @search_tags.setter
+    def search_tags(self, value):
+        self.search_tags_json = json.dumps(catalog_schemas.clean_tags(value))
+
+    @property
+    def attribute_record(self) -> dict:
+        value = self.attributes
+        if isinstance(value, str):  # defensive: legacy TEXT rows
+            try:
+                value = json.loads(value)
+            except Exception:
+                value = {}
+        return value if isinstance(value, dict) else {}
+
+    @property
     def measurements(self):
         return normalize_measurements(self.measurements_json)
 
@@ -366,6 +441,7 @@ class Product(Base):
             "color": self.color or "",
             "demographic": self.demographic,
             "category": self.category,
+            "subcategory": self.subcategory or "",
             "size": self.size or "-",
             "condition": self.condition or "",
             "item_condition": self.item_condition.value if isinstance(self.item_condition, ItemCondition) else (self.item_condition or ItemCondition.PRE_LOVED.value),
@@ -402,6 +478,13 @@ class Product(Base):
             "flaw_photo_index": self.flaw_photo_index if self.flaw_photo_index is not None else -1,
             "care_notes": self.care_notes or "",
             "staff_notes": self.staff_notes or "",
+            # Dynamic category schema record + display-ready specifications.
+            "attributes": self.attribute_record,
+            "attribute_schema": self.attribute_record.get("schema_key") or "",
+            "specifications": catalog_schemas.specifications(self.attribute_record),
+            "photo_angle_labels": catalog_schemas.photo_angle_labels(self.attribute_record),
+            "search_tags": self.search_tags,
+            "fulfillment_notes": self.fulfillment_notes or "",
             "rack_location": self.rack_location or "Rail A-1",
             "stock_lot_id": self.stock_lot_id or "",
             "lot_grade_id": self.lot_grade_id or "",
@@ -1206,6 +1289,10 @@ class NotificationEvent(Base):
     payload_json = Column(Text, nullable=False, default="{}")
     source_key = Column(String(160), nullable=True, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    # Permanently deleted from the bell for every device. The row is kept as a
+    # tombstone so the startup history backfill can never resurrect it.
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String(120), nullable=True)
 
     __table_args__ = (Index("idx_notification_history", "created_at", "id"),)
 

@@ -129,7 +129,7 @@ The webhook is how Flutterwave tells your server a payment completed even if
 the shopper closed their browser mid-payment.
 
 1. Dashboard → **Settings → Webhooks**
-2. **URL:** `https://adonai-store.onrender.com/api/payments/flutterwave/webhook`
+2. **URL:** `https://www.adonaithrift-store.online/api/payments/flutterwave/webhook`
    (use your real domain)
 3. **Secret hash:** paste the exact same value you put in `FLW_SECRET_HASH`
 4. Save.

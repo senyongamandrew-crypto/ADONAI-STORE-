@@ -68,7 +68,7 @@ assert.match(privacy, /temporary reservation\/session token/i, "privacy policy n
 assert.match(privacy, /mailto:info@adonaithrift-store\.online/, "privacy contacts use the official email");
 assert.match(routes, /"\/return-policy": "return-policy\.html"/, "return policy has a clean server route");
 assert.match(routes, /"\/return-policy"/, "return policy is included in the generated sitemap paths");
-assert.match(read("sitemap.xml"), /<loc>https:\/\/adonai-store\.onrender\.com\/return-policy<\/loc>/, "static sitemap contains the return policy");
+assert.match(read("sitemap.xml"), /<loc>https:\/\/www\.adonaithrift-store\.online\/return-policy<\/loc>/, "static sitemap contains the return policy");
 assert.match(read("robots.txt"), /Allow: \/return-policy/, "robots file allows policy indexing");
 assert.match(storefront, /href="\/terms-and-conditions"/, "checkout provides Terms links");
 assert.match(storefront, /href="\/return-policy"/, "checkout provides a direct return-policy link");

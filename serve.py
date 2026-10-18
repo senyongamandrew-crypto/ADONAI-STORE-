@@ -142,7 +142,7 @@ ALLOWED_STATIC_EXTENSIONS = {
 # Top-level directories that must never be exposed over HTTP.
 BLOCKED_TOP_DIRS = {
     ".git", ".github", "android", "scripts", "migrations", "components",
-    "pos-dist", "node_modules", "__pycache__",
+    "pos-dist", "node_modules", "__pycache__", "data",
 }
 
 # Specific filenames that pass the extension allowlist but are still private.
@@ -221,7 +221,7 @@ def resolve_static_file(clean_path: str) -> str | None:
 PDP_HEAD_START = "<!--ADONAI_PDP_HEAD_START-->"
 PDP_HEAD_END = "<!--ADONAI_PDP_HEAD_END-->"
 PDP_BOOTSTRAP_MARKER = "<!--ADONAI_PDP_BOOTSTRAP-->"
-PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://adonai-store.onrender.com").rstrip("/")
+PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "https://www.adonaithrift-store.online").rstrip("/")
 
 
 def html_escape(value: str) -> str:
@@ -402,6 +402,16 @@ def product_page_html(slug: str, origin: str) -> bytes | None:
             "areaServed": "UG",
         },
     }
+    # Category schema specifications become schema.org PropertyValues so
+    # search engines see "Backing type: Lever-Back", "Insole length: 27 cm"…
+    specs = [row for row in (product.get("specifications") or []) if isinstance(row, dict) and row.get("label") and row.get("value")]
+    if specs:
+        json_ld["additionalProperty"] = [
+            {"@type": "PropertyValue", "name": str(row["label"])[:80], "value": str(row["value"])[:120]}
+            for row in specs[:30]
+        ]
+    if product.get("subcategory"):
+        json_ld["category"] = f"{product.get('category')} > {product.get('subcategory')}"
     if compare > price > 0:
         json_ld["offers"]["priceSpecification"] = {
             "@type": "PriceSpecification",

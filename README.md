@@ -396,6 +396,47 @@ python3 scripts/optimize-product-images.py --check
 ```
 
 
+## Notification bell: system pop-ups, sound and bulk delete
+
+- **Pop-ups on the computer / phone.** Open the bell → **Turn on pop-ups** (or the
+  one-time "Get pop-ups for new orders?" invitation). New website orders, customer
+  notes and other store changes then appear in the Windows / macOS notification
+  centre — or the Android notification shade in the Adonai POS app — while the POS
+  is minimised or in another window. Clicking a pop-up opens the matching
+  workspace (Orders, Inventory…). The gear ⚙ in the bell adds "Also while I am
+  using the POS window". `notification-sw.js` only shows pop-ups; it has no fetch
+  handler and caches nothing. `js/notification-ticker.js` keeps the 5-second
+  check on time while the window is minimised.
+- **Sound.** One short notification "ding" per batch of new activity, with
+  on/off, volume and **Test sound** under the gear (saved per device). Browsers
+  allow page sound after one click on the page; pop-ups also use the computer's
+  own notification sound.
+- **Select several / delete permanently.** Press and hold a message (or
+  right-click / Ctrl-click it) to show tick boxes, then **Select all**, **Mark
+  read** or **Delete** → **Delete permanently**. The boxes disappear after the
+  action. `POST /api/notifications/delete` (managers/admins) removes alerts for
+  every device — orders, sales and stock are never touched; cashier keys only
+  clear their own device. Alerts must stay visible while the POS / app is open
+  or minimised; if the browser or Android fully closes it, alerts resume when it
+  is reopened.
+
+## Schema-driven Catalog Intake (category field schemas)
+
+Catalog Intake builds its form from the selected **Category → Sub-group**. Each pair resolves one JSON schema in `category_field_schemas`, so staff only see the fields, units and photo angles that apply to that item. Earrings are measured in millimetres and grams and are never asked for inches, garment sizes or fabric. Metal rings have no fabric-texture question. Pre-loved shoes get tread, insole, heel-counter and toebox inspection points.
+
+| Layer | What it holds |
+| --- | --- |
+| `data/category_field_schemas.json` | Canonical definitions: taxonomy (category → sub-group → schema), units, global baseline fields, option sets and 14 schemas (earrings; rings & bracelets; necklaces; tops; bottoms; dresses; scarves; footwear; bags; watches; eyewear; hats; belts; other accessories). Never served directly (`serve.py` blocks `data/`). |
+| `category_field_schemas` table | Seeded from the JSON at startup. Rows marked `source = 'system'` refresh on deploy; set `source = 'custom'` to keep edits made in Supabase. |
+| `GET /api/catalog/field-schemas` | Public endpoint. Returns the full document, or one resolved form with `?category=…&subcategory=…`. |
+| `catalog_schemas.py` | Server engine. On every product create or update it validates `attributes`: drops hidden or unknown keys, enforces units and ranges, checks required fields and inspection points, and fills `fabric`, `size` and the inch flat-lay card from the structured values. |
+| `js/catalog-schemas.js` (+ generated `js/catalog-schemas.data.js`) | Browser engine and renderer, working the same way as the Python engine (`tests/fixtures/catalog-schema-parity.json` is checked by both test suites). It uses the bundled copy offline and refreshes from the API when it can. |
+| `products.attributes` (JSONB) | `{schema_key, schema_version, complete, values, inspection, photo_angles}`. Every value is stored with its unit, e.g. `{"value": 8, "unit": "mm"}`. Also exposed through the `catalog_items` view (see `migrations/README.md`). |
+
+Required category details block a new intake, and the server checks them again. Photo angles are guidance only: the readiness strip shows `x / n required angles` and suggests the next shot. The edit modal follows two rules. A record saved complete must stay complete. An older record can be saved with gaps, and staff get a reminder; legacy inch measurements fill the new form automatically. Search tags are generated from brand, sub-group and tagged attributes (for example "nickel-free" or "lever-back"). Staff can edit them, and edits are never overwritten. The storefront and POS search both use these tags. The product page shows a grouped **Specifications** card, inspection results, captions for mapped photo angles and the item's pickup/delivery note. JSON-LD includes the specifications as `additionalProperty`.
+
+After editing the JSON, run `npm run build:schemas` (`tests/catalog-schemas-engine.test.js` fails if the generated bundle drifts).
+
 ## Garment tags and phone-camera checkout
 
 - **Catalog Intake → Save & Print Tag** saves the garment first and opens a
@@ -419,7 +460,8 @@ python3 scripts/optimize-product-images.py --check
   never creates stock and is rejected at checkout (as is the legacy preview
   code `ADONAI-SAMPLE`). The garment name in this layout is "Cotton Shirt".
 - The website comes from `website_url` / `app_url` in Store Settings, falling
-  back to the repository's existing live storefront `adonai-store.onrender.com`.
+  back to the live public storefront `www.adonaithrift-store.online` (printed
+  without the `www.`).
   Localhost, native origins and temporary preview addresses are not printed.
 - **POS Register → Scan Tag** requests the rear camera and adds one decoded
   garment through the same stock-reservation path as manual / USB scanning.
