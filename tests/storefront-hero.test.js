@@ -43,8 +43,8 @@ assert.match(home, /class="promise-line"/, "the promise block states the purpose
 assert.match(home, /class="promise-anchors"/, "the promise block carries its anchors");
 ok("the hero carries a labelled promise block");
 
-/* The label says whose promise it is. */
-assert.match(home, /promise-label">\s*What Adonai stands for/, "the block says what Adonai stands for");
+/* The label says whose promise it is, and it is marked as a moment of its own. */
+assert.match(home, /promise-label">\s*<span class="promise-rule"[^>]*><\/span>\s*What Adonai stands for/, "the block says what Adonai stands for");
 ok("the block is titled with the store's promise");
 
 /* ------------------------------------------------------------------ *
@@ -63,10 +63,23 @@ const keys = Array.from(block.querySelectorAll(".promise-key")).map(el => el.tex
 const tails = Array.from(block.querySelectorAll(".promise-tail")).map(el => el.textContent.trim());
 
 assert.equal(anchors.length, 3, "the promise is carried by three anchors");
-assert.match(line, /factory-fresh/i, "the purpose names the new stock");
 assert.match(line, /one-of-one/i, "the purpose names the one-of-one stock");
 assert.match(line, /Kampala/i, "the purpose says who delivers it");
-ok("the purpose names both kinds of stock and the team that delivers");
+assert.match(line, /packed/i, "the purpose says the order is packed by the store");
+assert.match(line, /tracked/i, "the purpose says the order is tracked");
+ok("the purpose names who delivers the order, and how it is handled");
+
+/* The lede already names the stock. The purpose line must be about service,
+   or the banner reads the same sentence twice in a row. */
+const lede = (doc.querySelector(".lede").textContent.replace(/\s+/g, " ").trim());
+for (const repeated of ["factory-tagged", "hand-inspected", "exist once"]) {
+  assert.ok(
+    !line.toLowerCase().includes(repeated),
+    "the purpose line does not repeat the lede's '" + repeated + "'"
+  );
+}
+assert.ok(!line.toLowerCase().includes("apparel"), "the purpose line does not repeat the lede's subject");
+ok("the purpose line and the lede each say something different");
 
 assert.ok(keys.some(k => /factory-new/i.test(k)), "an anchor covers factory-new");
 assert.ok(keys.some(k => /inspected/i.test(k) && /graded/i.test(k)), "an anchor covers the inspection and grading");
@@ -97,11 +110,13 @@ assert.doesNotMatch(home, /lede-more/, "the run-on paragraph is gone from the he
 assert.doesNotMatch(css, /\.lede-more/, "the rule that hid the run-on paragraph is gone");
 ok("the run-on paragraph is gone, and its rule with it");
 
-assert.match(css, /\.masthead-promise\s*\{[^}]*border-top/, "the promise block is separated by a hairline");
+assert.match(css, /\.masthead-promise::before/, "the promise block is separated by a fading hairline");
 assert.match(css, /\.promise-label\s*\{[^}]*text-transform:\s*uppercase/, "the label is set as a small caps eyebrow");
+assert.match(css, /\.promise-rule/, "the label is marked with a short rule");
 assert.match(css, /\.promise-anchors\s*\{[^}]*max-width/, "the anchors are kept to a readable measure");
 assert.match(css, /\.promise-anchors li::before/, "each anchor carries a brand-gold marker");
 assert.match(css, /#DA9902/, "the marker uses the brand gold");
+assert.match(css, /\.promise-line\s*\{[^}]*text-wrap:\s*balance/, "the purpose line is set with balanced lines");
 ok("the promise block is styled like part of the brand");
 
 /* It must stay on a phone, only trimmed — and the phone tuning has to come

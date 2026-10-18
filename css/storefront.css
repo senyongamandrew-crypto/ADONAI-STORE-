@@ -1382,52 +1382,86 @@ body.cart-drawer-closed { touch-action: auto; }
    WhatsApp/Instagram link had nothing to tap above the fold. */
 /* What the store stands for — the promise that sits under the calls to
    action. It answers the three questions a first-time visitor actually has
-   about a rail that mixes factory-new with one-of-one vintage: what am I
-   buying, why should I trust the vintage, and what happens when it's gone. */
+   about a rail that mixes factory-new with one-of-one vintage: whether
+   their size exists, what the vintage inspection is worth, and what
+   happens once a piece is gone. The line above them carries the service
+   promise, so the block covers the whole ambition without repeating the
+   lede above it. */
 .masthead-promise {
-  margin-top: 22px;
-  padding-top: 16px;
-  border-top: 1px solid rgba(47, 107, 70, .22);
+  position: relative;
+  margin-top: 26px;
+  padding-top: 17px;
+  /* The block's measures are all in ch, so the fading rule above it lands
+     exactly on the width of the text below. */
+  font-size: 13px;
+}
+/* A hairline that fades out, the same way the header's gold rule does. */
+.masthead-promise::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  max-width: 58ch;
+  height: 1px;
+  background: linear-gradient(90deg,
+    rgba(47, 107, 70, .38) 0%,
+    rgba(47, 107, 70, .16) 55%,
+    rgba(47, 107, 70, 0) 100%);
 }
 .promise-label {
-  margin: 0 0 8px;
-  font: 800 10.5px/1 var(--font-text);
-  letter-spacing: .18em;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 9px;
+  font: 800 11px/1 var(--font-text);
+  letter-spacing: .16em;
   text-transform: uppercase;
   color: #2F6B46;
+}
+/* A short gold dash marks the block as a moment of its own, so the label
+   does not read as a second eyebrow. */
+.promise-rule {
+  width: 16px;
+  height: 2px;
+  flex: none;
+  background: #DA9902;
 }
 .promise-line {
   margin: 0;
   max-width: 50ch;
-  font: 600 15px/1.55 var(--font-text);
-  color: #2A3A33;
+  font: 600 15px/1.6 var(--font-text);
+  color: var(--ink);
+  text-wrap: balance;
 }
 .promise-anchors {
   list-style: none;
-  margin: 12px 0 0;
+  margin: 14px 0 0;
   padding: 0;
-  max-width: 54ch;
+  max-width: 58ch;
 }
 .promise-anchors li {
   position: relative;
-  padding-left: 17px;
-  margin-top: 6px;
-  font: 500 13px/1.5 var(--font-text);
-  color: #5A6570;
+  padding-left: 18px;
+  margin-top: 7px;
+  font: 500 13px/1.55 var(--font-text);
+  color: #4B5563;
+  text-wrap: pretty;
 }
 .promise-anchors li::before {
   content: "";
   position: absolute;
-  left: 0;
-  top: 7px;
-  width: 6px;
-  height: 6px;
+  left: 1px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
-  background: #DA9902;
+  background: #C89B3C;
+  box-shadow: 0 0 0 3px rgba(200, 155, 60, .16);
 }
-.promise-key { font-weight: 700; color: #1F2937; }
-.promise-key::after { content: " ·"; color: #C89B3C; padding: 0 2px; }
-.promise-tail { color: #5A6570; }
+.promise-key { font-weight: 700; color: var(--ink); }
+.promise-key::after { content: " · "; color: #C89B3C; }
+.promise-tail { color: #4B5563; }
 
 /* On a phone the promise is the store's whole ambition, so it stays — it is
    only trimmed, to keep the rail within reach of the fold. */
