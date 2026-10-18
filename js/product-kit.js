@@ -395,6 +395,58 @@
     return MANIFEST()[key] || null;
   }
 
+  /* Garment photos uploaded through the POS live in the media API rather
+     than the bundled asset folder. The server can re-encode those on the
+     fly (?w=…), so they can carry a responsive srcset exactly like a
+     bundled asset instead of always shipping the full-resolution master. */
+  const MEDIA_API_URL = /^(?:https?:\/\/[^/]+)?\/?api\/media\/[0-9a-f]{32}\/?$/i;
+  const MEDIA_API_WIDTHS = [320, 640, 960];
+
+  function isMediaApiUrl(src) {
+    return MEDIA_API_URL.test(String(src || "").trim());
+  }
+
+  /** Append (or replace) the ?w= width hint on a media API URL. */
+  function mediaApiUrl(src, width) {
+    const value = String(src || "").trim();
+    if (!value) return "";
+    if (!width) return value;
+    const [base, query] = value.split("?");
+    const kept = (query || "")
+      .split("&")
+      .filter(part => part && part.split("=")[0] !== "w");
+    kept.push("w=" + encodeURIComponent(String(width)));
+    return `${base}?${kept.join("&")}`;
+  }
+
+  /** Responsive candidate list for a media API photo. */
+  function mediaApiSrcset(src) {
+    return MEDIA_API_WIDTHS
+      .map(w => `${esc(mediaApiUrl(src, w))} ${w}w`)
+      .join(", ");
+  }
+
+  /**
+   * Smallest sensible source for a 40x40 photo-count dot.
+   *
+   * The dots used to point straight at the full-resolution master JPEG, so
+   * four dots on a single card pulled about a megabyte of originals. This
+   * resolves the tiny derivative instead: a bundled 96px WebP, or a 96px
+   * re-encode of a media API photo.
+   */
+  function thumbSrc(src) {
+    const value = String(src || "").trim();
+    if (!value) return "";
+    const entry = imageEntry(value);
+    if (entry && entry.thumb) return resolveSrc(entry.thumb);
+    if (isMediaApiUrl(value)) return mediaApiUrl(resolveSrc(value), 96);
+    if (entry && entry.webp && entry.webp.length) {
+      const smallest = entry.webp.slice().sort((a, b) => a - b)[0];
+      return resolveSrc(`${entry.stem}-${smallest}.webp`);
+    }
+    return resolveSrc(value);
+  }
+
   /** Collected gallery photos (main image first, de-duplicated). */
   function productImages(product) {
     if (!product) return [];
@@ -415,7 +467,9 @@
     const alt = esc(opts.alt || "");
     const sizes = opts.sizes || "100vw";
     const loading = opts.eager ? "eager" : "lazy";
-    const fetchPriority = opts.eager ? "high" : "auto";
+    // Only the single largest-content image asks for high priority; the rest
+    // of the first row loads eagerly but lets the browser decide the order.
+    const fetchPriority = opts.priority ? "high" : "auto";
     const className = opts.className ? ` class="${esc(opts.className)}"` : "";
     const entry = imageEntry(src);
     const width = opts.width || (entry && entry.w) || 800;
@@ -425,7 +479,19 @@
       `<img src="${esc(resolved)}" alt="${alt}" width="${width}" height="${height}" ` +
       `loading="${loading}" decoding="async" fetchpriority="${fetchPriority}"${className} />`;
 
-    if (!entry || !entry.webp || !entry.webp.length) return imgTag;
+    if (!entry || !entry.webp || !entry.webp.length) {
+      // A photo held by the media API is re-encoded by the server, so it can
+      // still ship a responsive srcset and stop every card from downloading
+      // the full-resolution master.
+      if (isMediaApiUrl(src)) {
+        return (
+          `<img src="${esc(resolved)}" srcset="${mediaApiSrcset(resolved)}" ` +
+          `sizes="${esc(sizes)}" alt="${alt}" width="${width}" height="${height}" ` +
+          `loading="${loading}" decoding="async" fetchpriority="${fetchPriority}"${className} />`
+        );
+      }
+      return imgTag;
+    }
 
     const srcset = entry.webp
       .map(w => `${esc(resolveSrc(entry.stem))}-${w}.webp ${w}w`)
@@ -491,6 +557,9 @@
     pictureHTML,
     resolveSrc,
     imageEntry,
+    thumbSrc,
+    isMediaApiUrl,
+    mediaApiUrl,
     PAYMENT_METHODS,
     paymentChips
   };

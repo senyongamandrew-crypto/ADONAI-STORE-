@@ -27,15 +27,25 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRODUCT_DIR = os.path.join(ROOT, "assets", "products")
+ASSET_DIR = os.path.join(ROOT, "assets")
 MANIFEST_PATH = os.path.join(ROOT, "js", "image-manifest.js")
+
+# Bundled artwork that lives outside the catalog folder but is still served
+# to shoppers through the storefront's responsive image path.
+EXTRA_IMAGES = ("storefront-editorial-bg.jpg",)
 
 # Rendered sizes across the storefront: rail card ≈ 320px, PDP main stage
 # ≈ 640px, desktop gallery / lightbox ≈ 960px.
 TARGET_WIDTHS = (320, 640, 960)
+# The rail card shows a row of 40x40 photo-count dots. Those dots used to
+# point at the full-resolution master JPEG, so four dots on one card pulled
+# ~1 MB of originals. A dedicated 96px WebP keeps that row under ~5 KB.
+THUMB_WIDTH = 96
 MAX_JPEG_EDGE = 1280
 JPEG_QUALITY = 80
 JPEG_BYTE_BUDGET = 400 * 1024   # above this the fallback is re-encoded once
 WEBP_QUALITY = 72
+THUMB_QUALITY = 70
 
 
 def optimize_jpeg(path: str, image) -> None:
@@ -83,11 +93,21 @@ def build() -> dict:
     if not os.path.isdir(PRODUCT_DIR):
         return manifest
 
-    for filename in sorted(os.listdir(PRODUCT_DIR)):
+    sources = [(os.path.join(PRODUCT_DIR, name), "assets/products")
+               for name in sorted(os.listdir(PRODUCT_DIR))]
+    # Storefront artwork outside the catalog folder is delivered through the
+    # same responsive path, so the brand fallback tile is not the one image
+    # that still ships as a full-size master.
+    sources += [(os.path.join(ASSET_DIR, name), "assets")
+                for name in EXTRA_IMAGES
+                if os.path.isfile(os.path.join(ASSET_DIR, name))]
+
+    for path, prefix in sources:
+        filename = os.path.basename(path)
         stem, ext = os.path.splitext(filename)
         if ext.lower() not in (".jpg", ".jpeg", ".png"):
             continue
-        path = os.path.join(PRODUCT_DIR, filename)
+        out_dir = os.path.dirname(path)
 
         with Image.open(path) as opened:
             optimize_jpeg(path, opened)
@@ -101,17 +121,30 @@ def build() -> dict:
                     break  # never upscale beyond the master file
                 scale = min(1.0, target / float(width))
                 size = (max(1, round(width * scale)), max(1, round(height * scale)))
-                out_path = os.path.join(PRODUCT_DIR, f"{stem}-{target}.webp")
+                out_path = os.path.join(out_dir, f"{stem}-{target}.webp")
                 source.resize(size, Image.LANCZOS).save(
                     out_path, "WEBP", quality=WEBP_QUALITY, method=6
                 )
                 widths.append(target)
 
-        manifest[f"assets/products/{filename}"] = {
+            # 40x40 photo-count dot on the rail card. Never upscaled: a photo
+            # narrower than the target is written at its own width.
+            thumb_scale = min(1.0, THUMB_WIDTH / float(width))
+            thumb_size = (
+                max(1, round(width * thumb_scale)),
+                max(1, round(height * thumb_scale)),
+            )
+            thumb_name = f"{stem}-{THUMB_WIDTH}.webp"
+            source.resize(thumb_size, Image.LANCZOS).save(
+                os.path.join(out_dir, thumb_name), "WEBP", quality=THUMB_QUALITY, method=6
+            )
+
+        manifest[f"{prefix}/{filename}"] = {
             "w": width,
             "h": height,
             "webp": widths,
-            "stem": f"assets/products/{stem}",
+            "thumb": f"{prefix}/{thumb_name}",
+            "stem": f"{prefix}/{stem}",
         }
     return manifest
 

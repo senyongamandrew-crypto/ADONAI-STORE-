@@ -167,6 +167,28 @@ def api_response_headers(result):
     return list(values.items())
 
 
+def compress_api_body(body: bytes, content_type: str, accept_encoding: str):
+    """Gzip an API response when the client asked for it.
+
+    The storefront catalog is JSON and compresses by roughly three quarters.
+    Static assets were already compressed, but every /api/ response — the
+    product list a shopper waits on most of all — was sent as plain text.
+    """
+    if not body or len(body) <= 256:
+        return body, []
+    if "gzip" not in str(accept_encoding or "").lower():
+        return body, []
+    if not any(str(content_type or "").startswith(t) for t in COMPRESSIBLE_TYPES):
+        return body, []
+    buffer = io.BytesIO()
+    with gzip.GzipFile(fileobj=buffer, mode="wb", compresslevel=6) as gz:
+        gz.write(body)
+    compressed = buffer.getvalue()
+    if len(compressed) >= len(body):
+        return body, []
+    return compressed, [("Content-Encoding", "gzip"), ("Vary", "Accept-Encoding")]
+
+
 def response_security_headers(path: str, content_type: str):
     """Let only isolated HTML promo creatives use their explicit frame policy."""
     if str(path or "").startswith("/api/promo-media/") and str(content_type or "").lower().startswith("text/html"):
@@ -656,6 +678,19 @@ def wsgi_app(environ, start_response):
         headers.extend((name, value) for name, value in response_security_headers(raw_path, content_type)
                        if name.lower() not in existing_headers)
 
+        if status_code != 304:
+            response_body, compression = compress_api_body(
+                response_body, content_type, environ.get("HTTP_ACCEPT_ENCODING", "")
+            )
+            if compression:
+                # The uncompressed length is now wrong: drop it before the
+                # compressed one is set, so the response carries exactly one.
+                replaced = {c[0].lower() for c in compression} | {"content-length"}
+                headers = [(name, value) for name, value in headers
+                           if name.lower() not in replaced]
+                headers.extend(compression)
+                headers.append(("Content-Length", str(len(response_body))))
+
         status_str = f"{status_code} {HTTPStatus(status_code).phrase}"
         start_response(status_str, headers)
         if method == "HEAD":
@@ -845,6 +880,16 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             response_headers = api_response_headers(result)
             existing_headers = {name.lower() for name, _ in response_headers}
             security_headers = response_security_headers(path, content_type)
+            if status_code != 304:
+                response_body, compression = compress_api_body(
+                    response_body, content_type, self.headers.get("Accept-Encoding", "")
+                )
+                if compression:
+                    replaced = {c[0].lower() for c in compression} | {"content-length"}
+                    response_headers = [(k, v) for k, v in response_headers
+                                        if k.lower() not in replaced]
+                    response_headers.extend(compression)
+                    response_headers.append(("Content-Length", str(len(response_body))))
             for k, v in [*response_headers, *cors, *((k, v) for k, v in security_headers if k.lower() not in existing_headers)]:
                 self.send_header(k, v)
             self.end_headers()

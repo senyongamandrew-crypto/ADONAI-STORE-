@@ -334,6 +334,19 @@
   }
 
   let productSyncInFlight = null;
+  // True once the server has answered the product pull at least once. The
+  // storefront needs this to tell "the rail is genuinely empty" apart from
+  // "the rail has not loaded yet", so it can hold its placeholder instead of
+  // showing an empty grid to a shopper who has only just arrived.
+  let productsSynced = false;
+  // The storefront is holding a placeholder until the first catalog answer
+  // arrives. This fires exactly once per page load — success, empty result
+  // or a failed request — so the rail never stays stuck on a placeholder.
+  function markProductsSynced() {
+    if (productsSynced) return;
+    productsSynced = true;
+    broadcast("catalog");
+  }
   function normalizeProductMedia(product) {
     if (!product) return product;
     const mediaUrl = value => /^\/api\/media\/[a-f0-9]{32}$/.test(String(value || "")) ? apiUrl(value) : value;
@@ -354,18 +367,22 @@
       .then(async response => {
         let data = null;
         try { data = await response.json(); } catch (e) {}
-        if (!response.ok || !data || !Array.isArray(data.products)) return false;
+        if (!response.ok || !data || !Array.isArray(data.products)) {
+          markProductsSynced();
+          return false;
+        }
         reload();
         const before = JSON.stringify(state.products || []);
         const normalized = data.products.map(normalizeProductMedia);
         const after = JSON.stringify(normalized);
+        markProductsSynced();
         if (before === after) return false;
         state.products = normalized;
         save();
         broadcast("products");
         return true;
       })
-      .catch(() => false)
+      .catch(() => { markProductsSynced(); return false; })
       .finally(() => { productSyncInFlight = null; });
     return productSyncInFlight;
   }
@@ -1389,6 +1406,7 @@
     /* ----- live backend financials & POS holds ----- */
     pullProducts,
     pullOperationalData,
+    productsSynced: () => productsSynced,
     financeRequest(path, options) {
       const suffix = String(path || "").replace(/^\//, "");
       return apiRequest("/api/finance/" + suffix, options || { method: "GET" }, true);

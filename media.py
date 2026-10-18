@@ -5,6 +5,7 @@ private, attachment is part of the product transaction, and ranged video reads
 select only the requested byte slice. No ephemeral Render filesystem dependency.
 """
 from datetime import datetime, timedelta
+from collections import OrderedDict
 import io
 import json
 import os
@@ -12,6 +13,7 @@ import re
 import struct
 import subprocess
 import tempfile
+import threading
 import urllib.parse
 import uuid
 import warnings
@@ -32,6 +34,12 @@ MAX_VIDEO_UPLOAD = 50 * 1024 * 1024
 MAX_PROMO_HTML_UPLOAD = 2 * 1024 * 1024
 MAX_VIDEO_SECONDS = 30
 MAX_STORED_VIDEO = 12 * 1024 * 1024
+# Responsive widths the media API can re-encode a stored photo to. The
+# storefront asks for one of these with ?w=<px> so a rail card never has to
+# download the full-resolution master.
+MEDIA_WIDTHS = (96, 320, 640, 960)
+DERIVATIVE_QUALITY = 72
+DERIVATIVE_CACHE_LIMIT = 96
 MEDIA_ID = re.compile(r"^[0-9a-f]{32}$")
 MEDIA_PATH = re.compile(r"^/api/media/([0-9a-f]{32})$")
 PROMO_HTML_UPLOAD_PATH = "/api/promo-media/html"
@@ -95,6 +103,85 @@ def prepare_image(data):
                 return output.getvalue(), image.width, image.height
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ValueError("The photo could not be read. Export it as JPG or PNG and try again.") from exc
+
+
+# ---------------------------------------------------------------------------
+# RESPONSIVE DERIVATIVES
+#
+# A garment photo uploaded through the POS is stored once, full size. Serving
+# that master to every rail card meant a shopper downloaded the whole file
+# just to see a 280px thumbnail. The media API can now re-encode a stored
+# photo on demand at ?w=<px> and hand back a small WebP instead. The
+# originals stay the source of truth; derivatives are pure cache.
+# ---------------------------------------------------------------------------
+_DERIVATIVE_CACHE: "OrderedDict[str, tuple]" = OrderedDict()
+_DERIVATIVE_LOCK = threading.Lock()
+
+
+def requested_width(query_params):
+    """The ?w= width a caller asked for, snapped to a supported size."""
+    if not query_params:
+        return None
+    raw = query_params.get("w", [None])[0] if hasattr(query_params, "get") else None
+    if raw in (None, ""):
+        return None
+    try:
+        width = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    if width <= 0:
+        return None
+    # Snap to the nearest supported width so a caller can never force an
+    # unbounded set of cache entries.
+    return min(MEDIA_WIDTHS, key=lambda candidate: (abs(candidate - width), candidate))
+
+
+def _cache_derivative(key, value):
+    with _DERIVATIVE_LOCK:
+        _DERIVATIVE_CACHE[key] = value
+        _DERIVATIVE_CACHE.move_to_end(key)
+        while len(_DERIVATIVE_CACHE) > DERIVATIVE_CACHE_LIMIT:
+            _DERIVATIVE_CACHE.popitem(last=False)
+
+
+def _read_derivative(key):
+    with _DERIVATIVE_LOCK:
+        value = _DERIVATIVE_CACHE.get(key)
+        if value is not None:
+            _DERIVATIVE_CACHE.move_to_end(key)
+        return value
+
+
+def build_derivative(source_bytes, width):
+    """Re-encode a stored photo to a small WebP. Returns (bytes, mime) or None."""
+    if not source_bytes or width <= 0:
+        return None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(source_bytes)) as original:
+                if original.format not in {"JPEG", "PNG", "WEBP", "HEIF"}:
+                    return None
+                image = ImageOps.exif_transpose(original)
+                if image.mode == "RGBA":
+                    # A transparent photo would turn black where the alpha was
+                    # dropped, so it is laid over white first.
+                    background = Image.new("RGB", image.size, (255, 255, 255))
+                    background.paste(image, mask=image.split()[3])
+                    image = background
+                elif image.mode != "RGB":
+                    image = image.convert("RGB")
+                if image.width <= width:
+                    # Never upscale: the master is already small enough.
+                    return None
+                scale = width / float(image.width)
+                size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
+                resized = image.resize(size, Image.LANCZOS)
+                output = io.BytesIO()
+                resized.save(output, "WEBP", quality=DERIVATIVE_QUALITY, method=4)
+                return output.getvalue(), "image/webp"
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        return None
 
 
 def promotion_html_dimensions(source, filename):
@@ -347,7 +434,7 @@ def route_promotion_html_request(method, headers, staff, promo_match):
         return MediaResponse(200, "text/html; charset=utf-8", bytes(payload or b""), extra)
 
 
-def route_request(method, path, data, headers, staff):
+def route_request(method, path, data, headers, staff, query_params=None):
     """Called after existing staff + optional stock-area authorization."""
     if path == PROMO_HTML_UPLOAD_PATH and method == "POST":
         filename = sanitize_filename(headers, "promotion.html")
@@ -436,6 +523,32 @@ def route_request(method, path, data, headers, staff):
             return error("Media not found", 404)
         if method not in {"GET", "HEAD"}:
             return error("Method not allowed", 405)
+
+        # A storefront card asks for a small re-encode of a stored photo. The
+        # original stays the source of truth; this only avoids shipping the
+        # full-resolution master to a 280px thumbnail.
+        if asset.kind == "image":
+            width = requested_width(query_params)
+            if width:
+                derivative = _read_derivative(f"{asset.id}:{width}")
+                if derivative is None:
+                    master = session.query(ProductMedia.data).filter_by(id=asset.id).scalar()
+                    derivative = build_derivative(bytes(master or b""), width)
+                    if derivative is not None:
+                        _cache_derivative(f"{asset.id}:{width}", derivative)
+                if derivative is not None:
+                    body, mime = derivative
+                    etag = '"%s-w%d"' % (asset.id, width)
+                    extra = {
+                        "Cache-Control": ("public, max-age=604800, immutable" if public
+                                          else "private, max-age=3600"),
+                        "ETag": etag,
+                        "Content-Length": str(len(body)),
+                    }
+                    if public and header(headers, "If-None-Match") == etag:
+                        return MediaResponse(304, mime, b"", extra)
+                    return MediaResponse(200, mime, b"" if method == "HEAD" else body, extra)
+
         total = asset.byte_length
         extra = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=86400" if public else "private, no-store"}
         etag = '"' + asset.id + '"'

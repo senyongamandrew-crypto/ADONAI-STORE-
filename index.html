@@ -163,7 +163,48 @@
     </div>
   </section>
 
-  <div class="grid card-grid" id="productGrid"></div>
+  <!-- Placeholder cards. They are in the HTML, not built by script, so the
+       rail already looks like a shop while the catalog is still in flight
+       instead of showing an empty gap. The storefront replaces them with
+       the real cards as soon as the catalog arrives. -->
+  <div class="grid card-grid" id="productGrid" aria-busy="true" aria-label="Loading current pieces">
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+    <article class="pcard pcard--skeleton" aria-hidden="true">
+      <div class="pmedia skel-block"></div>
+      <div class="pbody">
+        <span class="skel-line skel-line--sm"></span>
+        <span class="skel-line skel-line--lg"></span>
+        <span class="skel-line skel-line--md"></span>
+        <span class="skel-line skel-line--price"></span>
+      </div>
+    </article>
+  </div>
   <p class="empty" id="gridEmpty" hidden>Nothing matches those filters right now — the rail changes daily, so check back soon.</p>
 </main>
 
