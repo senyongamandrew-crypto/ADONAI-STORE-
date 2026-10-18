@@ -379,13 +379,24 @@
   }
 
   /**
-   * Resolve an asset reference to a root-relative URL.
+   * Resolve an asset reference to a URL that this runtime can load.
    * PDP permalinks live at /product/<slug>, so a bare "assets/…" path would
    * otherwise resolve against /product/ and 404.
    */
+  const MEDIA_REFERENCE = /^(?:https?:\/\/[^/]+)?\/?api\/(?:media|promo-media)\/[0-9a-f]{32}\/?(?:[?#]\S*)?$/i;
+
   function resolveSrc(src) {
     const value = String(src || "").trim();
     if (!value) return "";
+    // /api/media/<id> and /api/promo-media/<id> identify this application,
+    // not a particular hostname. Records written by the Android terminal
+    // carry the absolute web origin; the storefront may be served from the
+    // apex domain, a custom domain or a preview host, where img-src 'self'
+    // would block a foreign host. Always resolve against the current origin.
+    if (MEDIA_REFERENCE.test(value)) {
+      const path = "/" + value.replace(/^https?:\/\/[^/]+/i, "").replace(/^\/+/, "").toLowerCase();
+      return global.DB && typeof global.DB.apiUrl === "function" ? global.DB.apiUrl(path) : path;
+    }
     if (/^(https?:|data:|blob:|\/)/i.test(value)) return value;
     return "/" + value.replace(/^\.?\//, "");
   }

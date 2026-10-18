@@ -224,7 +224,10 @@
     if (raw) { try { state = JSON.parse(raw); ok = valid(state); } catch (e) { ok = false; } }
     if (!raw || !ok) { state = seedState(); save(); }
     if (state && Array.isArray(state.products)) {
-      state.products.forEach(normalizeProductPolicy);
+      // Heal cached rows too: an older POS session may have stored absolute
+      // media URLs in localStorage, and those would stay broken on the
+      // storefront until the next catalog sync replaced them.
+      state.products = state.products.map(product => normalizeProductMedia(normalizeProductPolicy(product)));
       if (Array.isArray(state.sales)) state.sales = state.sales.map(normalizeSaleRecord);
       if (state.settings) {
         if (String(state.settings.email || "").trim().toLowerCase() === LEGACY_STORE_EMAIL) {
@@ -347,13 +350,39 @@
     productsSynced = true;
     broadcast("catalog");
   }
+  /* ----------------------------------------------------------
+     MEDIA REFERENCE RESOLUTION
+
+     A photo reference belongs to the store, not to a hostname. Rows used to
+     be written from the Android terminal as
+     https://www.<store>/api/media/<id> because DB.apiUrl() prefixes the web
+     origin outside the browser. The storefront may be served from the apex
+     domain or a custom domain, and its Content-Security-Policy only allows
+     images from 'self' — so those cards showed a broken-image glyph.
+
+     Everything is now normalized to the host-independent
+     /api/media/<id> path on the way in, and apiUrl() re-applies this
+     runtime's own base (relative on the web, absolute in the packaged app).
+     ---------------------------------------------------------- */
+  const MEDIA_REFERENCE = /^(?:https?:)?\/\/[^/]+\/+((?:api)\/(?:media|promo-media)\/[a-f0-9]{32})\/?(?:[?#]\S*)?$/i;
+  const BARE_MEDIA_REFERENCE = /^\/?((?:api)\/(?:media|promo-media)\/[a-f0-9]{32})\/?(?:[?#]\S*)?$/i;
+
+  function canonicalMediaRef(value) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return "";
+    const hosted = raw.match(MEDIA_REFERENCE);
+    if (hosted) return apiUrl("/" + hosted[1].toLowerCase());
+    const bare = raw.match(BARE_MEDIA_REFERENCE);
+    if (bare) return apiUrl("/" + bare[1].toLowerCase());
+    return raw;
+  }
+
   function normalizeProductMedia(product) {
     if (!product) return product;
-    const mediaUrl = value => /^\/api\/media\/[a-f0-9]{32}$/.test(String(value || "")) ? apiUrl(value) : value;
     return Object.assign({}, product, {
-      image_url: mediaUrl(product.image_url),
-      images: Array.isArray(product.images) ? product.images.map(mediaUrl) : [],
-      video: product.video ? Object.assign({}, product.video, { url: mediaUrl(product.video.url) }) : null
+      image_url: canonicalMediaRef(product.image_url),
+      images: Array.isArray(product.images) ? product.images.map(canonicalMediaRef) : [],
+      video: product.video ? Object.assign({}, product.video, { url: canonicalMediaRef(product.video.url) }) : null
     });
   }
 
@@ -1502,6 +1531,7 @@
     ugx(n) { return "UGX " + money(n).toLocaleString("en-US"); },
     laneOf: orderLanes,
     barcodeSVG: generateBarcodeSVG,
-    apiUrl: apiUrl
+    apiUrl: apiUrl,
+    canonicalMediaRef: canonicalMediaRef
   };
 })(typeof window !== "undefined" ? window : globalThis);

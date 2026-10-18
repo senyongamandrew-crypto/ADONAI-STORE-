@@ -214,6 +214,12 @@ input:focus, select:focus, textarea:focus { border-color:#4ADE80 !important; out
 .guest-card, .ledger-row, .staff-row, .rider-card { border-color:#E2E8F0; border-radius:16px; box-shadow:0 5px 16px rgba(15,23,42,.04); }
 .guest-notes { border-color:#E2E8F0; border-radius:12px; background:#F8FAFC; }
 .intake-card { border-radius:18px; }
+/* Auto-filled by applyIntakeProfile(): explains which details the chosen category needs. */
+.intake-profile-hint {
+  display:block; margin:-2px 0 14px; padding:9px 12px; border-radius:11px;
+  border:1px solid #D1FAE5; background:#ECFDF5; color:#046C4E;
+  font-size:12px; font-weight:600; letter-spacing:0; text-transform:none;
+}
 .fgrid { gap:14px; }
 .field { margin-bottom:14px; }
 .field label, .intake-card .field label, .flab { font-size:10px; font-weight:800; letter-spacing:.07em; }

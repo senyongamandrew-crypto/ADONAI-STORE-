@@ -122,6 +122,11 @@ body.pdp-lightbox-open { overflow: hidden; }
   width: 100%; height: 100%; display: block;
   object-fit: contain;
 }
+/* Photos fade in as they land (js/product-kit.js adds .is-loaded) instead
+   of flashing a blank frame with alt text on slow connections. */
+.pdp-slide img, .rel-media img { opacity: 0; transition: opacity .35s ease; }
+.pdp-slide img.is-loaded, .rel-media img.is-loaded { opacity: 1; }
+.pdp-slide img.img-broken, .rel-media img.img-broken { display: none; }
 .pdp-stage.empty, .pdp-stage-wrap.empty {
   aspect-ratio: 4 / 5; display: grid; place-items: center;
   color: var(--muted); font-size: 13px; text-align: center; padding: 24px;
@@ -512,8 +517,9 @@ body.pdp-lightbox-open { overflow: hidden; }
   padding: 8px; transition: border-color .15s ease, transform .15s ease;
 }
 .rel-card:hover { border-color: var(--ink); transform: translateY(-2px); }
-.rel-media { position: relative; border-radius: 9px; overflow: hidden; background: var(--pdp-slate-50); }
-.rel-media picture, .rel-media img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; display: block; }
+.rel-media { position: relative; border-radius: 9px; overflow: hidden; background: linear-gradient(180deg, #FCFBF8, #F1EFE8); }
+/* contain, matching the rail cards: the whole piece stays in frame. */
+.rel-media picture, .rel-media img { width: 100%; aspect-ratio: 4 / 5; object-fit: contain; display: block; }
 .rel-noimg { display: grid; place-items: center; aspect-ratio: 4 / 5; font-size: 11px; color: var(--muted); }
 .rel-name {
   font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 4px;

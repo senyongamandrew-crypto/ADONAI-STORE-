@@ -30,6 +30,7 @@ from sqlalchemy.orm import relationship, deferred
 
 import catalog_schemas
 from database import Base
+from security import canonical_image_url
 
 # Category-specific intake records live in JSONB on PostgreSQL (indexable with
 # GIN) and in a JSON-encoded TEXT column on the local SQLite fallback.
@@ -431,6 +432,9 @@ class Product(Base):
 
     def to_dict(self):
         video = next((asset for asset in self.media_assets if asset.kind == "video"), None)
+        video_payload = video.to_dict() if video else None
+        if video_payload:
+            video_payload["url"] = canonical_image_url(video_payload.get("url", ""))
         return {
             "id": self.id,
             "sku": self.sku,
@@ -469,9 +473,13 @@ class Product(Base):
             "compare_price": self.compare_price,
             "in_stock_count": self.in_stock_count,
             "desc": self.desc or "",
-            "image_url": self.image_url or "",
-            "images": self.images,
-            "video": video.to_dict() if video else None,
+            # Root-relative on the way out as well as on the way in: rows
+            # written by the Android POS before this rule still carry the
+            # absolute storefront origin, and the page CSP would block them
+            # on any other host. See security.canonical_image_url.
+            "image_url": canonical_image_url(self.image_url),
+            "images": [canonical_image_url(url) if isinstance(url, str) else url for url in self.images],
+            "video": video_payload,
             "fabric": self.fabric or "",
             "measurements": self.measurements,
             "flaw_notes": self.flaw_notes or "",

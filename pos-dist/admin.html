@@ -10,12 +10,13 @@
 <link rel="stylesheet" href="styles.css?v=8.0" />
 <link rel="stylesheet" href="css/vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/dispatch.css?v=1.0" />
-<link rel="stylesheet" href="css/notifications.css?v=2.4" />
+<link rel="stylesheet" href="css/notifications.css?v=3.0" />
 <link rel="stylesheet" href="css/admin-overhaul.css?v=1.0" />
 <link rel="stylesheet" href="css/consignment.css?v=1.0" />
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
 <link rel="stylesheet" href="css/garment-media.css?v=1.0" />
+<link rel="stylesheet" href="css/catalog-schemas.css?v=1.1" />
 <link rel="stylesheet" href="css/adaptive-display.css?v=1.1" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -296,6 +297,13 @@
           <div class="field"><label>Item type / category</label><select id="inCat" class="sel-full"></select></div>
           <div class="field"><label>Category group</label><select id="inGroup" class="sel-full"></select></div>
         </div>
+        <!-- Category + sub-group resolve ONE form from category_field_schemas. -->
+        <div class="fgrid third intake-subgroup-row" id="inSubCatRow" hidden>
+          <div class="field" id="inSubCatField"><label for="inSubCat">Sub-group / style<span class="fhint">Loads this item's specification form</span></label><select id="inSubCat" class="sel-full"></select></div>
+          <div class="intake-schema-badge" id="intakeSchemaBadge" aria-live="polite"></div>
+        </div>
+        <!-- Filled automatically from the chosen category: shows which details this kind of stock needs. -->
+        <p class="fhint intake-profile-hint" id="intakeProfileHint" hidden></p>
 
         <h4 class="sec">2. Item Details &amp; Barcode</h4>
         <div class="inventory-toggle" id="intakeConditionControls" role="group" aria-label="Inventory type">
@@ -320,7 +328,8 @@
           <div class="field"><label>Size</label>
             <div class="sku-row"><input class="sel-full" id="inSize" placeholder="L / 42 / -" /><select id="inSizePreset" class="sel-mini"><option value="">Preset</option></select></div>
           </div>
-          <div class="field"><label>Brand / label</label><input class="sel-full" id="inBrand" placeholder="e.g. Levi's, Zara, Vintage Boutique" /></div>
+          <div class="field"><label>Brand / label</label><input class="sel-full" id="inBrand" placeholder="e.g. Levi's, Zara, Vintage Boutique" />
+            <div class="brand-quick" role="group" aria-label="Brand shortcuts"><button type="button" class="brand-quick-btn" data-brand-preset="Unbranded">Unbranded</button><button type="button" class="brand-quick-btn" data-brand-preset="Custom / Handmade">Custom / Handmade</button></div></div>
           <div class="field"><label>Color / wash</label><input class="sel-full" id="inColor" placeholder="e.g. Indigo, Olive, Terracotta" /></div>
         </div>
         <div class="fgrid">
@@ -338,25 +347,42 @@
         <div class="fgrid">
           <div class="field full" id="inStockLotField"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
           <div class="field full" id="inLotGradeField" hidden><label>Graded tier<span class="fhint" id="inLotGradeHint">Pre-graded tier · locks the unit COGS</span></label><select class="sel-full" id="inLotGrade"><option value="">Choose tier…</option></select></div>
-          <div class="field" id="inCostField"><label>Cost price (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
-          <div class="field"><label>Base price (UGX)<span class="fhint">Before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
+          <div class="field" id="inCostField"><label>Weighted landed unit COGS (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
+          <div class="field"><label>Target retail selling price (UGX)<span class="fhint">Suggested retail · before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
           <div class="field" id="inTransportField"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
         </div>
 
-        <h4 class="sec">4. Garment Photos &amp; Video</h4>
+        <section class="intake-specs" id="intakeSpecsSection" hidden aria-labelledby="intakeSpecsTitle">
+          <div class="intake-specs-head">
+            <div><h4 class="sec" id="intakeSpecsTitle">4. Category Specifications</h4>
+              <p class="muted small" id="intakeSpecsLead">Only the details that apply to this exact item type are shown, with the units it is measured in.</p></div>
+            <span class="intake-specs-progress" id="intakeSpecsProgress" aria-live="polite"></span>
+          </div>
+          <div id="intakeSpecs"></div>
+        </section>
+
+        <h4 class="sec" id="intakePhotosTitle">5. Photos, Video &amp; Angle Mapping</h4>
         <div class="photos-head">
           <div><label class="flab">A flexible gallery, straight from your phone</label>
             <p class="muted small">More than four views? Add extra photos and a short garment video.</p></div>
           <span class="muted small" id="angleCount">0 / 12 photos</span>
         </div>
         <div id="photoRow"></div>
+        <div id="intakePhotoProtocol" class="intake-photo-protocol" hidden></div>
         <p class="partner-media-rule" id="partnerMediaRule" hidden>Consignment items require at least one photo and one uploaded video between 15 and 20 seconds. The server verifies the saved clip duration.</p>
 
         <div class="field"><label>Item story / description (visible on catalog)</label><textarea class="sel-full" id="inStory" placeholder="Describe fit, fabric feel, vintage era, and standout features…"></textarea></div>
         <div class="field"><label>Notes for shoppers / floor staff (intake notes)</label><textarea class="sel-full" id="inNotes" placeholder="Any minor wear details, dry clean status, or special handling notes…"></textarea></div>
+        <div class="fgrid third">
+          <div class="field"><label for="inSearchTags">Search tags<span class="fhint">Auto-filled from the category details · edit freely</span></label>
+            <input class="sel-full" id="inSearchTags" maxlength="600" placeholder="sterling silver, hoops, nickel-free" />
+            <span class="fhint" id="inSearchTagsHint">Comma-separated. Used by storefront and POS search.</span></div>
+          <div class="field"><label for="inFulfillment">Pickup &amp; delivery notes<span class="fhint">Shown on the product page</span></label>
+            <textarea class="sel-full" id="inFulfillment" maxlength="600" placeholder="Ships in a padded jewelry box · pickup at the Kampala store from 10am"></textarea></div>
+        </div>
 
-        <h4 class="sec">5. Product Page Details (flat-lay measurements &amp; disclosure)</h4>
+        <h4 class="sec" id="intakePdpTitle">6. Product Page Details (flat-lay measurements &amp; disclosure)</h4>
         <p class="muted small" style="margin:-6px 0 10px">
           Thrift stock is one-of-one, so shoppers buy on measurements — not on S/M/L.
           Fill the fields that apply; the product page renders them in inches and centimetres.
@@ -369,7 +395,7 @@
             <input class="sel-full" id="inCare" placeholder="Machine wash cold inside out. Hang dry." /></div>
         </div>
 
-        <div class="field">
+        <div class="field" id="inMeasureSetField">
           <label>Measurement set
             <span class="fhint">Switches the fields below</span>
           </label>
@@ -394,6 +420,8 @@
           </select>
         </div>
 
+        <div class="intake-readiness" id="intakeReadiness" hidden aria-live="polite"></div>
+
         <div class="intake-actions">
           <button class="btn primary big" id="btnIntakePrint" type="button">Save &amp; Print Tag</button>
           <button class="btn big" id="btnIntakeSave" type="button">Save Garment (UGX 0)</button>
@@ -410,7 +438,7 @@
             <h3 class="gt-tag-name" id="tagTitle">Garment name</h3>
             <div class="gt-tag-bars" id="tagBars"></div>
             <p class="gt-tag-code" id="tagCode">ADN-XXX-0000</p>
-            <footer class="gt-tag-website" id="tagWebsite">adonai-store.onrender.com</footer>
+            <footer class="gt-tag-website" id="tagWebsite">adonaithrift-store.online</footer>
           </article>
         </div>
         <p class="gt-draft-note">Save first to print. The tag contains only the store name, garment name, barcode and website. Prices stay in the catalog and appear at checkout.</p>
@@ -787,8 +815,8 @@
         <div class="promo-manager-head">
           <div>
             <p class="pa-eyebrow">PUBLIC STOREFRONT</p>
-            <h3 id="storefrontPromoTitle">Manage the image strip</h3>
-            <p class="muted small">Choose catalog pieces or upload your own storefront artwork. Custom images can be reordered, replaced, removed and given accessible alt text; no prices or discounts are added to custom artwork.</p>
+            <h3 id="storefrontPromoTitle">Manage promotional banners</h3>
+            <p class="muted small">Choose catalog pieces or upload your own banner artwork or animated HTML advert. Upload the original HTML file to preserve its animation; a screenshot is only a still image. Creatives can be reordered, replaced, removed and given accessible descriptions; no prices or discounts are added to custom artwork.</p>
           </div>
         </div>
         <div class="promo-manager-controls">
@@ -797,7 +825,7 @@
             <select id="storefrontPromoMode" class="sel-full">
               <option value="auto">Automatic — discounts first, then available pieces</option>
               <option value="selected">Choose specific pieces</option>
-              <option value="custom">Upload custom images</option>
+              <option value="custom">Upload banner images or HTML</option>
               <option value="none">Hide the strip</option>
             </select>
           </div>
@@ -808,11 +836,11 @@
           <div class="promo-product-list" id="promoProductList"></div>
         </div>
         <div class="promo-product-choices promo-creative-choices" id="promoCreativeChoices" hidden>
-          <p class="promo-manager-hint muted small">Upload up to 8 JPG, PNG or WebP images. Reorder, replace or remove them below. Custom artwork is shown without generated price or discount labels, even when the catalog is empty.</p>
+          <p class="promo-manager-hint muted small">Upload up to 8 JPG, PNG, WebP, HEIC/HEIF images or animated HTML adverts (2 MB max per HTML file). Upload the original .html file to keep its animation; static image files are still images. HTML plays in an isolated sandbox, so use a self-contained file or HTTPS-hosted assets. Reorder, replace or remove creatives below. No generated prices or discounts are added.</p>
           <div class="promo-creative-toolbar">
-            <input id="promoCreativeFileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
-            <button class="btn" id="btnAddPromoImages" type="button">Add images</button>
-            <span class="muted small" id="promoCreativeCapacity">0 of 8 images</span>
+            <input id="promoCreativeFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,text/html,.jpg,.jpeg,.png,.webp,.heic,.heif,.html,.htm" multiple hidden />
+            <button class="btn" id="btnAddPromoImages" type="button">Add banner files</button>
+            <span class="muted small" id="promoCreativeCapacity">0 of 8 creatives</span>
           </div>
           <div class="promo-creative-list" id="promoCreativeList" aria-live="polite"></div>
         </div>
@@ -908,20 +936,22 @@
 
 <script src="js/analytics.js"></script>
 <script src="js/adaptive.js?v=1.1"></script>
-<script src="js/notifications.js?v=2.4"></script>
+<script src="js/notifications.js?v=3.0"></script>
 <script src="js/icons.js?v=1.2"></script>
-<script src="js/db.js?v=5.9"></script>
+<script src="js/db.js?v=6.0"></script>
 <script src="js/auth.js?v=3.0"></script>
 <script src="js/pos-access.js?v=1.2"></script>
 <script src="js/intake.js?v=5.1"></script>
 <script src="js/garment-media.js?v=1.0"></script>
+<script src="js/catalog-schemas.data.js?v=2026.10.18"></script>
+<script src="js/catalog-schemas.js?v=1.1"></script>
 <script src="js/garment-tools.js?v=1.1"></script>
 <script src="js/file-downloads.js?v=1.0"></script>
 <script src="js/audit-exports.js?v=1.1"></script>
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=8.3"></script>
+<script src="app.js?v=8.5"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

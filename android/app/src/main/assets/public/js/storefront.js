@@ -10,6 +10,15 @@
   const PK = window.AdonaiPDP;
   const displayPrice = p => Number(p && (p.final_selling_price != null ? p.final_selling_price : p.selling_price)) || 0;
   const CONSENT_KEY = "adonai-consent-v1";
+  // How many cards load their photo straight away. A shopper who just opened
+  // the site is looking at the first row, so those photos must not sit in
+  // the lazy-loading queue behind everything else.
+  const EAGER_CARD_COUNT = 4;
+  // Yield to the browser between batches so the first screenful paints now
+  // and the rest of the rail fills in without blocking the page.
+  const scheduleFrame = typeof window.requestAnimationFrame === "function"
+    ? cb => window.requestAnimationFrame(() => cb())
+    : cb => setTimeout(cb, 16);
 
   /* ---------- stroke icon set ---------- */
   const svg = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -178,6 +187,11 @@
   /* ---------- filter state ---------- */
   let products = [];
   let fDemo = "All", fCat = "All", fSize = "All", fCond = "All", fInventory = "All", fMax = 200000, term = "";
+  /* Compact catalog (<1100px) keeps the filter panel behind one button.
+     Must stay in sync with the @media (max-width: 1100px) block in
+     css/storefront.css (v3.12). */
+  const FILTER_PANEL_MAX = 1100;
+  let filtersOpen = false;
 
   // Deep links from the PDP breadcrumb (/?demo=Women&cat=Dresses%20%26%20Skirts)
   // preselect the rail filters so "Home › Women › Dresses" behaves like a
@@ -247,7 +261,16 @@
       }
       if (saved && saved.mode === "custom" && Array.isArray(saved.items)) {
         const items = saved.items.filter(item => item && /^[a-f0-9]{32}$/i.test(String(item.media_id || "")))
-          .slice(0, 8).map(item => ({ media_id: String(item.media_id).toLowerCase(), alt_text: String(item.alt_text || "").slice(0, 120) }));
+          .slice(0, 8).map(item => {
+            const type = item.type === "html" ? "html" : "image";
+            return {
+              media_id: String(item.media_id).toLowerCase(),
+              type,
+              width: type === "html" ? Math.max(1, Math.min(2000, Number(item.width) || 728)) : 0,
+              height: type === "html" ? Math.max(1, Math.min(1200, Number(item.height) || 90)) : 0,
+              alt_text: String(item.alt_text || "").slice(0, 120)
+            };
+          });
         if (items.length) return { mode: "custom", ids: [], items };
       }
     } catch (error) { /* Invalid saved config safely falls back to automatic mode. */ }
@@ -283,6 +306,13 @@
       </a>`;
   }
 
+  /* Brand fallback — used when no live offer qualifies (an empty rail, or
+     saved promo picks that have since sold). Per the storefront promotion
+     contract this strip carries no invented copy: it is the store's own
+     artwork and nothing else. It does have to LOOK deliberate, so
+     css/storefront.css (v3.12) frames each tile and steps the crop across
+     the frame — the same photo cropped dead-centre into four identical
+     280x74 bands is what read as four broken images on a phone. */
   function brandPromotionCardHTML(decorativeCopy) {
     const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
     const image = PK.pictureHTML("assets/storefront-editorial-bg.jpg", {
@@ -298,10 +328,29 @@
   function customPromotionCardHTML(item, decorativeCopy) {
     const copyAccessibility = decorativeCopy ? ' aria-hidden="true" inert tabindex="-1"' : "";
     const mediaId = String(item && item.media_id || "");
-    const src = typeof DB.apiUrl === "function" ? DB.apiUrl(`/api/media/${mediaId}`) : `/api/media/${mediaId}`;
+    const creativeType = item && item.type === "html" ? "html" : "image";
+    const endpoint = creativeType === "html" ? "/api/promo-media/" : "/api/media/";
+    const src = typeof DB.apiUrl === "function" ? DB.apiUrl(`${endpoint}${mediaId}`) : `${endpoint}${mediaId}`;
     const alt = String(item && item.alt_text || "").trim().slice(0, 120);
     const label = alt ? `Storefront artwork: ${alt}` : "View the Adonai Store collection";
-    return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media"><img src="${esc(src)}" alt="${esc(alt)}" class="promo-card-img" loading="lazy" decoding="async" width="560" height="180"></span></a>`;
+    if (creativeType === "html") {
+      const width = Math.max(1, Math.min(2000, Number(item.width) || 728));
+      const height = Math.max(1, Math.min(1200, Number(item.height) || 90));
+      const maxWidth = Math.min(728, Math.max(180, (Number(window.innerWidth) || 320) - 70));
+      const scale = Math.min(1, maxWidth / width, 90 / height);
+      const displayWidth = Math.max(1, Math.round(width * scale));
+      const displayHeight = Math.max(1, Math.round(height * scale));
+      const sizeStyle = `--promo-html-frame-width:${width}px;--promo-html-frame-height:${height}px;--promo-html-scale:${scale};--promo-html-display-width:${displayWidth}px;--promo-html-display-height:${displayHeight}px`;
+      const frame = `<span class="promo-html-viewport"><iframe src="${esc(src)}" title="" width="${width}" height="${height}" sandbox="allow-scripts" referrerpolicy="no-referrer" loading="lazy" tabindex="-1" aria-hidden="true"></iframe></span>`;
+      return `<a class="promo-card promo-card--custom promo-card--html" href="#catalogDashboardRegion" style="${sizeStyle}"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media">${frame}</span></a>`;
+    }
+    return `<a class="promo-card promo-card--custom" href="#catalogDashboardRegion"${copyAccessibility} aria-label="${esc(label)}"><span class="promo-card-media">${PK.pictureHTML(src, {
+      alt: alt,
+      className: "promo-card-img",
+      sizes: "(min-width: 640px) 280px, 78vw",
+      width: 560,
+      height: 180
+    })}</span></a>`;
   }
 
   function renderPromotionalRail() {
@@ -342,7 +391,9 @@
       brandFallback = featured.length === 0;
     }
 
-    const oneProduct = !customMode && !brandFallback && featured.length === 1;
+    const oneHtmlCreative = customMode && customItems.length === 1 && customItems[0].type === "html";
+    const oneCard = (!customMode && !brandFallback && featured.length === 1) || oneHtmlCreative;
+    const hasHtmlCreative = customMode && customItems.some(item => item.type === "html");
     rail.hidden = false;
 
     const viewportWidth = Math.max(320, Number(window.innerWidth) || 1024);
@@ -350,7 +401,11 @@
     const targetWidth = viewportWidth + cardEstimate;
     const widthPerCard = cardEstimate + 14;
     const cardCount = brandFallback ? 1 : customMode ? customItems.length : featured.length;
-    const repeatCount = oneProduct ? 1 : Math.min(8, Math.max(1,
+    // Repeating HTML frames would execute third-party scripts and inflate
+    // impressions. Keep one item sequence per rich-creative marquee pass; a
+    // single HTML creative stays static, while image-only strips retain their
+    // fully repeated seamless loop.
+    const repeatCount = oneCard ? 1 : hasHtmlCreative ? 1 : Math.min(8, Math.max(1,
       Math.ceil(targetWidth / (cardCount * widthPerCard))));
     const repeatedItems = brandFallback
       ? Array.from({ length: repeatCount }, (_, index) => index)
@@ -363,11 +418,31 @@
         ? repeatedItems.map((item, index) => customPromotionCardHTML(item, index >= customItems.length)).join("")
         : repeatedItems.map((offer, index) => promotionalCardHTML(offer, index >= featured.length)).join("");
 
-    track.classList.toggle("is-static", oneProduct);
-    track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneProduct ? "" :
+    track.classList.toggle("is-static", oneCard);
+    track.innerHTML = `<div class="promo-set">${cards}</div>` + (oneCard ? "" :
       `<div class="promo-set promo-set--clone" aria-hidden="true" inert>${cards}</div>`);
 
-    if (!oneProduct) {
+    /* Uploaded artwork whose bytes are gone must not render as an empty grey
+       tile — a shopper reads that as a broken shop. It degrades to the same
+       icon placeholder the product tiles use for a missing photo: no
+       invented copy, still one tap away from the rail. */
+    Array.from(track.querySelectorAll(".promo-card--custom img")).forEach(img => {
+      const degrade = () => {
+        const media = img.closest(".promo-card-media");
+        if (!media || media.dataset.degraded === "1") return;
+        media.dataset.degraded = "1";
+        img.remove();
+        const placeholder = document.createElement("span");
+        placeholder.className = "promo-image-fallback";
+        placeholder.setAttribute("aria-hidden", "true");
+        placeholder.innerHTML = catIcon("tag");
+        media.appendChild(placeholder);
+      };
+      if (img.complete && img.naturalWidth === 0) degrade();
+      else img.addEventListener("error", degrade, { once: true });
+    });
+
+    if (!oneCard) {
       const setDuration = () => {
         const firstSet = track.querySelector(".promo-set");
         if (!firstSet || !track.isConnected) return;
@@ -453,7 +528,10 @@
     const tokens = query.split(/\s+/).filter(Boolean);
     const searchable = [
       p.name, p.brand, p.color, p.category, p.demographic,
-      p.sku, p.barcode_id, p.size, p.condition, p.desc
+      p.sku, p.barcode_id, p.size, p.condition, p.desc,
+      // Category schema: sub-group + intake search tags ("nickel-free",
+      // "925 sterling silver", "lever-back") make specs findable.
+      p.subcategory, (Array.isArray(p.search_tags) ? p.search_tags : []).join(" ")
     ].join(" ").toLowerCase();
 
     return tokens.every(token => {
@@ -516,9 +594,8 @@
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => {
       term = e.target.value.trim().toLowerCase();
-      renderGrid();
+      const visibleCount = renderGrid();
       if (window.AdonaiAnalytics && term) {
-        const visibleCount = $("#productGrid").children.length;
         window.AdonaiAnalytics.trackSearch(term, visibleCount);
       }
     }, 300);
@@ -529,6 +606,98 @@
     $("#priceVal").textContent = DB.ugx(fMax);
     renderGrid();
   });
+
+  /* ============================================================
+     COMPACT CATALOG CHROME
+     Two things the rail was missing on phones and tablets: an honest
+     count ("12 of 18 pieces match") and a way to put the filter panel
+     away. Both are driven from renderGrid(), so every filter path —
+     chips, selects, search, price, and live stock updates — keeps them
+     accurate without any extra bookkeeping.
+     ============================================================ */
+  function activeFilterCount() {
+    const range = $("#priceRange");
+    const priceCapped = !!range && Number(range.value) < Number(range.max);
+    return (fDemo !== "All" ? 1 : 0) + (fCat !== "All" ? 1 : 0) +
+           (fInventory !== "All" ? 1 : 0) + (fSize !== "All" ? 1 : 0) +
+           (fCond !== "All" ? 1 : 0) + (term ? 1 : 0) + (priceCapped ? 1 : 0);
+  }
+
+  let railMatched = 0, railTotal = 0;
+
+  function applyFilterPanelState() {
+    const toggle = $("#filterToggle"), card = $("#filterCard");
+    if (!toggle || !card) return;
+    const compact = window.innerWidth <= FILTER_PANEL_MAX;
+    const open = !compact || filtersOpen;
+    card.classList.toggle("is-collapsed", !open);
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.hidden = !compact;
+
+    /* While the panel is open its own button doubles as the live result
+       read-out, so a tap on a chip answers itself without scrolling. */
+    const title = toggle.querySelector(".filter-toggle-title");
+    if (title) title.textContent = open ? `Showing ${railMatched} of ${railTotal}` : "Refine the rail";
+
+    const active = activeFilterCount();
+    const badge = $("#filterBadge");
+    if (badge) {
+      badge.textContent = active ? `${active} active` : "";
+      badge.hidden = !active;
+    }
+    const clear = $("#filterClear");
+    if (clear) clear.dataset.visible = active ? "1" : "0";
+  }
+
+  function updateRailMeta(matched, total) {
+    const count = $("#railCount");
+    if (count) {
+      const pieces = matched === 1 ? "piece" : "pieces";
+      count.innerHTML = matched === total
+        ? `<b>${total}</b> ${pieces} on the rail right now · prices in UGX`
+        : `<b>${matched}</b> of ${total} ${pieces} match your filters`;
+    }
+    applyFilterPanelState();
+  }
+
+  const filterToggleBtn = $("#filterToggle");
+  if (filterToggleBtn) {
+    filterToggleBtn.addEventListener("click", () => {
+      filtersOpen = !filtersOpen;
+      applyFilterPanelState();
+    });
+  }
+
+  const filterClearBtn = $("#filterClear");
+  if (filterClearBtn) {
+    filterClearBtn.addEventListener("click", () => {
+      fDemo = fCat = fInventory = fSize = fCond = "All";
+      term = "";
+      const search = $("#shopSearch");
+      if (search) search.value = "";
+      const range = $("#priceRange");
+      if (range) {
+        range.value = range.max;
+        fMax = Number(range.max);
+        const readout = $("#priceVal");
+        if (readout) readout.textContent = DB.ugx(fMax);
+      }
+      renderChips();
+      renderGrid();
+      updateDynamicSEO();
+    });
+  }
+
+  /* Re-evaluate only when the viewport actually crosses the breakpoint —
+     mobile browsers fire resize constantly as the URL bar slides away. */
+  let filterLayoutCompact = null;
+  window.addEventListener("resize", () => {
+    const compact = window.innerWidth <= FILTER_PANEL_MAX;
+    if (compact === filterLayoutCompact) return;
+    filterLayoutCompact = compact;
+    if (!compact) filtersOpen = false;   // desktop shows the panel outright
+    applyFilterPanelState();
+  }, { passive: true });
 
   /* ---------- verified social proof only ---------- */
   function ratingHTML(p) {
@@ -549,51 +718,58 @@
       : `<div class="star-rating" aria-label="No customer reviews yet"><span class="review-count">New arrival · No reviews yet</span></div>`;
   }
 
-  const discountPercent = p => {
-    const original = Number(p.compare_price || 0);
-    const selling = Number(displayPrice(p) || 0);
-    return original > 0 && selling >= 0 && selling < original
-      ? Math.round(((original - selling) / original) * 100)
-      : 0;
-  };
-
-  /* ---------- product card with multi-angle preview ---------- */
-  function mediaHTML(p, photos, disc) {
+  /* ---------- product card with multi-angle preview ----------
+     The photo-count indicator is the only overlay on the card image.
+     Grade, discount, stock type and video belong to the product page. */
+  function mediaHTML(p, photos, index) {
     const mainImg = photos[0] || p.image_url;
+    // The first cards are the ones a shopper actually sees on arrival, so
+    // their photo must not wait for the lazy-loading queue.
+    const eager = index < EAGER_CARD_COUNT;
     const img = mainImg
       ? PK.pictureHTML(mainImg, {
           alt: p.name,
-          sizes: "(min-width: 1024px) 280px, (min-width: 640px) 45vw, 90vw",
+          // sizes must describe the card the grid actually lays out
+          // (css/storefront.css): two columns on phones, ~250-300px cards
+          // above that. The old "90vw" told phones each photo was nearly
+          // screen-wide, so they downloaded the 960w candidate for a
+          // ~160px card — the single biggest image-weight bug on the rail.
+          sizes: "(min-width: 1280px) 300px, (min-width: 900px) 30vw, (min-width: 641px) 45vw, 50vw",
           width: 400,
-          height: 500
+          height: 500,
+          eager: eager,
+          priority: index === 0
         })
       : "";
+    // The dots are 40x40 pixels. Pointing them at the full-resolution master
+    // made four dots on one card cost about a megabyte, so they use the
+    // dedicated tiny derivative instead — at low priority, so a dot can
+    // never compete with the card photos a shopper is actually looking at.
     const dots = photos.length > 1
       ? `<div class="media-dots" title="Open the full photo set">${photos.slice(0, 4).map((src, i) =>
-          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.resolveSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" /></i>`).join("")}</div>`
+          `<i class="${i === 0 ? "active" : ""}" data-angle="${i}"><img src="${esc(PK.thumbSrc(src))}" alt="Angle ${i + 1}" width="40" height="40" loading="lazy" decoding="async" fetchpriority="low" /></i>`).join("")}</div>`
       : "";
-    const grade = PK.gradeFor(p);
+    // The category mark always sits behind the photo: while the photo is
+    // still travelling (or if it cannot be served at all) the card shows a
+    // calm placeholder instead of a blank frame with raw alt text. CSS
+    // fades the mark away the moment the photo lands.
     return `
       <div class="pmedia">
-        <span class="grade-badge" style="--grade:${grade.color}">${esc(grade.short)}</span>
-        ${disc > 0 ? `<span class="discount-badge">${disc}% OFF</span>` : ""}
-        <span class="inventory-badge ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.is_consignment ? "PARTNER · VINTAGE" : (p.item_condition === "BRAND_NEW" ? "NEW" : "VINTAGE")}</span>
-        ${img || `<span class="media-icon">${catIcon(p.category)}</span>`}
+        <span class="media-icon" aria-hidden="true">${catIcon(p.category)}</span>
+        ${img}
         ${dots}
-        ${p.video && p.video.url ? '<span class="media-video-badge"><svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10" aria-hidden="true"><path d="M8 5v14l12-7z"/></svg>Video</span>' : ""}
         ${photos.length > 4 ? `<span class="media-extra-photos">+${photos.length - 4} photos</span>` : ""}
       </div>`;
   }
 
-  function cardHTML(p) {
+  function cardHTML(p, index) {
     const sold = p.in_stock_count <= 0;
-    const disc = discountPercent(p);
     const photos = getProductImages(p);
     const href = esc(PK.productPath(p));
     return `
     <article class="pcard ${sold ? "sold" : ""}" data-card="${esc(p.id)}">
       <a class="pcard-link" href="${href}" aria-label="View full details, measurements and photos for ${esc(p.name)}">
-        ${mediaHTML(p, photos, disc)}
+        ${mediaHTML(p, photos, index || 0)}
         <div class="pbody">
           <div class="phead-row">
             <span class="pdem">${esc(p.demographic || p.category)}</span>
@@ -623,6 +799,38 @@
     </article>`;
   }
 
+  /* The rail is drawn in small batches so the first screenful of cards is on
+     screen as soon as the catalog arrives, instead of after the whole
+     catalog has been turned into one giant HTML string. A newer render
+     (a filter change, a live stock update) bumps the token and abandons the
+     batches still queued. */
+  const GRID_CHUNK = 12;
+  let gridRenderToken = 0;
+  // Everything a shopper can see on the rendered rail, as one string. The
+  // live catalog sync calls renderGrid() on a timer; when this signature
+  // has not changed, the existing cards (and their in-flight photos) are
+  // left untouched.
+  let lastGridSignature = "";
+  function gridSignature(list) {
+    const head = [fDemo, fCat, fInventory, fSize, fCond, fMax, term].join("|");
+    const rows = list.map(p => [
+      p.id, p.in_stock_count, displayPrice(p), p.compare_price || 0,
+      p.image_url || "", getProductImages(p).join(",")
+    ].join(":"));
+    return head + "#" + rows.join(",");
+  }
+  // Safety net: the placeholder must never sit there forever pretending the
+  // shop is still loading. If the catalog has not answered by now, the rail
+  // is drawn from whatever is known — including nothing.
+  let railLoadTimedOut = false;
+  window.setTimeout(() => {
+    if (railLoadTimedOut) return;
+    if (typeof DB.productsSynced === "function" && !DB.productsSynced()) {
+      railLoadTimedOut = true;
+      renderGrid();
+    }
+  }, 8000);
+
   function renderGrid() {
     const grid = $("#productGrid");
     const list = products
@@ -634,11 +842,51 @@
       .filter(p => displayPrice(p) <= fMax)
       .filter(p => matchesSearch(p, term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
+
+    // Before the first catalog response there is nothing to draw. Leave the
+    // placeholder cards in place: an empty rail reads as a broken shop,
+    // while a placeholder reads as a shop that is still loading.
+    const stillLoading = !list.length && !products.length && !railLoadTimedOut &&
+      typeof DB.productsSynced === "function" && !DB.productsSynced();
+    if (stillLoading) {
+      grid.setAttribute("aria-busy", "true");
+      const count = $("#railCount");
+      if (count) count.innerHTML = "Loading the live rail…";
+      applyFilterPanelState();
+      return 0;
+    }
+
     $("#gridEmpty").hidden = list.length > 0;
-    grid.innerHTML = list.map(cardHTML).join("");
+    updateRailMeta(list.length, products.length);
+
+    // The catalog re-syncs every few seconds while the shop is open. If
+    // nothing a shopper can see has changed, rebuilding the cards anyway
+    // would throw away every <img> still downloading and start each photo
+    // again from byte zero — on a slow connection the photos would never
+    // finish. An unchanged rail is left exactly as it is.
+    const signature = gridSignature(list);
+    if (signature === lastGridSignature) return list.length;
+    lastGridSignature = signature;
+
     if (window.AdonaiAnalytics && list.length > 0) {
       window.AdonaiAnalytics.trackViewItemList(list, fCat !== "All" ? fCat : (fDemo !== "All" ? fDemo : "All"));
     }
+
+    const token = ++gridRenderToken;
+    grid.innerHTML = "";
+    grid.removeAttribute("aria-busy");
+    let index = 0;
+    const drawBatch = () => {
+      if (token !== gridRenderToken) return;      // a newer render took over
+      const slice = list.slice(index, index + GRID_CHUNK);
+      if (!slice.length) return;
+      grid.insertAdjacentHTML("beforeend", slice.map((p, i) => cardHTML(p, index + i)).join(""));
+      if (PK.settleImages) PK.settleImages(grid);
+      index += slice.length;
+      if (index < list.length) scheduleFrame(drawBatch);
+    };
+    drawBatch();
+    return list.length;
   }
 
   $("#productGrid").addEventListener("click", e => {
@@ -667,7 +915,7 @@
   /* ============================================================
      PRODUCT DETAIL PAGE NAVIGATION
      The full specification experience (flat-lay measurements, flaw
-     disclosure, delivery estimator, WhatsApp ordering) lives on the
+     disclosure, delivery estimator, one cart-based order path) lives on the
      dedicated, shareable PDP at /product/<slug>, so a rail card deep
      links straight into it instead of opening a partial quick-view.
      ============================================================ */
@@ -1726,6 +1974,10 @@
   }, 120000);
 
   /* ---------- real-time stock & System Parameters sync ---------- */
+  /* The first catalog answer — whether it brought pieces or not — is what
+     retires the rail's placeholder cards. */
+  DB.on("catalog", () => { renderGrid(); });
+
   DB.on("products", () => {
     const before = new Map(products.map(p => [p.id, p.in_stock_count]));
     refreshProducts();

@@ -7,10 +7,10 @@ import json
 import logging
 import os
 import uuid
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, or_, text
 
 from database import IS_POSTGRES, Base, engine, get_db, verify_database_connection
-from security import hash_pin as pbkdf2_hash_pin
+from security import hash_pin as pbkdf2_hash_pin, canonical_image_url
 from models import (
     AccountingJournalEntry,
     AccountingJournalLine,
@@ -895,6 +895,46 @@ def seed_sample_sales(session):
     logger.info("Seeded initial baseline sales and ledger records.")
 
 
+def repair_product_media_urls(session) -> int:
+    """Heal image references that were saved with an absolute host.
+
+    The Android terminal's DB.apiUrl() prefixes the configured web origin
+    outside the browser, so editing a garment gallery there stored
+    ``https://www.<store>/api/media/<id>`` in products.image_url/images_json.
+    A storefront served from the apex domain, a custom domain or a preview
+    host then has those images blocked by its CSP (img-src 'self') — the
+    "product photos do not load" report. Rows now keep the host-independent
+    ``/api/media/<id>`` form; this bounded pass repairs the ones written
+    before the rule existed. Safe to run on every boot (it only writes when
+    a value actually changes).
+    """
+    candidates = session.query(Product).filter(or_(
+        Product.image_url.like("http%"),
+        Product.image_url.like("//%"),
+        Product.images_json.like("%http%"),
+        Product.images_json.like("%//%"),
+    )).all()
+    repaired = 0
+    for product in candidates:
+        if product.image_url:
+            image_url = canonical_image_url(product.image_url)
+            if image_url != product.image_url:
+                product.image_url = image_url
+                repaired += 1
+        try:
+            images = json.loads(product.images_json or "[]")
+        except (TypeError, ValueError):
+            images = None
+        if isinstance(images, list):
+            cleaned = [canonical_image_url(url) if isinstance(url, str) else url for url in images]
+            if cleaned != images:
+                product.images_json = json.dumps(cleaned)
+                repaired += 1
+    if repaired:
+        logger.info("Repaired %d absolute product media reference(s) to root-relative form.", repaired)
+    return repaired
+
+
 def init_db() -> bool:
     """
     Initializes database tables and verifies schema on startup.
@@ -935,6 +975,7 @@ def init_db() -> bool:
             seed_riders(session)
             seed_products(session)
             seed_sample_sales(session)
+            repair_product_media_urls(session)
             backfill_financial_journal(session)
             from notifications import backfill_history
             backfill_history(session)

@@ -445,11 +445,33 @@ const demoProducts = [{
   assert.ok(uploaded.classList.contains("img-broken"),
     "a photo that cannot be served at all yields to the placeholder, not a blank frame");
 
+  /* A legacy row — or a localStorage copy written by the Android terminal
+     before the fix — still names the absolute web origin. The rail must
+     rebase it onto the origin actually serving the page: the storefront CSP
+     is `img-src 'self'`, so a foreign host renders as a broken card. */
+  const legacyProducts = [{
+    ...demoProducts[0],
+    id: "PRD-3", sku: "ADN-3", slug: "legacy-host-piece-adn-3", name: "Legacy Host Piece",
+    image_url: "https://www.adonaithrift-store.online" + mediaUrl,
+    images: ["https://www.adonaithrift-store.online" + mediaUrl]
+  }];
+  const third = renderStorefront(legacyProducts);
+  await new Promise(r => setTimeout(r, 500));
+  const legacyImg = third.window.document.querySelector("#productGrid .pmedia img");
+  assert.ok(legacyImg, "the legacy-host card still renders a photo element");
+  assert.equal(legacyImg.getAttribute("src"), mediaUrl,
+    "a legacy absolute media URL is rebased onto the storefront origin");
+  assert.match(legacyImg.getAttribute("srcset") || "", /^\/api\/media\//,
+    "the responsive candidates stay same-origin");
+  assert.doesNotMatch(legacyImg.getAttribute("srcset") || "", /adonaithrift-store\.online/,
+    "no candidate leaks the old absolute host into the page");
+
   console.log("✓ photo dots use the 96px derivative, never the full-resolution master");
   console.log("✓ the first cards load their photo eagerly, the first at high priority");
   console.log("✓ the rail paints in batches and keeps its placeholder until the catalog lands");
   console.log("✓ media API photos ship a responsive srcset and are re-encoded on request");
   console.log("✓ card photos are durable, phone-sized, uncropped and fade in over a placeholder");
   console.log("✓ the catalog payload is gzipped and no longer publishes internal costing");
+  console.log("✓ legacy absolute media URLs are rebased onto the serving origin");
   process.exit(0);
 })().catch(error => { console.error(error); process.exit(1); });
