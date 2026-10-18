@@ -150,9 +150,18 @@ assert.match(mastheadRule, /storefront-editorial-bg\.jpg/, "the hero carries the
 assert.match(css, /:root\s*\{[^}]*--head-h:\s*76px/, "the bar's height is a variable the hero can use");
 ok("the hero slides up behind the bar and keeps the photograph");
 
-/* The bar has to be see-through for that to show. */
+/* The bar over the hero has to be see-through for that to show. */
 assert.match(home, /class="site-head site-head--hero"/, "the storefront's bar floats over the hero");
 assert.match(css, /\.site-head--hero::after\s*\{[^}]*opacity:\s*0/, "the bar's surface is hidden over the hero");
 ok("the bar is transparent over the hero, so the photograph shows behind the buttons");
+
+/* The banner carries no navigation of its own. The rail sits directly below
+   it and the bar's cart is the one order path, so a row of buttons in the
+   banner repeated both and pushed the rail further down the page. */
+assert.equal(hero.querySelectorAll(".masthead-cta").length, 0, "the banner has no call-to-action row");
+assert.doesNotMatch(home, /mh-btn/, "the banner's button styles are gone from the page");
+assert.doesNotMatch(css, /\.mh-btn/, "the banner's button styles are gone from the stylesheet");
+assert.doesNotMatch(css, /\.masthead-cta/, "the banner's button row styles are gone from the stylesheet");
+ok("the banner carries no navigation of its own");
 
 console.log("\n✓ storefront hero promise holds (" + passed + " checks)\n");
