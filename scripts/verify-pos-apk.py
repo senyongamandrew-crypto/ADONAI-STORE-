@@ -59,6 +59,9 @@ def main() -> int:
     expected = "com.adonaithrift.pos.preview" if preview else "com.adonaithrift.pos"
     if package != expected or int(code) != 20500 or version != ("2.5.0-preview" if preview else "2.5.0"):
         raise ValueError(f"Wrong APK identity/version: {package} {version} ({code})")
+    expected_label = "Adonai Delivery" if preview else "Adonai POS"
+    if f"application-label:'{expected_label}'" not in badging:
+        raise ValueError(f"Wrong APK app label, expected: {expected_label}")
     if "sdkVersion:'22'" not in badging or "targetSdkVersion:'34'" not in badging:
         raise ValueError("Unexpected APK minimum/target SDK")
     for permission in PERMISSIONS:
@@ -79,7 +82,7 @@ def main() -> int:
         raise ValueError("No verified signing certificate")
     digest = hashlib.sha256(apk.read_bytes()).hexdigest()
     metadata = {
-        "app_name": "Adonai Store Preview" if preview else "Adonai POS",
+        "app_name": "Adonai Delivery" if preview else "Adonai POS",
         "package": package, "version": version, "version_code": int(code),
         "preview_installs_alongside_existing_app": preview,
         "source_commit": os.environ.get("GITHUB_SHA", "local"),

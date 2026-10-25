@@ -258,7 +258,7 @@ jobs:
             Allow "Install unknown apps" for your browser/Files and open the APK.
             You do not need Android Studio or any build tools on your phone.
 
-            Branch builds are labelled **Adonai Store Preview** and install
+            Branch builds are labelled **Adonai Delivery** and install
             alongside the existing POS, not over it. Do not uninstall your
             existing app or clear its data. No unsynced phone data is copied.
             Use a device already assigned to you or pair an authorized rider.
