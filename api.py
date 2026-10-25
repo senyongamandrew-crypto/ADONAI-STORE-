@@ -1867,7 +1867,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "error": "Too many requests. Please slow down.",
                     "retry_after_seconds": retry_after,
                 }, status=429)
-            if path.rstrip("/") in {"/api/auth/verify", "/api/pos-access/unlock", "/api/rider/pair"} and method == "POST":
+            if path.rstrip("/") in {"/api/auth/verify", "/api/pos-access/unlock", "/api/rider/pair", "/api/rider/connect"} and method == "POST":
                 # Peek only: a correct passkey must never be locked out by its
                 # own earlier successful sign-ins. Failures are recorded below.
                 allowed, retry_after = _rate_limiter.peek(
@@ -1916,7 +1916,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not authenticated or (staff_info or {}).get("role") == "rider":
                     return dispatch.response({"ok":False,"error":"Staff dispatch authorization is required."},401)
             result = dispatch.route_request(method, clean_path, body, headers, staff_info, staff_auth_required())
-            if clean_path == "/api/rider/pair" and method == "POST" and result[0] in {400,403}:
+            if clean_path in {"/api/rider/pair", "/api/rider/connect"} and method == "POST" and result[0] in {400,403}:
                 _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
             return result
 

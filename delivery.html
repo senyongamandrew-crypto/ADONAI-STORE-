@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en-UG">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="referrer" content="no-referrer" />
+<meta name="theme-color" content="#0B1F16" />
+<meta name="description" content="Adonai Delivery — the rider partner app. Receive assigned orders, accept them, and deliver to customers." />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Adonai Delivery" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Adonai Delivery — Rider Partner App</title>
+<link rel="manifest" href="manifest-delivery.json" />
+<link rel="icon" type="image/png" sizes="192x192" href="assets/delivery-icon-192.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="assets/delivery-icon-512.png" />
+<link rel="apple-touch-icon" href="assets/delivery-apple-touch.png" />
+<link rel="stylesheet" href="css/delivery.css" />
+</head>
+<body>
+<div class="dl-shell">
+
+  <!-- ================= desktop explainer (hidden on phones) ================= -->
+  <aside class="dl-desk" aria-label="About Adonai Delivery">
+    <div class="dl-desk-brand">
+      <img src="assets/delivery-icon-192.png" alt="" width="46" height="46" />
+      <div><strong>ADONAI DELIVERY</strong><span>Rider partner application</span></div>
+    </div>
+    <p class="dl-desk-kicker">THE THIRD APP</p>
+    <h1>Storefront. Cashier register. <em>Delivery.</em></h1>
+    <p class="dl-desk-lead">This is the rider's own application — separately installable, separately signed in, and showing <strong>only the orders assigned to that rider</strong>. It never shares the cashier's session or the shopper's storefront.</p>
+
+    <ol class="dl-flow">
+      <li><span>1</span><div><strong>Dispatcher assigns</strong><p>A paid web order is prepared in the Admin Suite and assigned to a delivery partner.</p></div></li>
+      <li><span>2</span><div><strong>Rider receives</strong><p>The job arrives here with a notification, the customer's area, phone and parcel contents.</p></div></li>
+      <li><span>3</span><div><strong>Rider accepts</strong><p>Accept, or decline with a reason so dispatch can reassign it immediately.</p></div></li>
+      <li><span>4</span><div><strong>Rider delivers</strong><p>Collected → arrived → delivered, with the recipient's name recorded at the door.</p></div></li>
+    </ol>
+
+    <div class="dl-desk-state"><span class="dl-pulse" id="deskPulse"></span><div><strong id="deskState">Waiting for a rider to connect</strong><small id="deskStateSub">The same screen is an installable phone app.</small></div></div>
+
+    <div class="dl-desk-demo" id="deskDemo" hidden>
+      <p class="dl-desk-kicker">LOCAL PREVIEW TOOLS</p>
+      <p>Connection code <code>DEMORIDERS</code> signs in <strong>Kato Brian</strong>. Use the button below to push a fresh order to this rider and watch the full flow.</p>
+      <button type="button" class="dl-desk-btn" id="deskNewOrder">＋ Send a new order to this rider</button>
+      <button type="button" class="dl-desk-btn ghost" id="deskInstall">⬇ Install Adonai Delivery</button>
+      <div class="dl-desk-log" id="deskLog" aria-live="polite"></div>
+    </div>
+
+    <div class="dl-desk-links">
+      <a href="admin.html?view=dispatch">Dispatch console ↗</a>
+      <a href="pos.html">Cashier register ↗</a>
+      <a href="index.html">Storefront ↗</a>
+      <a href="preview">UI states preview ↗</a>
+    </div>
+    <p class="dl-desk-foot">Only the latest GPS fix is stored, and only while the rider explicitly starts a duty. No route history, no phone serial, no IMEI.</p>
+  </aside>
+
+  <!-- ============================== phone app ============================== -->
+  <div class="dl-phone" id="dlPhone">
+
+    <!-- ---------- connect / sign in ---------- -->
+    <section class="dl-screen dl-connect" id="connectScreen">
+      <header class="dl-connect-head">
+        <img src="assets/delivery-icon-192.png" alt="Adonai Delivery" width="74" height="74" />
+        <p class="dl-eyebrow">ADONAI STORE · KAMPALA</p>
+        <h2>Deliver with<br /><span>Adonai.</span></h2>
+        <p class="dl-connect-sub">Your assigned orders, your acceptance, your delivery record.</p>
+      </header>
+
+      <div class="dl-connect-body">
+        <div class="dl-demo-chip" id="demoChip" hidden>
+          <span>🧪 LOCAL DEMO</span>
+          <p>Code <strong>DEMORIDERS</strong> connects the preview rider, Kato Brian.</p>
+          <button type="button" id="demoFill">Use demo code</button>
+        </div>
+
+        <form id="connectForm" autocomplete="off">
+          <label for="connectCode">Connection code from dispatch</label>
+          <input id="connectCode" name="code" type="text" inputmode="text" autocapitalize="characters" autocomplete="one-time-code" spellcheck="false" maxlength="20" placeholder="ABCDE-F2345" required />
+          <p class="dl-field-hint">Single-use, issued by your dispatcher. Expires in 10 minutes.</p>
+
+          <label for="deviceLabel">This phone's label</label>
+          <input id="deviceLabel" name="label" type="text" maxlength="100" value="My delivery phone" required />
+          <p class="dl-field-hint">Helps dispatch recognise the device. No serial or IMEI is read.</p>
+
+          <button type="button" class="dl-advanced-toggle" id="advancedToggle" aria-expanded="false">Advanced · store server ▾</button>
+          <div class="dl-advanced" id="advancedBox" hidden>
+            <label for="serverUrl">Server address</label>
+            <input id="serverUrl" name="server" type="url" inputmode="url" maxlength="180" />
+            <p class="dl-field-hint">Only change this if dispatch gave you a different HTTPS address.</p>
+          </div>
+
+          <p class="dl-error" id="connectError" role="alert" hidden></p>
+          <button type="submit" class="dl-btn primary big" id="connectBtn">Connect this phone <span>→</span></button>
+        </form>
+
+        <div class="dl-connect-privacy">
+          <strong>Nothing starts tracking on connect.</strong>
+          <p>You will see only your own assigned deliveries. Location sharing is a separate, explicit choice you can stop at any time.</p>
+        </div>
+      </div>
+      <footer class="dl-connect-foot">Adonai Delivery · separate from the storefront and the cashier register<br />A rider session lives on this device only.</footer>
+    </section>
+
+    <!-- ---------- main app ---------- -->
+    <section class="dl-screen dl-app" id="appScreen" hidden>
+      <header class="dl-top">
+        <div class="dl-top-brand"><span class="dl-top-mark">A</span><div><strong>ADONAI DELIVERY</strong><small id="topRider">Rider</small></div></div>
+        <div class="dl-top-actions">
+          <span class="dl-net" id="netState" title="Connection status"><i></i><span>Online</span></span>
+          <button type="button" class="dl-icon-btn" id="bellBtn" aria-label="Notification settings" title="Notification settings">🔔<span class="dl-bell-badge" id="bellBadge" hidden>0</span></button>
+        </div>
+      </header>
+
+      <div class="dl-offline" id="offlineBar" hidden>⚠ Offline — updates will send when the connection returns.</div>
+      <div class="dl-banners" id="bannerHost" aria-live="polite"></div>
+
+      <main class="dl-scroll" id="view" tabindex="-1"></main>
+
+      <nav class="dl-tabs" aria-label="Delivery sections">
+        <button type="button" data-tab="jobs" class="active"><span class="dl-tab-ico">▤</span><span>Jobs</span><i class="dl-tab-badge" id="tabBadge" hidden>0</i></button>
+        <button type="button" data-tab="active"><span class="dl-tab-ico">➤</span><span>Active</span></button>
+        <button type="button" data-tab="history"><span class="dl-tab-ico">◷</span><span>History</span></button>
+        <button type="button" data-tab="profile"><span class="dl-tab-ico">☺</span><span>Profile</span></button>
+      </nav>
+    </section>
+
+    <div class="dl-toasts" id="toastHost" aria-live="polite"></div>
+    <div class="dl-sheet-host" id="sheetHost" hidden></div>
+  </div>
+</div>
+
+<noscript><p style="padding:24px;font:16px system-ui">Adonai Delivery needs JavaScript to show your assigned orders.</p></noscript>
+<script src="js/delivery-app.js" defer></script>
+</body>
+</html>
