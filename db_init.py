@@ -206,6 +206,12 @@ def apply_additive_schema_migrations():
             ("attributes", "TEXT NOT NULL DEFAULT '{}'"),
             ("search_tags_json", "TEXT NOT NULL DEFAULT '[]'"),
             ("fulfillment_notes", "TEXT"),
+            # Direct-upload supplier tagging + item-level economics
+            # (migrations/20261025_direct_supplier_upload.sql installs the
+            # CHECK constraints for PostgreSQL; SQLite keeps the portable shape).
+            ("supplier_name", "VARCHAR(255)"),
+            ("fixed_unit_cost", "NUMERIC(12,2)"),
+            ("base_retail_price", "NUMERIC(12,2)"),
         ],
         "order_items": [
             ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
@@ -371,6 +377,7 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_products_slug ON products(slug)",
             "CREATE INDEX IF NOT EXISTS ix_products_consignment_partner_id ON products(consignment_partner_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_subcategory ON products(subcategory)",
+            "CREATE INDEX IF NOT EXISTS ix_products_supplier_name ON products(supplier_name)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_consignment_partner_id ON order_items(consignment_partner_id)",
             # Payment-columns indexes for databases whose orders table predates

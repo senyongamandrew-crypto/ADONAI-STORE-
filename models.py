@@ -302,6 +302,14 @@ class Product(Base):
     measurements_json = Column(Text, default="{}")
     fabric_grading_notes = Column(Text, nullable=True)
     cost_price = Column(Integer, default=0)
+    # ---- Direct-upload supplier tagging + item-level economics -------------
+    # Piece-by-piece supplier intake (see DIRECT_SUPPLIER_UPLOAD.md): which
+    # partner supplied the garment, the fixed unit cost it was acquired at,
+    # and the base retail price it should sell at. Backed by
+    # migrations/20261025_direct_supplier_upload.sql (CHECK cost/price >= 0).
+    supplier_name = Column(String(255), nullable=True, index=True)
+    fixed_unit_cost = Column(Numeric(12, 2), nullable=True)
+    base_retail_price = Column(Numeric(12, 2), nullable=True)
     # Canonical pricing inputs. The generated columns are also enforced in PostgreSQL;
     # selling_price remains the whole-UGX compatibility field used by the POS.
     base_price = Column(Numeric(14, 2), nullable=False, default=0)
@@ -360,6 +368,8 @@ class Product(Base):
         Index("idx_product_search", "demographic", "category", "in_stock_count"),
         Index("idx_product_price_stock", "selling_price", "in_stock_count"),
         CheckConstraint("commission_rate IS NULL OR (commission_rate >= 0 AND commission_rate <= 100)", name="ck_product_commission_rate"),
+        CheckConstraint("fixed_unit_cost IS NULL OR fixed_unit_cost >= 0", name="ck_products_fixed_unit_cost"),
+        CheckConstraint("base_retail_price IS NULL OR base_retail_price >= 0", name="ck_products_base_retail_price"),
     )
 
     @property
@@ -458,6 +468,10 @@ class Product(Base):
             "fabric_grading_notes": self.fabric_grading_notes or "",
             "is_one_of_one": (self.item_condition.value if isinstance(self.item_condition, ItemCondition) else self.item_condition) == ItemCondition.PRE_LOVED.value,
             "cost_price": self.cost_price,
+            # Direct-upload supplier tagging + item-level economics.
+            "supplier_name": self.supplier_name or "",
+            "fixed_unit_cost": float(self.fixed_unit_cost) if self.fixed_unit_cost is not None else None,
+            "base_retail_price": float(self.base_retail_price) if self.base_retail_price is not None else None,
             "base_price": float(self.base_price or 0),
             "total_transport_cost": float(self.total_transport_cost or 0),
             "embedded_transport_portion": float(self.embedded_transport_portion if self.embedded_transport_portion is not None else (self.total_transport_cost or 0) * 0.5),

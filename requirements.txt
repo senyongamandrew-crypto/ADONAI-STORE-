@@ -11,3 +11,6 @@ imageio-ffmpeg>=0.6.0,<0.7
 
 # Genuine Excel workbooks for audit-log downloads
 openpyxl>=3.1.5,<4
+
+# Direct-upload supplier catalog ingestion (supplier_ingestion.py)
+supabase>=2.8.0

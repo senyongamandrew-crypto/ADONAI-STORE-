@@ -143,6 +143,17 @@
       cost_price: Number(v("[data-f-cost]")) || 0,
       selling_price: Number(v("[data-f-sell]")) || 0,
       compare_price: Number(v("[data-f-compare]")) || 0,
+      // Direct-upload supplier payload structure (DIRECT_SUPPLIER_UPLOAD.md):
+      // forms transmit these fields strictly alongside the catalog fields
+      // above. item_name / catalog_group / size_availability / condition_notes
+      // mirror the canonical name / category / size / condition values.
+      supplier_name: v("[data-f-supplier]"),
+      fixed_unit_cost: Number(v("[data-f-cost]")) || 0,
+      base_retail_price: Number(v("[data-f-sell]")) || 0,
+      item_name: v("[data-f-name]"),
+      catalog_group: v("[data-f-cat]") || "Outerwear & Jackets",
+      size_availability: v("[data-f-size]") || "-",
+      condition_notes: v("[data-f-cond]") || "Grade A — Excellent",
       desc: v("[data-f-desc]"),
       stock_lot_id: v("[data-f-lot]"),
       in_stock_count: Math.max(0, Number(v("[data-f-stock]")) || 0)

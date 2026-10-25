@@ -347,6 +347,7 @@
         <div class="fgrid">
           <div class="field full" id="inStockLotField"><label>Stock lot / bale allocation<span class="fhint">Optional · fills the landed unit cost</span></label><select class="sel-full" id="inStockLot"><option value="">No registered lot selected</option></select></div>
           <div class="field full" id="inLotGradeField" hidden><label>Graded tier<span class="fhint" id="inLotGradeHint">Pre-graded tier · locks the unit COGS</span></label><select class="sel-full" id="inLotGrade"><option value="">Choose tier…</option></select></div>
+          <div class="field" id="inSupplierField"><label>Source supplier<span class="fhint">Direct-upload partner tag · e.g. Finds Ug</span></label><input class="sel-full" id="inSupplier" maxlength="255" placeholder="e.g. Finds Ug" /></div>
           <div class="field" id="inCostField"><label>Weighted landed unit COGS (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
           <div class="field"><label>Target retail selling price (UGX)<span class="fhint">Suggested retail · before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
           <div class="field" id="inTransportField"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
