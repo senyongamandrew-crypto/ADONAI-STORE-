@@ -42,10 +42,21 @@ ROUTES = {
     # Local review sessions may opt into a POS-first or rider-first root without
     # changing the production storefront route on Render.
     "/": (
-        "pos.html" if os.environ.get("ADONAI_PREVIEW_POS_ROOT") == "1"
+        "delivery.html" if os.environ.get("ADONAI_PREVIEW_DELIVERY_ROOT") == "1"
+        else "ui-states-preview.html" if os.environ.get("ADONAI_PREVIEW_STATES_ROOT") == "1"
+        else "pos.html" if os.environ.get("ADONAI_PREVIEW_POS_ROOT") == "1"
         else "rider-demo.html" if os.environ.get("ADONAI_PREVIEW_RIDER_ROOT") == "1"
         else "index.html"
     ),
+    # A local-only review page: every denied/blocked state, every pop-up and
+    # the real screens at every device size. Never the production root.
+    "/preview": "ui-states-preview.html",
+    # Adonai Delivery — the third, separately installable application: the
+    # rider partner app. It has its own manifest, icon set, service worker and
+    # device-bound sign-in; it never shares the cashier or admin session.
+    "/delivery": "delivery.html",
+    "/manifest-delivery.json": "manifest-delivery.json",
+    "/sw-delivery.js": "sw-delivery.js",
     "/store": "index.html",
     "/product": "product.html",
     "/pos": "pos.html",

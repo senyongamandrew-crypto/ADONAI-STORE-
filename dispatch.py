@@ -3,12 +3,14 @@ Admin location data requires an authenticated staff deployment or a deliberately
 protected Orders scope, independently of the always-open cashier register.
 """
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import base64
 import hashlib
 import json
 import logging
 import math
 import os
+import random
 import re
 import secrets
 import urllib.error
@@ -17,7 +19,8 @@ import uuid
 from urllib.parse import quote
 
 from database import get_db
-from models import Rider, RiderDevice, RiderPairing, DeliveryEvent, Order, User
+from models import (Rider, RiderAccount, RiderAttendance, RiderDevice, RiderPairing, DeliveryEvent,
+                    Order, OrderItem, Product, User)
 from media import MediaResponse
 import access_control
 from notifications import broadcast_event
@@ -75,6 +78,29 @@ def text(value, maximum, field, required=False):
 
 def policy_active(session, staff_required):
     return staff_required or "orders" in access_control.state(session=session)["protected"]
+
+
+def demo_mode():
+    return os.environ.get("ADONAI_DELIVERY_DEMO") == "1"
+
+
+KAMPALA_TZ = ZoneInfo("Africa/Kampala")
+
+
+def kampala_day():
+    return datetime.now(KAMPALA_TZ).strftime("%Y-%m-%d")
+
+
+def attendance_gate(session, rider):
+    """Riders who sign in to an account must check in once per Kampala day.
+
+    Riders paired through the native APK path (no account) are not gated.
+    """
+    account = session.query(RiderAccount).filter_by(rider_id=rider.id).first()
+    if account is None:
+        return {"required": False, "checked_in_today": True}
+    row = session.query(RiderAttendance).filter_by(account_id=account.id, day=kampala_day()).first()
+    return {"required": True, "checked_in_today": row is not None}
 
 
 def gps_access(session, headers, staff, staff_required):
@@ -140,9 +166,10 @@ def event_dict(event):
 def order_brief(order, latest=None):
     return {"id":order.id,"customer_name":order.customer_name or "Customer","customer_phone":order.customer_phone or "",
             "address":order.customer_address or "","area":order.delivery_area or "","notes":order.delivery_notes or "",
-            "total":int(order.total or 0),"dispatch_status":order.dispatch_status,"rider_id":order.rider_id,
+            "total":int(order.total or 0),"delivery_fee":int(order.delivery_fee or 0),
+            "dispatch_status":order.dispatch_status,"rider_id":order.rider_id,
             "rider_name":order.rider_name or "","paid":order.payment_status=="paid","delivery_type":order.delivery_type,
-            "progress":event_dict(latest) if latest else None}
+            "created_at":iso(order.created_at),"progress":event_dict(latest) if latest else None}
 
 
 def add_event(session, order, rider, stage, device=None, note="", received_by=""):
@@ -371,6 +398,25 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             notify_rider(session, "RIDER_UPDATED", "Partner profile updated", message, rider,
                          changed_fields=fields, status=rider.status)
         session.flush();return response({"ok":True,"rider":rider.to_dict()})
+    match=re.fullmatch(r"/api/dispatch/riders/([^/]+)/app-code",path)
+    if match and method=="POST":
+        # Adonai Delivery onboarding. api.py already requires staff dispatch
+        # authorization for every /api/dispatch/* route, and the orders-area
+        # guard still applies when that area is protected. Unlike /pair this
+        # code grants the JOB INBOX only: it cannot enable GPS because
+        # duty/start, /location and the GPS board all still require
+        # policy_active(). A store can therefore onboard riders without ever
+        # switching on live tracking.
+        rider=rider_by_id(session,match[1],True)
+        code=base64.b32encode(secrets.token_bytes(7)).decode()[:10]
+        row=session.get(RiderPairing,rider.id)
+        if not row: row=RiderPairing(rider_id=rider.id);session.add(row)
+        row.code_hash=digest(code);row.expires_at=now()+timedelta(minutes=10)
+        row.issued_by=str((staff or {}).get("name","Dispatcher"))[:100]
+        notify_rider(session,"DELIVERY_APP_CODE_ISSUED","Delivery app connection code issued",
+                     f"A connection code was issued for {rider.name}'s Adonai Delivery app. Location sharing stays off.",rider)
+        return response({"ok":True,"code":code[:5]+"-"+code[5:],"expires_at":iso(row.expires_at),
+                         "rider":rider.to_dict(),"purpose":"delivery-app","app_url":"/delivery"},201)
     match=re.fullmatch(r"/api/dispatch/riders/([^/]+)/(pair|revoke)",path)
     if match and method=="POST":
         require_gps_access(session,headers,staff,staff_required); rider=rider_by_id(session,match[1],True)
@@ -414,6 +460,22 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
         notify_rider(session, "RIDER_PHONE_PAIRED", "Partner phone paired",
                      f"{rider.name}'s phone was paired. Location sharing stays off until a duty starts.", rider)
         return response({"ok":True,"session_token":token,"rider":rider.to_dict(),"device_id":device.id,"expires_at":iso(device.expires_at)},201)
+    if path == "/api/dispatch/attendance" and method == "GET":
+        import rider_accounts
+        return rider_accounts.dispatch_attendance(session)
+    match = re.fullmatch(r"/api/dispatch/attendance/([^/]+)/(selfie|signature)", path)
+    if match and method == "GET":
+        import rider_accounts
+        return rider_accounts.dispatch_image(session, match[1], match[2])
+    if path == "/api/rider/demo-status" and method == "GET":
+        # Public capability flag with no secrets: lets the rider app offer the
+        # local demo connect code when this deployment is a review sandbox.
+        # Production deployments never set ADONAI_DELIVERY_DEMO.
+        return response({"ok":True,"demo":os.environ.get("ADONAI_DELIVERY_DEMO")=="1"})
+    if path == "/api/rider/connect" and method == "POST":
+        # Retired: a connection code alone no longer links a phone. Riders sign
+        # in to their Adonai Delivery account, check in, then enter the code.
+        fail("Sign in to your Adonai Delivery account first, then enter the connection code.", 410, "CONNECT_MOVED")
     if path.startswith("/api/rider/"):
         device,rider=device_from_request(session,headers);prune_points(session)
         if path=="/api/rider/me" and method=="GET":
@@ -421,7 +483,114 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             latest={}
             for event in session.query(DeliveryEvent).filter(DeliveryEvent.order_id.in_([o.id for o in jobs]),DeliveryEvent.rider_id==rider.id).order_by(DeliveryEvent.created_at.desc(),DeliveryEvent.id.desc()).all():
                 if event.order_id not in latest: latest[event.order_id]=event
-            return response({"ok":True,"rider":rider.to_dict(),"tracking":live_state(device),"orders":[order_brief(o,latest.get(o.id)) for o in jobs],"server_time":iso(now())})
+            gate=attendance_gate(session,rider)
+            return response({"ok":True,"rider":rider.to_dict(),"tracking":live_state(device),
+                             "orders":[order_brief(o,latest.get(o.id)) for o in jobs],"server_time":iso(now()),
+                             "gps_policy":policy_active(session,staff_required),
+                             "attendance_required":gate["required"],"checked_in_today":gate["checked_in_today"],
+                             "demo":demo_mode()})
+        # ---- Adonai Delivery: job inbox detail, acceptance, refusal, --------
+        # availability, completed history and delivery fees. Every route is
+        # scoped to the paired device's own rider; a rider can never read or
+        # mutate another rider's customer details.
+        if path=="/api/rider/status" and method=="POST":
+            status=str(body.get("status","")).strip()
+            if status not in RIDER_STATES: fail("Choose Available, On delivery or Offline.")
+            active=session.query(Order).filter(Order.rider_id==rider.id,Order.dispatch_status=="Dispatched",
+                     Order.status.notin_(["cancelled","canceled","completed"])).count()
+            if status=="Offline" and active: fail("Finish or decline your active deliveries before going Offline.",409)
+            if status=="Available" and active: fail("You still have active deliveries — stay On delivery until they are done.",409)
+            previous=rider.status;rider.status=status
+            if previous!=status:
+                notify_rider(session,"RIDER_STATUS_UPDATED","Partner availability changed",
+                             f"{rider.name} is now {status} (set from the Adonai Delivery app).",rider,status=status)
+            session.flush();return response({"ok":True,"rider":rider.to_dict()})
+        match=re.fullmatch(r"/api/rider/orders/([^/]+)/decline",path)
+        if match and method=="POST":
+            order=session.query(Order).filter_by(id=match[1]).with_for_update().first()
+            if not order or order.rider_id!=rider.id: fail("This delivery is not assigned to you.",404)
+            if order.status in {"cancelled","canceled","completed"} or order.dispatch_status!="Dispatched" or order.payment_status!="paid":
+                fail("This delivery is no longer active. Contact dispatch.",409)
+            last=session.query(DeliveryEvent).filter_by(order_id=order.id,rider_id=rider.id).order_by(DeliveryEvent.created_at.desc(),DeliveryEvent.id.desc()).first()
+            if last and last.stage in {"collected","arrived","delivered"}:
+                fail("You already collected this parcel. Call dispatch instead of declining.",409)
+            reason=str(body.get("reason","")).strip()
+            reasons={"Too far for this trip","Vehicle problem","Customer unreachable","Finishing another job","Other"}
+            if reason not in reasons: fail("Choose a reason for declining.")
+            note=text(body.get("note",""),300,"Delivery note")
+            detail=(reason+(": "+note if note else ""))[:500]
+            event=add_event(session,order,rider,"declined",device,detail)
+            # Return the job to the dispatch pool so another partner can take it.
+            order.rider_id=None;order.rider_name="";order.dispatch_status="In Assembly";order.updated_at=now()
+            others=session.query(Order).filter(Order.rider_id==rider.id,Order.id!=order.id,
+                     Order.dispatch_status=="Dispatched",Order.status.notin_(["cancelled","canceled","completed"])).count()
+            if not others and rider.status=="On delivery": rider.status="Available"
+            notify_rider(session,"DELIVERY_DECLINED",f"Order {order.id}: declined",
+                         f"{rider.name} declined {order.id} ({reason}). Reassign this delivery.",rider,
+                         order_id=order.id,delivery_progress="declined",fulfillment_status="In Assembly",rider_status=rider.status)
+            session.flush();return response({"ok":True,"event":event_dict(event),"rider":rider.to_dict()})
+        match=re.fullmatch(r"/api/rider/orders/([^/]+)",path)
+        if match and method=="GET":
+            order=session.query(Order).filter_by(id=match[1]).first()
+            if not order or order.rider_id!=rider.id: fail("This delivery is not assigned to you.",404)
+            events=session.query(DeliveryEvent).filter_by(order_id=order.id,rider_id=rider.id).order_by(DeliveryEvent.created_at,DeliveryEvent.id).all()
+            detail=order_brief(order,events[-1] if events else None)
+            # Item names and quantities only — never unit costs, supplier data
+            # or staff notes. A rider needs to know what to hand the customer.
+            detail.update({
+                "items":[{"name":i.name or "Item","qty":int(i.qty or 1),"unit_price":int(i.unit_price or 0),
+                          "barcode_id":i.barcode_id or "","category":i.category or ""} for i in (order.items or [])],
+                "timeline":[event_dict(e) for e in events],
+                "subtotal":int(order.subtotal or 0),"payment_status":order.payment_status or "",
+                "payment_method":order.tender_type or ""})
+            return response({"ok":True,"order":detail})
+        if path=="/api/rider/history" and method=="GET":
+            rows=session.query(Order).filter(Order.rider_id==rider.id,Order.dispatch_status=="Completed").order_by(Order.updated_at.desc()).limit(60).all()
+            history=[]
+            for o in rows:
+                done=session.query(DeliveryEvent).filter_by(order_id=o.id,rider_id=rider.id,stage="delivered").order_by(DeliveryEvent.created_at.desc()).first()
+                history.append({"id":o.id,"customer_name":o.customer_name or "Customer","area":o.delivery_area or "",
+                                "total":int(o.total or 0),"delivery_fee":int(o.delivery_fee or 0),
+                                "received_by":done.received_by if done else "","delivered_at":iso(done.created_at) if done else iso(o.updated_at),
+                                "note":done.note if done else ""})
+            today=now().date();week=now()-timedelta(days=7)
+            fees=lambda rows_:sum(int(o.delivery_fee or 0) for o in rows_)
+            return response({"ok":True,"history":history,"rider":rider.to_dict(),
+                             "earnings":{"all":fees(rows),"week":fees([o for o in rows if o.updated_at and o.updated_at>=week]),
+                                         "today":fees([o for o in rows if o.updated_at and o.updated_at.date()==today]),
+                                         "jobs":len(rows)},"server_time":iso(now())})
+        if path=="/api/rider/demo/order" and method=="POST" and os.environ.get("ADONAI_DELIVERY_DEMO")=="1":
+            # Local review only. Creates a fresh paid web delivery and puts it
+            # through the exact same assignment path as the dispatch console.
+            product=session.get(Product,"PRD-DEMO-1")
+            if not product:
+                product=Product(id="PRD-DEMO-1",sku="ADN-DEMO-1001",barcode_id="ADN-DEMO-1001",
+                                name="Indigo Type III Trucker Jacket",brand="Adonai Vintage",demographic="Men",
+                                category="Jackets",size="M",item_condition="PRE_LOVED",quantity_type="PRE_LOVED",
+                                condition="Grade A",base_price=85000,total_transport_cost=0,selling_price=85000,
+                                in_stock_count=1,slug="indigo-trucker-jacket-demo")
+                session.add(product);session.flush()
+            people=[("Amina Nakato","0772333444","Plot 5, Muyenga Road","Muyenga"),
+                    ("Moses Ssempa","0755111222","Kabalagala, behind the market","Kabalagala"),
+                    ("Grace Achieng","0701998877","Ntinda Complex, Shop 14","Ntinda"),
+                    ("Peter Muwonge","0776111999","Bukoto Street, off Kisaasi Road","Bukoto")]
+            name,phone,address,area=random.choice(people)
+            oid="AT-D"+secrets.token_hex(3).upper();price=85000;fee=5000
+            order=Order(id=oid,channel="web",status="processing",dispatch_status="In Assembly",
+                        customer_name=name,customer_phone=phone,customer_address=address,delivery_type="boda",
+                        delivery_area=area,delivery_fee=fee,delivery_notes="Call when you arrive at the gate.",
+                        subtotal=price,total=price+fee,tender_type="momo",payment_status="paid",
+                        payment_provider="momo",payment_channel="mtn",payment_reference="DEMO-"+oid,
+                        paid_at=now(),cashier_name="Delivery demo",created_at=now(),updated_at=now())
+            session.add(order)
+            session.add(OrderItem(id="ODI-"+uuid.uuid4().hex[:12],order_id=oid,product_id=product.id,
+                                  barcode_id=product.barcode_id,name=product.name,item_condition="PRE_LOVED",
+                                  quantity_type="PRE_LOVED",unit_price=price,unit_cost=price//2,
+                                  category="Jackets",qty=1,line_total=price))
+            session.flush()
+            assign(session,order,rider.id,"Delivery demo")
+            session.flush()
+            return response({"ok":True,"order_id":oid},201)
         if path=="/api/rider/duty/stop" and method=="POST":
             was_active=bool(device.sharing and device.duty_until and device.duty_until>now())
             device.sharing=False;device.duty_until=None
@@ -467,8 +636,10 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             last=session.query(DeliveryEvent).filter_by(order_id=order.id,rider_id=rider.id).order_by(DeliveryEvent.created_at.desc(),DeliveryEvent.id.desc()).first()
             if last and last.stage==stage: return response({"ok":True,"event":event_dict(last),"order":order_brief(order,last)})
             if order.dispatch_status!="Dispatched" or order.payment_status!="paid": fail("This delivery is not active/paid. Contact dispatch.",409)
+            if stage=="accepted" and not attendance_gate(session,rider)["checked_in_today"]:
+                fail("Check in for today first: take your selfie and sign.",409,"ATTENDANCE_REQUIRED")
             previous=last.stage if last else "assigned"
-            transitions={"assigned":{"accepted","issue"},"accepted":{"collected","issue"},"collected":{"arrived","delivered","issue"},"arrived":{"delivered","issue"},"issue":{"accepted","collected","arrived","delivered","issue"}}
+            transitions={"assigned":{"accepted","issue"},"accepted":{"collected","issue"},"collected":{"arrived","delivered","issue"},"arrived":{"delivered","issue"},"issue":{"accepted","collected","arrived","delivered","issue"},"declined":{"accepted","issue"}}
             if stage not in transitions.get(previous,set()): fail(f"Cannot report {stage} before the preceding delivery step.",409)
             note=text(body.get("note",""),500,"Delivery note")
             received=text(body.get("received_by",""),100,"Recipient name",stage=="delivered")

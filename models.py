@@ -1361,3 +1361,48 @@ class NotificationStreamTicket(Base):
     ticket_hash = Column(String(64), primary_key=True)
     staff_json = Column(Text, nullable=False)
     expires_at = Column(DateTime, nullable=False, index=True)
+
+
+class RiderAccount(Base):
+    """A delivery partner's own sign-in (Adonai Delivery).
+
+    Signing up creates the account only; it grants no jobs. Dispatch's
+    single-use connection code links the account to a roster Rider after the
+    rider has checked in for the day.
+    """
+    __tablename__ = "rider_accounts"
+
+    id = Column(String(50), primary_key=True)
+    phone = Column(String(20), unique=True, nullable=False, index=True)  # normalised 2567XXXXXXXX
+    name = Column(String(100), nullable=False)
+    password_hash = Column(String(200), nullable=False)
+    rider_id = Column(String(50), nullable=True, unique=True, index=True)  # linked roster profile
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class RiderAccountSession(Base):
+    """Hashed sign-in token for the delivery app. Only the hash is stored."""
+    __tablename__ = "rider_account_sessions"
+
+    token_hash = Column(String(64), primary_key=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class RiderAttendance(Base):
+    """One check-in per rider per Kampala day: a selfie plus a drawn signature."""
+    __tablename__ = "rider_attendance"
+    __table_args__ = (UniqueConstraint("account_id", "day", name="uq_rider_attendance_day"),)
+
+    id = Column(String(64), primary_key=True)
+    account_id = Column(String(50), nullable=False, index=True)
+    rider_id = Column(String(50), nullable=True, index=True)
+    day = Column(String(10), nullable=False, index=True)  # YYYY-MM-DD in Africa/Kampala
+    taken_at = Column(DateTime, nullable=False)
+    selfie_type = Column(String(20), nullable=False)
+    selfie = deferred(Column(LargeBinary, nullable=False))
+    signature_type = Column(String(20), nullable=False)
+    signature = deferred(Column(LargeBinary, nullable=False))
+    device_label = Column(String(100), nullable=True)

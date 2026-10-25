@@ -26,7 +26,8 @@ from db_init import init_db
 from database import get_db
 from security import hash_pin
 from models import (
-    Order, OrderItem, Product, Rider, RiderDevice, RiderPairing, PosAccessKey,
+    Order, OrderItem, Product, Rider, RiderAccount, RiderAccountSession, RiderAttendance,
+    RiderDevice, RiderPairing, PosAccessKey,
 )
 import access_control
 import dispatch
@@ -35,6 +36,9 @@ import dispatch
 ADMIN_PASSWORD = "adonai-admin-1"
 ORDERS_PASSWORD = "adonai-demo-1"       # unlocks Orders, dispatch & audit + GPS board
 PAIRING_CODE = "DEMORIDERS"             # [A-Z2-7]{10} single-use phone pairing code
+RIDER_ACCOUNT_PHONE = "0772555010"     # signs in as Kato Brian; normalised to 2567XXXXXXXX
+RIDER_ACCOUNT_PASSWORD = "rider-demo-1"
+RIDER_ACCOUNT_ID = "RAC-DEMO01"
 
 RID = "RDP-DEMO01"
 
@@ -81,6 +85,23 @@ def seed():
         s.query(OrderItem).filter(OrderItem.order_id.in_(["AT-DEMO-1", "AT-DEMO-2"])).delete()
         s.query(Order).filter(Order.id.in_(["AT-DEMO-1", "AT-DEMO-2"])).delete()
         s.query(Product).filter(Product.id.in_(["PRD-DEMO-1", "PRD-DEMO-2"])).delete()
+        s.flush()
+
+        # 3b) Delivery partner's own sign-in (phone + password). Deliberately NOT
+        #     linked to the roster rider: the demo shows the sign-in, selfie and
+        #     signature step, then the connection code step.
+        account = s.get(RiderAccount, RIDER_ACCOUNT_ID)
+        if not account:
+            account = RiderAccount(id=RIDER_ACCOUNT_ID, phone="256772555010", name="Kato Brian",
+                                   password_hash=hash_pin(RIDER_ACCOUNT_PASSWORD), active=True,
+                                   created_at=now())
+            s.add(account)
+        account.name = "Kato Brian"
+        account.password_hash = hash_pin(RIDER_ACCOUNT_PASSWORD)
+        account.active = True
+        account.rider_id = None
+        s.query(RiderAccountSession).filter_by(account_id=RIDER_ACCOUNT_ID).delete()
+        s.query(RiderAttendance).filter_by(account_id=RIDER_ACCOUNT_ID).delete()
         s.flush()
 
         # 4) Live pairing code (production codes last 10 minutes; the demo keeps
@@ -133,6 +154,7 @@ def seed():
         print(f"  Orders-area password (dispatch console & GPS board): {ORDERS_PASSWORD}")
         print(f"  Owner/admin password (settings/security):            {ADMIN_PASSWORD}")
         print(f"  Rider: Kato Brian ({RID}) — phone pairing code:     {PAIRING_CODE}")
+        print(f"  Rider sign-in (Adonai Delivery): phone {RIDER_ACCOUNT_PHONE} / password {RIDER_ACCOUNT_PASSWORD}")
         print("  AT-DEMO-1  paid + dispatched to Kato Brian (appears in the rider app)")
         print("  AT-DEMO-2  paid + In Assembly (assign it from the dispatch console)")
 

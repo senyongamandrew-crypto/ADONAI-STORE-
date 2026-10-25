@@ -26,6 +26,7 @@ import access_control
 import media
 import exports
 import dispatch
+import rider_accounts
 from notifications import (
     DELETE_BATCH_LIMIT,
     LOW_STOCK_THRESHOLD,
@@ -102,6 +103,11 @@ RETIRED_DEFAULT_KEYS = {"adonai-master-2026"}
 _rate_limiter = RateLimiter()
 AUTH_RATE_LIMIT = int(os.environ.get("AUTH_RATE_LIMIT", "10"))          # attempts
 AUTH_RATE_WINDOW = int(os.environ.get("AUTH_RATE_WINDOW", "300"))       # seconds
+# Credential-bearing routes: checked with peek() before, and failures recorded.
+AUTH_PEEK_PATHS = {"/api/auth/verify", "/api/pos-access/unlock", "/api/rider/pair", "/api/rider/connect",
+                   "/api/rider-account/login", "/api/rider-account/signup", "/api/rider-account/connect"}
+AUTH_FAILURE_PATHS = {"/api/rider/pair", "/api/rider/connect", "/api/rider-account/login",
+                      "/api/rider-account/signup", "/api/rider-account/connect"}
 API_RATE_LIMIT = int(os.environ.get("API_RATE_LIMIT", "300"))           # requests
 API_RATE_WINDOW = int(os.environ.get("API_RATE_WINDOW", "60"))          # seconds
 
@@ -1867,7 +1873,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     "error": "Too many requests. Please slow down.",
                     "retry_after_seconds": retry_after,
                 }, status=429)
-            if path.rstrip("/") in {"/api/auth/verify", "/api/pos-access/unlock", "/api/rider/pair"} and method == "POST":
+            if path.rstrip("/") in AUTH_PEEK_PATHS and method == "POST":
                 # Peek only: a correct passkey must never be locked out by its
                 # own earlier successful sign-ins. Failures are recorded below.
                 allowed, retry_after = _rate_limiter.peek(
@@ -1909,6 +1915,14 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             status, result = area_error
             return json_response(result, status=status)
 
+        if clean_path.startswith("/api/rider-account/"):
+            # Rider sign-in and daily attendance. Public routes, but every
+            # protected step is bound to the account's own sign-in token.
+            result = rider_accounts.route_request(method, clean_path, body, headers, staff_auth_required())
+            if clean_path in AUTH_FAILURE_PATHS and method == "POST" and result[0] in {400, 401, 403}:
+                _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
+            return result
+
         if clean_path.startswith(("/api/riders", "/api/dispatch/", "/api/rider/")):
             staff_info = None
             if not clean_path.startswith("/api/rider/"):
@@ -1916,7 +1930,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not authenticated or (staff_info or {}).get("role") == "rider":
                     return dispatch.response({"ok":False,"error":"Staff dispatch authorization is required."},401)
             result = dispatch.route_request(method, clean_path, body, headers, staff_info, staff_auth_required())
-            if clean_path == "/api/rider/pair" and method == "POST" and result[0] in {400,403}:
+            if clean_path in AUTH_FAILURE_PATHS and method == "POST" and result[0] in {400,403}:
                 _rate_limiter.check("auth", client_ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW)
             return result
 

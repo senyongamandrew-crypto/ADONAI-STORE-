@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Adonai Store — UI states preview (denied, pop-ups, every screen)</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
+<link rel="stylesheet" href="css/pos-access.css" />
+<link rel="stylesheet" href="css/notifications.css" />
+<style>
+  :root{
+    --ink:#0F172A; --muted:#64748B; --line:#E2E8F0; --paper:#F5F7F3;
+    --green:#15803D; --green2:#16A34A; --red:#B91C1C; --red2:#DC2626;
+    --amber:#B45309; --dark:#0B1120;
+    --font:"Plus Jakarta Sans",Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+    --serif:"Playfair Display",Georgia,serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font:400 14px/1.5 var(--font);-webkit-font-smoothing:antialiased}
+  a{color:inherit}
+  button{font-family:inherit}
+
+  /* ---------------- header ---------------- */
+  .pv-head{position:sticky;top:0;z-index:40;background:var(--dark);color:#F8FAFC;box-shadow:0 10px 30px rgba(11,17,32,.24)}
+  .pv-head-top{max-width:1500px;margin:0 auto;padding:16px 22px 12px;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .pv-brand{display:flex;align-items:center;gap:13px;min-width:0}
+  .pv-mark{width:42px;height:42px;flex:none;border-radius:12px;display:grid;place-items:center;background:linear-gradient(145deg,#16A34A,#0E5C2E);color:#ECFDF5;font:800 22px/1 var(--serif);box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  .pv-brand h1{margin:0;font-size:17px;font-weight:800;letter-spacing:-.015em}
+  .pv-brand p{margin:3px 0 0;color:#94A3B8;font-size:11.5px;line-height:1.45;max-width:72ch}
+  .pv-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .pv-live{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border-radius:99px;background:rgba(34,197,94,.12);border:1px solid rgba(74,222,128,.28);color:#BBF7D0;font-size:11px;font-weight:700;white-space:nowrap}
+  .pv-live i{width:7px;height:7px;border-radius:50%;background:#4ADE80;box-shadow:0 0 0 3px rgba(74,222,128,.18)}
+  .pv-link{padding:8px 12px;border-radius:9px;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06);color:#E2E8F0;font-size:11.5px;font-weight:700;text-decoration:none;white-space:nowrap}
+  .pv-link:hover{background:rgba(255,255,255,.14);color:#fff}
+  .pv-tabs{max-width:1500px;margin:0 auto;padding:0 22px;display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin}
+  .pv-tabs button{flex:none;position:relative;appearance:none;border:0;background:transparent;color:#94A3B8;padding:12px 14px 13px;font-size:12.5px;font-weight:700;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+  .pv-tabs button:hover{color:#E2E8F0}
+  .pv-tabs button[aria-selected="true"]{color:#fff;border-bottom-color:#4ADE80}
+  .pv-tabs em{font-style:normal;margin-left:7px;padding:2px 7px;border-radius:99px;background:rgba(255,255,255,.09);color:#CBD5E1;font-size:10px}
+  .pv-tabs button[aria-selected="true"] em{background:rgba(74,222,128,.2);color:#BBF7D0}
+  .pv-toolbar{max-width:1500px;margin:0 auto;padding:10px 22px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,.07)}
+  .pv-search{min-width:230px;flex:1;max-width:380px;padding:9px 12px;border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.06);color:#F8FAFC;font-size:12.5px;outline:none}
+  .pv-search::placeholder{color:#94A3B8}
+  .pv-search:focus{border-color:#4ADE80;box-shadow:0 0 0 3px rgba(74,222,128,.14)}
+  .pv-chips{display:flex;gap:6px;flex-wrap:wrap}
+  .pv-chip{border:1px solid rgba(255,255,255,.14);background:transparent;color:#94A3B8;padding:7px 11px;border-radius:99px;font-size:11px;font-weight:700;cursor:pointer}
+  .pv-chip:hover{color:#fff}
+  .pv-chip[aria-pressed="true"]{background:#22C55E;border-color:#22C55E;color:#052E16}
+  .pv-count{margin-left:auto;color:#94A3B8;font-size:11.5px;font-weight:700}
+
+  /* ---------------- layout ---------------- */
+  main{max-width:1500px;margin:0 auto;padding:22px 22px 60px}
+  .pv-pane[hidden]{display:none}
+  .pv-intro{margin:0 0 18px;padding:16px 18px;border:1px solid #CDE8D6;border-left:4px solid var(--green2);border-radius:12px;background:#F0FAF4;color:#1F3B2B;font-size:12.5px;line-height:1.65}
+  .pv-intro strong{font-weight:800}
+  .pv-intro code{background:rgba(21,128,61,.1);padding:2px 5px;border-radius:5px;font-size:11.5px}
+  .pv-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(390px,1fr));gap:18px}
+  .pv-wide{grid-column:1/-1}
+
+  .pv-card{display:flex;flex-direction:column;min-width:0;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);overflow:hidden}
+  .pv-card[hidden]{display:none}
+  .pv-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px 12px;border-bottom:1px solid #F1F5F9}
+  .pv-card-head h3{margin:0;font-size:14px;font-weight:800;letter-spacing:-.01em;line-height:1.35}
+  .pv-num{display:inline-block;margin-right:9px;color:#94A3B8;font-size:10.5px;font-weight:800;letter-spacing:.08em}
+  .pv-badge{flex:none;padding:4px 8px;border-radius:6px;font-size:9.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+  .pv-badge.bad{background:#FEF2F2;color:var(--red);border:1px solid #FECACA}
+  .pv-badge.warn{background:#FFFBEB;color:var(--amber);border:1px solid #FDE68A}
+  .pv-badge.info{background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE}
+  .pv-badge.ok{background:#ECFDF5;color:#166534;border:1px solid #BBF7D0}
+
+  .pv-stage{position:relative;display:flex;align-items:center;justify-content:center;min-height:248px;padding:22px;overflow:hidden;background:#F8FAFC;background-image:radial-gradient(#DDE5E9 .8px,transparent .8px);background-size:14px 14px}
+  .pv-stage.dark{background:#111827;background-image:radial-gradient(rgba(255,255,255,.06) .8px,transparent .8px);background-size:14px 14px}
+  .pv-stage.tall{min-height:430px}
+  .pv-stage.dialog-stage{min-height:490px}
+  .pv-stage.flush{padding:0;display:block}
+  .pv-stage-note{position:absolute;z-index:3;left:10px;bottom:8px;color:#94A3B8;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;pointer-events:none}
+  .pv-card-body{padding:13px 16px 15px;display:flex;flex-direction:column;gap:11px;flex:1}
+  .pv-where{margin:0;color:var(--muted);font-size:11.5px;line-height:1.6}
+  .pv-where code{background:#F1F5F9;color:#334155;padding:2px 5px;border-radius:5px;font-size:10.5px}
+  .pv-where b{color:#334155}
+  .pv-card-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:auto}
+  .pv-btn{appearance:none;border:1px solid #CBD5E1;background:#fff;color:#334155;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+  .pv-btn:hover{border-color:var(--green);color:var(--green);background:#F0FAF4}
+  .pv-btn.solid{background:var(--green);border-color:var(--green);color:#fff}
+  .pv-btn.solid:hover{background:#126B33;color:#fff}
+  .pv-empty{padding:34px;text-align:center;color:var(--muted);font-size:13px;grid-column:1/-1;border:1px dashed #CBD5E1;border-radius:14px}
+
+  /* ---------------- generic controls used inside reproductions ---------------- */
+  .pv-stage .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:8px 14px;border:1px solid #CBD5E1;border-radius:9px;background:#fff;color:#334155;font:700 12px/1 var(--font);cursor:pointer;text-decoration:none;white-space:nowrap}
+  .pv-stage .btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+  .pv-stage .btn.ghost{background:transparent}
+  .pv-stage input,.pv-stage select{min-height:40px;padding:9px 11px;border:1px solid #CBD5E1;border-radius:9px;background:#fff;font:400 13px var(--font);color:var(--ink);outline:none}
+  .pv-stage input:focus{border-color:var(--green2);box-shadow:0 0 0 3px rgba(22,163,74,.15)}
+  .pv-stage .pa-locked-view{margin:0;max-width:100%;width:100%;padding:27px 22px;box-shadow:0 12px 30px rgba(15,23,42,.08)}
+  .pv-stage .pos-access-overlay{position:absolute;inset:0;padding:16px;backdrop-filter:none;z-index:2}
+  .pv-stage .pos-access-dialog{max-width:400px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.2)}
+  .pv-stage .pa-dialog-icon{margin-bottom:12px}
+  .pv-stage .pa-password-input input{border:0;border-radius:0;background:transparent;min-height:0;padding:13px;box-shadow:none}
+  .pv-stage .pa-error{color:#B91C1C !important;font-size:11.5px;min-height:16px;margin:8px 0 0}
+  .pv-stage .pa-dialog-actions{margin-top:12px}
+  .pv-stage .pa-dialog-foot{margin-top:12px}
+  .pv-stage .nd-alertbar{width:100%;max-width:440px;border:1px solid #CDE8D6;border-radius:11px;box-shadow:0 10px 24px rgba(15,23,42,.08)}
+  .pv-stage .nd-alertbar[data-state="blocked"],.pv-stage .nd-alertbar[data-state="unsupported"]{border-color:#FDE68A}
+  .pv-stage .toast-card{width:100%;max-width:340px}
+  .pv-stage .toast-btn{border:1px solid #15803D;background:#16A34A;color:#fff;border-radius:7px;padding:7px 11px;font:700 11px/1 var(--font);cursor:pointer}
+  .pv-stage .toast-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .pv-stage .toast-card p{margin:4px 0 0;font-size:12px;color:#6B7280;line-height:1.5}
+
+  /* reproductions */
+  .rp{width:100%;max-width:430px}
+  .rp-dialog{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:0 18px 48px rgba(15,23,42,.13)}
+  .rp-dialog h4{margin:0 0 6px;font-size:19px;font-weight:800}
+  .rp-dialog .rp-sub{margin:0 0 14px;color:var(--muted);font-size:12px;line-height:1.6}
+  .rp-eyebrow{margin:0 0 6px;color:var(--green);font-size:9.5px;font-weight:800;letter-spacing:.14em}
+  .rp-label{display:block;margin:12px 0 6px;font-size:11px;font-weight:800;color:#334155}
+  .rp-row{display:flex;gap:8px}
+  .rp-row input{flex:1;min-width:0}
+  .rp-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:15px}
+  .rp-error{margin:8px 0 0;color:var(--red);font-size:11.5px;font-weight:700}
+  .rp-secbox{background:#FEF3C7;border:1px solid #FDE68A;color:#92400E;border-radius:10px;padding:10px 12px;font-size:11.5px;line-height:1.55}
+  .rp-code{display:block;width:100%;max-width:430px;background:#0F172A;color:#E2E8F0;border-radius:12px;padding:16px;font:400 11.5px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow:auto;box-shadow:0 16px 34px rgba(15,23,42,.2)}
+  .rp-code .k{color:#7DD3FC}.rp-code .s{color:#86EFAC}.rp-code .n{color:#FCA5A5}.rp-code .c{color:#64748B}
+  .rp-statusline{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#64748B}
+  .rp-statusline b{color:var(--red)}
+  .rp-toast{display:flex;align-items:center;gap:9px;background:#111827;color:#fff;border-radius:10px;padding:12px 15px;box-shadow:0 14px 30px rgba(15,23,42,.24);font-size:12.5px;font-weight:600;max-width:360px}
+  .rp-toast.err{background:var(--red2)}
+  .rp-toast.ok{background:var(--green)}
+  .rp-404{text-align:center;max-width:400px}
+  .rp-404 .num{font:800 64px/1 var(--serif);color:#9E2A2B}
+  .rp-404 h4{font-size:19px;margin:8px 0 8px}
+  .rp-404 p{color:#6E6259;font-size:12px;line-height:1.6;margin:0 0 14px}
+  .rp-404 a{display:inline-block;background:#111827;color:#F9FAFB;border-radius:99px;padding:9px 18px;font-size:11.5px;font-weight:700;text-decoration:none}
+  .rp-login{width:100%;max-width:330px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;text-align:center;box-shadow:0 18px 40px rgba(15,23,42,.12)}
+  .rp-login h4{margin:0 0 3px;font:700 22px var(--serif)}
+  .rp-login .rp-sub{margin:0 0 14px;color:#94A3B8;font-size:10.5px}
+  .rp-pin{display:grid;place-items:center;height:52px;border:1.5px solid #FCA5A5;border-radius:10px;background:#FEF2F2;color:var(--red);font-size:22px;letter-spacing:.24em;box-shadow:0 0 0 3px rgba(220,38,38,.08)}
+  .rp-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0}
+  .rp-keys span{display:grid;place-items:center;height:36px;border:1px solid var(--line);border-radius:8px;background:#F8FAFC;color:#334155;font-size:13px;font-weight:700}
+  .rp-hint{margin:10px 0 0;color:var(--red);font-size:11px;font-weight:700}
+  .rp-suite{width:100%;max-width:330px;border:1px solid rgba(187,247,208,.16);border-radius:20px;background:linear-gradient(180deg,rgba(17,24,39,.97),rgba(15,23,33,.94));padding:24px 22px 18px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+  .rp-suite .rp-eyebrow{color:#34D399;font-size:9px}
+  .rp-suite h4{margin:4px 0 8px;color:#F9FAFB;font:700 30px/1.1 var(--serif)}
+  .rp-suite p{margin:0 0 14px;color:#9CA3AF;font-size:11.5px;line-height:1.6}
+  .rp-suite strong{color:#BBF7D0}
+  .rp-suite label{display:block;text-align:left;margin-bottom:5px;color:#D1D5DB;font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase}
+  .rp-suite input{width:100%;background:rgba(255,255,255,.06);border:1.5px solid #F87171;color:#F9FAFB;border-radius:9px;min-height:40px;padding:9px 11px;font:400 12.5px var(--font)}
+  .rp-suite input::placeholder{color:#6B7280}
+  .rp-suite .rp-error{color:#FCA5A5;margin:7px 0 10px}
+  .rp-suite .go{width:100%;min-height:42px;border:0;border-radius:11px;background:var(--green);color:#fff;font:800 13px var(--font);cursor:pointer}
+  .rp-suite .foot{margin-top:13px;padding-top:11px;border-top:1px solid rgba(209,213,219,.14);color:#9CA3AF;font-size:10.5px}
+  .rp-cam{width:100%;max-width:400px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;box-shadow:0 18px 44px rgba(15,23,42,.13)}
+  .rp-cam-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .rp-cam h4{margin:0;font-size:16px;font-weight:800}
+  .rp-cam .rp-eyebrow{margin:0 0 4px;font-size:9px}
+  .rp-cam .x{border:0;background:#F1F5F9;border-radius:8px;width:26px;height:26px;color:#64748B;font-size:16px;cursor:pointer}
+  .rp-viewport{margin:12px 0 10px;height:96px;border-radius:10px;background:repeating-linear-gradient(45deg,#111827,#111827 10px,#1F2937 10px,#1F2937 20px);display:grid;place-items:center;color:#94A3B8;font-size:10px;letter-spacing:.12em;font-weight:800}
+  .rp-cam .gt-error{background:#FEF2F2;border:1px solid #FECACA;color:var(--red);border-radius:9px;padding:9px 11px;font-size:11.5px;line-height:1.55;margin:0 0 10px}
+  .rp-cam .rp-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-start;margin-top:0}
+  .rp-cam .rp-actions .btn{min-height:34px;padding:6px 10px;font-size:10.5px}
+  .rp-checkout{width:100%;max-width:400px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 14px 34px rgba(15,23,42,.09)}
+  .rp-checkout h4{margin:0 0 4px;font-size:14px;font-weight:800}
+  .rp-checkout .rp-sub{margin:0 0 12px;color:var(--muted);font-size:11.5px}
+  .rp-checkout .rp-field{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid #F1F5F9;font-size:11.5px}
+  .rp-checkout .rp-field span:first-child{color:var(--muted)}
+  .rp-loc{margin-top:10px;background:#FFFBEB;border:1px solid #FDE68A;color:#92400E;border-radius:9px;padding:9px 11px;font-size:11.5px;line-height:1.5}
+  .rp-lockalert{width:100%;max-width:360px;background:#fff;border:1px solid var(--line);border-left:4px solid #111827;border-radius:10px;padding:12px 14px;box-shadow:0 10px 28px rgba(17,24,39,.14)}
+  .rp-lockalert strong{display:block;font-size:13px}
+  .rp-lockalert p{margin:4px 0 8px;color:#6B7280;font-size:12px}
+  .rp-lockalert small{color:#9CA3AF;font-size:10.5px}
+  .rp-lockalert .lk{display:inline-flex;align-items:center;gap:5px;padding:6px 10px;border:1px solid #CBD5E1;border-radius:7px;color:#334155;font-size:10.5px;font-weight:800}
+  .rp-native{width:100%;max-width:350px;background:#fff;border:1px solid #D9DEE5;border-radius:12px;box-shadow:0 16px 40px rgba(15,23,42,.16);overflow:hidden}
+  .rp-native h4{margin:0;padding:13px 15px 9px;font-size:13px;font-weight:800}
+  .rp-native p{margin:0;padding:0 15px 14px;color:#4B5563;font-size:11.5px;line-height:1.55}
+  .rp-native .rp-actions{display:flex;justify-content:flex-end;gap:7px;padding:9px 13px;border-top:1px solid #EEF2F6;background:#F9FAFB}
+  .rp-native .btn{min-height:32px;padding:6px 11px;font-size:10.5px}
+  .rp-native .btn.danger{background:var(--red2);border-color:var(--red2);color:#fff}
+  .rp-settings{width:100%;max-width:400px;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 14px 34px rgba(15,23,42,.09)}
+  .rp-settings .rp-sw{display:flex;gap:7px;padding:9px 12px;border-bottom:1px solid #F1F5F9;flex-wrap:wrap}
+  .rp-settings .rp-sw button{border:1px solid #CBD5E1;background:#fff;color:#334155;border-radius:99px;padding:5px 10px;font-size:10px;font-weight:800;cursor:pointer}
+  .rp-settings .rp-sw button[aria-pressed="true"]{background:#111827;border-color:#111827;color:#fff}
+  .rp-settings .nd-alertbar{max-width:none;border:0;border-bottom:1px solid;border-radius:0;box-shadow:none}
+  .rp-settings .rp-panel{padding:11px 13px;color:#27332D;font-size:11.5px;display:grid;gap:7px}
+  .rp-settings .rp-panel label{display:flex;align-items:center;gap:8px;font-weight:600}
+  .rp-settings .rp-panel input{accent-color:var(--green2);min-height:auto;width:15px;height:15px;padding:0}
+
+  /* shake replay */
+  @keyframes pv-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+  .pv-shake{animation:pv-shake .32s ease}
+
+  /* live frames */
+  .pv-frame-wrap{position:relative;overflow:hidden;border-radius:12px;border:1px solid var(--line);background:#fff}
+  .pv-frame-wrap iframe{display:block;border:0;transform-origin:top left;background:#fff}
+  .pv-frame-scroll{display:flex;gap:16px;overflow-x:auto;padding:4px 2px 14px}
+  .pv-frame-card{flex:0 0 auto}
+  .pv-frame-cap{display:flex;justify-content:space-between;gap:12px;margin-bottom:6px;font-size:11px;font-weight:800;color:#334155}
+  .pv-frame-cap span{color:var(--muted);font-weight:700}
+  .pv-embed{width:100%;height:min(78vh,920px);border:0;display:block;background:#fff}
+  .pv-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .pv-links a{padding:8px 12px;border:1px solid #CBD5E1;border-radius:8px;background:#fff;color:#334155;font-size:11.5px;font-weight:700;text-decoration:none}
+  .pv-links a:hover{border-color:var(--green);color:var(--green)}
+
+  /* lightbox */
+  .pv-lightbox{position:fixed;inset:0;z-index:9999;background:rgba(8,12,22,.78);display:flex;flex-direction:column;padding:18px;backdrop-filter:blur(5px)}
+  .pv-lightbox[hidden]{display:none}
+  .pv-lightbox-bar{display:flex;align-items:center;gap:12px;margin-bottom:10px;color:#F8FAFC}
+  .pv-lightbox-bar strong{font-size:13px}
+  .pv-lightbox-bar .pv-lb-src{color:#94A3B8;font:400 11px ui-monospace,monospace}
+  .pv-lightbox-bar .pv-lb-actions{display:flex;gap:8px;margin-left:auto}
+  .pv-lightbox-bar a,.pv-lightbox-bar button{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.08);color:#E2E8F0;border-radius:8px;padding:7px 11px;font-size:11px;font-weight:700;text-decoration:none;cursor:pointer}
+  .pv-lightbox-bar a:hover,.pv-lightbox-bar button:hover{background:rgba(255,255,255,.18)}
+  .pv-lightbox iframe{flex:1;width:100%;border:0;border-radius:12px;background:#fff}
+  footer{max-width:1500px;margin:0 auto;padding:0 22px 40px;color:var(--muted);font-size:11px;line-height:1.7}
+
+  @media (max-width:900px){
+    .pv-grid{grid-template-columns:1fr}
+    .pv-head-top{padding:13px 14px 10px}
+    .pv-tabs,.pv-toolbar{padding-left:14px;padding-right:14px}
+    main{padding:16px 14px 44px}
+    footer{padding:0 14px 30px}
+    .pv-head-actions{width:100%}
+    .pv-count{margin-left:0}
+  }
+</style>
+</head>
+<body>
+
+<header class="pv-head">
+  <div class="pv-head-top">
+    <div class="pv-brand">
+      <div class="pv-mark">A</div>
+      <div>
+        <h1>Adonai Store · UI states preview</h1>
+        <p>Every “denied / blocked” state, every pop-up and modal, and the real screens at every device size — all in one place. Built from the strings and styles that actually ship in the app.</p>
+      </div>
+    </div>
+    <div class="pv-head-actions">
+      <span class="pv-live"><i></i> Live preview server</span>
+      <a class="pv-link" href="device-preview.html">Device fit tool ↗</a>
+      <a class="pv-link" href="/store">Open storefront ↗</a>
+    </div>
+  </div>
+  <nav class="pv-tabs" role="tablist" aria-label="Preview sections">
+    <button type="button" role="tab" data-tab="denied" aria-selected="true">Denied &amp; blocked <em>15</em></button>
+    <button type="button" role="tab" data-tab="popups" aria-selected="false">Pop-ups &amp; dialogs <em>10</em></button>
+    <button type="button" role="tab" data-tab="screens" aria-selected="false">Every screen size</button>
+    <button type="button" role="tab" data-tab="live" aria-selected="false">Live app pages</button>
+  </nav>
+  <div class="pv-toolbar">
+    <input class="pv-search" id="pvSearch" type="search" placeholder="Filter by state, page or message…" aria-label="Filter cards" />
+    <div class="pv-chips" id="pvChips">
+      <button type="button" class="pv-chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="pv-chip" data-filter="pos" aria-pressed="false">POS</button>
+      <button type="button" class="pv-chip" data-filter="admin" aria-pressed="false">Admin</button>
+      <button type="button" class="pv-chip" data-filter="storefront" aria-pressed="false">Storefront</button>
+      <button type="button" class="pv-chip" data-filter="api" aria-pressed="false">API / server</button>
+    </div>
+    <span class="pv-count" id="pvCount"></span>
+  </div>
+</header>
+
+<main>
+  <!-- ============================== DENIED ============================== -->
+  <section class="pv-pane" data-pane="denied">
+    <p class="pv-intro"><strong>What “denied” looks like in Adonai Store.</strong> Each card below is a faithful miniature of a real state in the app: the message, the colours and the controls come straight from the source files listed under it. Use <strong>Show it live</strong> to open the actual page in a frame, and <strong>Replay</strong> to see the rejection animation again. Sources: <code>js/pos-access.js</code>, <code>access_control.py</code>, <code>app.js</code>, <code>js/notifications.js</code>, <code>js/pos-camera.js</code>, <code>js/storefront.js</code>, <code>404.html</code>, <code>500.html</code>.</p>
+    <div class="pv-grid">
+
+      <!-- 01 -->
+      <article class="pv-card" data-area="admin" data-title="Protected area locked view admin dashboard" data-tags="area password">
+        <div class="pv-card-head"><div><span class="pv-num">01</span><h3>Protected area — locked workspace</h3></div><span class="pv-badge bad">Locked</span></div>
+        <div class="pv-stage">
+          <section class="pa-locked-view" data-shake>
+            <p class="pa-eyebrow">ADMIN-CONFIGURED PROTECTION</p>
+            <h2>Orders, dispatch &amp; audit</h2>
+            <p>Enter the password set by the admin to continue. The register stays open.</p>
+            <div class="pa-locked-actions"><button class="btn primary" type="button">Unlock area</button><button class="btn" type="button">Back to register</button></div>
+          </section>
+          <span class="pv-stage-note">admin.html · view=sales</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> Admin Suite, when a protected area is opened without a valid area session. <b>Source:</b> <code>admin.html#protectedAreaView</code> · <code>app.js showProtectedArea()</code> · <code>css/pos-access.css</code>. Checkout is never locked.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-replay>Replay</button><button class="pv-btn" data-lightbox="admin.html?view=sales" data-title="Admin Suite — Sales (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 02 -->
+      <article class="pv-card" data-area="pos admin" data-title="area password dialog incorrect password rejected" data-tags="403 unlock">
+        <div class="pv-card-head"><div><span class="pv-num">02</span><h3>Area password — rejected</h3></div><span class="pv-badge bad">403</span></div>
+        <div class="pv-stage dialog-stage">
+          <div class="pos-access-overlay">
+            <section class="pos-access-dialog" data-shake>
+              <div class="pa-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+              <p class="pa-eyebrow">OPTIONAL AREA PROTECTION</p>
+              <h2>Orders, dispatch &amp; audit</h2>
+              <p>The admin has protected this area. Enter its password or the admin password. The cashier register stays open.</p>
+              <form onsubmit="return false"><label for="pvPw2">Area password</label>
+                <div class="pa-password-input"><input id="pvPw2" type="password" value="wrong-password" /><button type="button">Show</button></div>
+                <p class="pa-error" role="alert">Incorrect password for this area. Try again.</p>
+                <div class="pa-dialog-actions"><button class="btn" type="button">Cancel</button><button class="btn primary" type="button">Unlock area</button></div>
+              </form>
+              <p class="pa-dialog-foot">Access lasts 30 minutes on this tab. Passwords are verified by the server.</p>
+            </section>
+          </div>
+          <span class="pv-stage-note">js/pos-access.js · passwordDialog()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> POS and Admin, on any protected view after a wrong password is submitted. The error text is the server's <code>INCORRECT_AREA_PASSWORD</code> response from <code>access_control.py</code>; the input gets focus and stays selected so the cashier can retype.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-replay>Replay</button><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 03 -->
+      <article class="pv-card" data-area="api" data-title="403 AREA_PASSWORD_REQUIRED server response json" data-tags="guard">
+        <div class="pv-card-head"><div><span class="pv-num">03</span><h3>Server 403 — AREA_PASSWORD_REQUIRED</h3></div><span class="pv-badge bad">API</span></div>
+        <div class="pv-stage">
+          <pre class="rp-code"><span class="c">// GET /api/orders · HTTP 403 Forbidden</span>
+{
+  <span class="k">"ok"</span>: <span class="n">false</span>,
+  <span class="k">"code"</span>: <span class="s">"AREA_PASSWORD_REQUIRED"</span>,
+  <span class="k">"area"</span>: <span class="s">"orders"</span>,
+  <span class="k">"error"</span>: <span class="s">"Enter the password set by the
+      admin for Orders, dispatch &amp; audit."</span>
+}</pre>
+          <span class="pv-stage-note">access_control.py · locked_response()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the backend guard, before any protected data leaves the server. Four areas can be protected: <code>finance</code>, <code>stock</code>, <code>orders</code>, <code>settings</code>. A sale (<code>POST /api/orders</code>) is deliberately never guarded, so a customer can always check out.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 04 -->
+      <article class="pv-card" data-area="admin" data-title="admin suite passkey gate incorrect passkey" data-tags="login gate">
+        <div class="pv-card-head"><div><span class="pv-num">04</span><h3>Admin Suite gate — passkey rejected</h3></div><span class="pv-badge bad">Denied</span></div>
+        <div class="pv-stage dark">
+          <div class="rp-suite" data-shake>
+            <p class="rp-eyebrow">ADONAI STORE · KAMPALA, UGANDA</p>
+            <h4>Admin Suite</h4>
+            <p>One passkey unlocks <strong>every dashboard</strong> — sales analytics, orders, inventory, ledgers &amp; settings.</p>
+            <label for="pvSuitePw">Store master passkey</label>
+            <input id="pvSuitePw" type="password" value="••••••••" />
+            <p class="rp-error" role="alert">Incorrect passkey — try again.</p>
+            <button class="go" type="button">Unlock Admin Suite</button>
+            <div class="foot">Cashier? Open the POS Register →</div>
+          </div>
+          <span class="pv-stage-note">admin.html#suiteGate · app.js</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the full-screen gate on <code>/admin</code>. Other replies include “That PIN belongs to … — the Admin Suite requires the store master passkey.” and “The server could not verify the passkey right now — try again shortly.”</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-replay>Replay shake</button><button class="pv-btn" data-lightbox="admin.html" data-title="Admin Suite (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 05 -->
+      <article class="pv-card" data-area="pos admin" data-title="staff terminal login invalid PIN key" data-tags="401">
+        <div class="pv-card-head"><div><span class="pv-num">05</span><h3>Staff terminal — invalid key / PIN</h3></div><span class="pv-badge bad">401</span></div>
+        <div class="pv-stage">
+          <div class="rp-login" data-shake>
+            <h4>Staff Terminal</h4>
+            <p class="rp-sub">Adonai Store · Kampala, Uganda</p>
+            <div class="rp-pin">••••</div>
+            <div class="rp-keys"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>C</span><span>0</span><span>⌫</span></div>
+            <p class="rp-hint" role="alert">Invalid Staff Terminal Key or PIN — try again</p>
+          </div>
+          <span class="pv-stage-note">login.html · js/login.js fail()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> <code>/login</code> when staff sign-in is required. The PIN display and text-key input shake red; the message comes from <code>/api/auth/verify</code> (HTTP 401) with a client fallback: “Could not verify key — check network or try again”.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-replay>Replay shake</button><button class="pv-btn" data-lightbox="login.html" data-title="Staff terminal login (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 06 -->
+      <article class="pv-card" data-area="api pos admin" data-title="429 too many sign-in attempts rate limit" data-tags="lockout">
+        <div class="pv-card-head"><div><span class="pv-num">06</span><h3>Rate limited — too many attempts</h3></div><span class="pv-badge warn">429</span></div>
+        <div class="pv-stage">
+          <div class="rp">
+            <div class="rp-statusline"><span>POST /api/auth/verify</span><b>429 Too Many Requests</b></div>
+            <pre class="rp-code">{
+  <span class="k">"ok"</span>: <span class="n">false</span>,
+  <span class="k">"error"</span>: <span class="s">"Too many sign-in attempts.
+                  Try again later."</span>,
+  <span class="k">"retry_after_seconds"</span>: <span class="s">47</span>
+}</pre>
+            <div class="rp-toast err" style="margin-top:12px">⏱ Too many sign-in attempts — wait about 1 minute and try again.</div>
+          </div>
+          <span class="pv-stage-note">security.py · api.py · app.js</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the Admin Suite gate and staff login after repeated failures. The server's <code>RateLimiter</code> returns <code>retry_after_seconds</code>; the UI turns it into a plain-language wait message instead of a dead end.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="login.html" data-title="Staff terminal login (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 07 -->
+      <article class="pv-card" data-area="api admin" data-title="401 403 staff no permission order action session expired" data-tags="unauthorised">
+        <div class="pv-card-head"><div><span class="pv-num">07</span><h3>Session expired / no permission</h3></div><span class="pv-badge bad">401 · 403</span></div>
+        <div class="pv-stage">
+          <div class="rp">
+            <div class="rp-toast err" style="margin-bottom:10px">⛔ Your staff account does not have permission to change this order.</div>
+            <div class="rp-toast err" style="margin-bottom:10px">🔒 Your staff session is no longer valid. Sign in again, then retry the order action.</div>
+            <div class="rp-toast err">🛰 Could not confirm the update because the server could not be reached. Refresh the queue before retrying.</div>
+          </div>
+          <span class="pv-stage-note">app.js orderActionError() · api.py</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> order actions in the Admin Suite. Each HTTP status gets its own human message; a 409 (“order has changed”) also refreshes the queue automatically. Protected endpoints also answer “Unauthorized: Staff terminal authentication required…”.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html?view=orders" data-title="Admin Suite — Orders (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 08 -->
+      <article class="pv-card" data-area="pos" data-title="camera permission denied garment barcode scan" data-tags="NotAllowedError">
+        <div class="pv-card-head"><div><span class="pv-num">08</span><h3>Camera permission — denied</h3></div><span class="pv-badge bad">Device</span></div>
+        <div class="pv-stage">
+          <div class="rp-cam">
+            <div class="rp-cam-head"><div><p class="rp-eyebrow">PHONE CAMERA · GARMENT CHECKOUT</p><h4>Scan a garment tag</h4></div><button class="x" type="button">×</button></div>
+            <p class="rp-sub" style="margin:8px 0 0;color:var(--muted);font-size:11.5px">Point your rear camera at the printed barcode.</p>
+            <div class="rp-viewport">CAMERA OFF</div>
+            <p class="gt-error" role="alert">Camera permission was not granted. Allow camera access in your browser settings, then try again. You can also scan a tag photo or type its code.</p>
+            <div class="rp-actions"><button class="btn" type="button">Try camera again</button><button class="btn" type="button">Scan a tag photo</button><button class="btn primary" type="button">Add to sale</button></div>
+          </div>
+          <span class="pv-stage-note">js/pos-camera.js · permissionError()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the POS barcode scanner. Other denial variants: “Camera access is blocked in this embedded preview…”, “No camera was found on this device…”, “The camera is being used by another app…”. <b>Important:</b> denial never blocks the sale — a tag photo or a typed SKU always works.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 09 -->
+      <article class="pv-card" data-area="pos" data-title="browser notifications permission denied blocked pop-ups" data-tags="alert bar">
+        <div class="pv-card-head"><div><span class="pv-num">09</span><h3>System pop-ups — blocked</h3></div><span class="pv-badge warn">Denied</span></div>
+        <div class="pv-stage">
+          <div class="nd-alertbar" data-state="blocked">
+            <div class="nd-alert-main"><span class="nd-alert-ico">🔔</span>
+              <p class="nd-alert-text">Pop-ups are blocked for this site. Click the 🔒 icon beside the web address → Notifications → Allow.</p>
+              <button class="nd-alert-enable" type="button" hidden>Open settings</button>
+            </div>
+          </div>
+          <span class="pv-stage-note">js/notifications.js · css/notifications.css</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the notification drawer's amber alert bar. On Android the text is “Pop-ups are blocked for Adonai POS. Allow notifications in Android settings.” with an <b>Open settings</b> button. In-app alerts keep working even when system pop-ups are denied.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-tab-jump="popups">See all bar states ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 10 -->
+      <article class="pv-card" data-area="storefront" data-title="location permission denied checkout delivery area" data-tags="geolocation">
+        <div class="pv-card-head"><div><span class="pv-num">10</span><h3>Location permission — denied</h3></div><span class="pv-badge warn">Checkout</span></div>
+        <div class="pv-stage">
+          <div class="rp-checkout">
+            <h4>Delivery details</h4>
+            <p class="rp-sub">Boda delivery · Kampala</p>
+            <div class="rp-field"><span>Destination area</span><strong>Kibuli · UGX 5,000</strong></div>
+            <div class="rp-field"><span>Phone number</span><strong>+256 7•• ••• •••</strong></div>
+            <div class="rp-loc" role="status">📍 Location permission was not granted; your selected destination area will be used.</div>
+          </div>
+          <span class="pv-stage-note">js/storefront.js · detectCurrentLocation()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the storefront checkout, only after the customer actively confirms the order. <b>Permission denial never blocks checkout</b> — the manually selected delivery area remains the fallback.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="index.html" data-title="Storefront (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 11 -->
+      <article class="pv-card" data-area="pos admin" data-title="locked notification redacted unlock area to view details" data-tags="bell">
+        <div class="pv-card-head"><div><span class="pv-num">11</span><h3>Locked notification — details hidden</h3></div><span class="pv-badge bad">Redacted</span></div>
+        <div class="pv-stage">
+          <div class="rp-lockalert">
+            <strong>New order activity</strong>
+            <p>Unlock Orders, dispatch &amp; audit to view the details.</p>
+            <small>Adonai Store · just now</small>
+            <div style="margin-top:10px"><span class="lk">🔒 Protected area</span></div>
+          </div>
+          <span class="pv-stage-note">access_control.py · sanitize_notification()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the notification bell and toast feed while an area is locked. The server replaces <em>all</em> free text — amounts, customer notes, supplier costs, IDs — with a generic title and message, so the bell stays useful without leaking protected data. The same filter applies to the SSE stream.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 12 -->
+      <article class="pv-card" data-area="pos" data-title="pop-up blocked browser window.open flash" data-tags="toast">
+        <div class="pv-card-head"><div><span class="pv-num">12</span><h3>Browser pop-up blocked</h3></div><span class="pv-badge warn">Fallback</span></div>
+        <div class="pv-stage">
+          <div class="rp">
+            <div class="rp-toast err">🚫 Pop-up blocked — open manually: https://adonai-store.onrender.com/</div>
+            <p style="margin:12px 0 0;color:var(--muted);font-size:11.5px;line-height:1.6">Shown when “View live store” cannot open a native in-app browser or a new tab. The URL stays visible so the cashier can still reach it.</p>
+          </div>
+          <span class="pv-stage-note">js/pos.js · flash()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the POS register's “View store” button. It tries the native browser plugin first, then <code>window.open</code>, then this error flash as the last resort.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 13 -->
+      <article class="pv-card" data-area="pos admin" data-title="export print receipt blocked locked area access" data-tags="audit">
+        <div class="pv-card-head"><div><span class="pv-num">13</span><h3>Export / print stopped by a lock</h3></div><span class="pv-badge bad">Blocked</span></div>
+        <div class="pv-stage">
+          <div class="rp">
+            <div class="rp-toast err" style="margin-bottom:10px">This area is locked. Unlock Orders &amp; audit before printing receipts.</div>
+            <div class="rp-toast err" style="margin-bottom:10px">This area was locked. Unlock it before exporting again.</div>
+            <div class="rp-toast err">Save denied by server</div>
+          </div>
+          <span class="pv-stage-note">js/audit-exports.js · js/receipt-printing.js</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> audit exports, receipt reprints and garment saves. A lock arriving <em>mid-action</em> cancels the download in progress, clears the busy state and leaves this explanation instead of a silent failure.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html?view=sales" data-title="Admin Suite — Sales (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 14 -->
+      <article class="pv-card" data-area="storefront" data-title="404 item not found sold moved" data-tags="error page">
+        <div class="pv-card-head"><div><span class="pv-num">14</span><h3>404 — piece sold or moved</h3></div><span class="pv-badge info">Storefront</span></div>
+        <div class="pv-stage">
+          <div class="rp-404">
+            <div class="num">404</div>
+            <h4>This piece might have been sold or moved.</h4>
+            <p>Some items are unique 1-of-1 pieces while others are stocked in multiple factory-new variants. Browse the active Adonai Store collection.</p>
+            <a href="#0">Explore Live Rail Inventory</a>
+          </div>
+          <span class="pv-stage-note">404.html</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> any unknown URL, or a product permalink whose item was sold/removed. Keeps the storefront header and offers two ways back into the catalogue.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="404.html" data-title="404 — Item Not Found (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- 15 -->
+      <article class="pv-card" data-area="storefront" data-title="500 server hiccup error" data-tags="error page">
+        <div class="pv-card-head"><div><span class="pv-num">15</span><h3>500 — technical bump</h3></div><span class="pv-badge info">Storefront</span></div>
+        <div class="pv-stage">
+          <div class="rp-404">
+            <div class="num">500</div>
+            <h4>We hit a slight technical bump.</h4>
+            <p>Our system encountered a temporary glitch while processing your request. Please reload the page or reach out directly to our shop concierge on WhatsApp.</p>
+            <a href="#0">↻ Reload Page</a>
+          </div>
+          <span class="pv-stage-note">500.html</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> unhandled server errors. Offers a one-tap reload and a direct WhatsApp support link with a pre-filled message — a dead end becomes a support conversation.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="500.html" data-title="500 — Server Hiccup (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============================== POPUPS ============================== -->
+  <section class="pv-pane" data-pane="popups" hidden>
+    <p class="pv-intro"><strong>Every pop-up family in the app.</strong> These are the same dialogs shown above, here in their normal (non-rejected) state, plus the toasts, invitation cards and the interactive pop-up settings bar. Switch the bar between <em>off / paused / blocked / on</em> to see all four designs.</p>
+    <div class="pv-grid">
+
+      <!-- P1 -->
+      <article class="pv-card" data-area="admin" data-title="admin master key authorization modal sec-box" data-tags="dialog">
+        <div class="pv-card-head"><div><span class="pv-num">P1</span><h3>Admin Master Key authorization</h3></div><span class="pv-badge info">Modal</span></div>
+        <div class="pv-stage">
+          <div class="rp-dialog">
+            <h4>Admin Master Key Authorization</h4>
+            <p class="rp-sub">Enter secondary Master Key to unlock protected administrative controls, financial logs, and system settings.</p>
+            <div class="rp-secbox">🛡 <b>Security Upgrade:</b> This action requires the secondary Admin Master Key Password to protect store permissions, financial records, and core parameters.</div>
+            <label class="rp-label" for="pvMk">Master key password</label>
+            <div class="rp-row"><input id="pvMk" type="password" placeholder="Enter master key password…" /><button class="btn ghost" type="button">Show</button></div>
+            <p style="margin:6px 0 0;color:var(--muted);font-size:10.5px">Verified by the server. Production uses the STORE_MASTER_KEY environment variable.</p>
+            <div class="rp-actions"><button class="btn" type="button">Cancel</button><button class="btn primary" type="button">Authorize &amp; Proceed</button></div>
+          </div>
+          <span class="pv-stage-note">app.js · renderMasterModal()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> any protected action inside the Admin Suite when the master key is still locked. A wrong key shakes the input and shows a toast: “Incorrect master key”.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html?view=settings" data-title="Admin Suite — Settings (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P2 -->
+      <article class="pv-card" data-area="pos admin" data-title="area password unlock dialog clean state" data-tags="dialog">
+        <div class="pv-card-head"><div><span class="pv-num">P2</span><h3>Area password prompt</h3></div><span class="pv-badge info">Modal</span></div>
+        <div class="pv-stage dialog-stage">
+          <div class="pos-access-overlay">
+            <section class="pos-access-dialog">
+              <div class="pa-dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+              <p class="pa-eyebrow">OPTIONAL AREA PROTECTION</p>
+              <h2>Stock management &amp; intake</h2>
+              <p>The admin has protected this area. Enter its password or the admin password. The cashier register stays open.</p>
+              <form onsubmit="return false"><label for="pvPwP2">Area password</label>
+                <div class="pa-password-input"><input id="pvPwP2" type="password" placeholder="••••••••" /><button type="button">Show</button></div>
+                <p class="pa-error"></p>
+                <div class="pa-dialog-actions"><button class="btn" type="button">Cancel</button><button class="btn primary" type="button">Unlock area</button></div>
+              </form>
+              <p class="pa-dialog-foot">Access lasts 30 minutes on this tab. Passwords are verified by the server.</p>
+            </section>
+          </div>
+          <span class="pv-stage-note">js/pos-access.js · passwordDialog()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> the first tap on any protected view. Escape or a backdrop click cancels; focus is trapped inside the dialog; the wrong-password state is card 02.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-tab-jump="denied">See rejected state ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P3 -->
+      <article class="pv-card" data-area="admin" data-title="admin suite unlock gate clean state" data-tags="dialog">
+        <div class="pv-card-head"><div><span class="pv-num">P3</span><h3>Admin Suite unlock gate</h3></div><span class="pv-badge info">Full screen</span></div>
+        <div class="pv-stage dark">
+          <div class="rp-suite">
+            <p class="rp-eyebrow">ADONAI STORE · KAMPALA, UGANDA</p>
+            <h4>Admin Suite</h4>
+            <p>One passkey unlocks <strong>every dashboard</strong> — sales analytics, orders, the inventory rack, catalog intake, financial ledgers &amp; strategy, staff and settings. Once inside, nothing asks for another key.</p>
+            <label for="pvSuitePw3">Store master passkey</label>
+            <input id="pvSuitePw3" type="password" placeholder="Enter the store master passkey…" />
+            <p class="rp-error">&nbsp;</p>
+            <button class="go" type="button">Unlock Admin Suite</button>
+            <div class="foot">Cashier? Open the POS Register →</div>
+          </div>
+          <span class="pv-stage-note">admin.html#suiteGate</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> <code>/admin</code> on a fresh session. While verifying, the button reads “Verifying passkey…”. On success the page reloads with full authorisation.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html" data-title="Admin Suite (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P4 -->
+      <article class="pv-card" data-area="pos" data-title="camera scan garment tag dialog live viewport" data-tags="dialog">
+        <div class="pv-card-head"><div><span class="pv-num">P4</span><h3>Camera / barcode scan dialog</h3></div><span class="pv-badge info">Modal</span></div>
+        <div class="pv-stage">
+          <div class="rp-cam">
+            <div class="rp-cam-head"><div><p class="rp-eyebrow">PHONE CAMERA · GARMENT CHECKOUT</p><h4>Scan a garment tag</h4></div><button class="x" type="button">×</button></div>
+            <p class="rp-sub" style="margin:8px 0 0;color:var(--muted);font-size:11.5px">Point your rear camera at the printed barcode. The saved garment and its current price go straight into your sale.</p>
+            <div class="rp-viewport">ALIGN THE FULL BARCODE HERE</div>
+            <p style="margin:0 0 8px;color:var(--muted);font-size:11px">Or enter the code printed below the barcode</p>
+            <div class="rp-row"><input placeholder="Garment barcode / SKU" /><button class="btn primary" type="button">Add to sale</button></div>
+            <div class="rp-actions" style="margin-top:10px"><button class="btn" type="button">Try camera again</button><button class="btn" type="button">Scan a tag photo</button></div>
+          </div>
+          <span class="pv-stage-note">js/pos-camera.js · GarmentTools.dialog()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> POS “Scan tag”. Status line messages include “No readable barcode found…”, “Checking saved garment and reserving stock…” and “Could not add “SKU”…”. The denied version is card 08.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-tab-jump="denied">See denied state ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P5 interactive -->
+      <article class="pv-card" data-area="pos admin" data-title="pop-up permission settings bar off paused blocked on" data-tags="interactive">
+        <div class="pv-card-head"><div><span class="pv-num">P5</span><h3>Pop-up settings bar — all 4 states</h3></div><span class="pv-badge ok">Interactive</span></div>
+        <div class="pv-stage">
+          <div class="rp-settings">
+            <div class="rp-sw" id="pvAlertSwitch">
+              <button type="button" data-state="off" aria-pressed="true">Off</button>
+              <button type="button" data-state="paused" aria-pressed="false">Paused</button>
+              <button type="button" data-state="blocked" aria-pressed="false">Blocked</button>
+              <button type="button" data-state="on" aria-pressed="false">On</button>
+            </div>
+            <div class="nd-alertbar" id="pvAlertBar" data-state="off">
+              <div class="nd-alert-main"><span class="nd-alert-ico" id="pvAlertIco">🔔</span>
+                <p class="nd-alert-text" id="pvAlertText">Get a pop-up on this computer for every new order, customer message and store change — even while the POS is minimised.</p>
+                <button class="nd-alert-enable" id="pvAlertEnable" type="button">Turn on pop-ups</button>
+              </div>
+            </div>
+            <div class="rp-panel" id="pvAlertPanel">
+              <label><input type="checkbox" checked /> System pop-ups</label>
+              <label><input type="checkbox" checked /> In-app banners while the POS is open</label>
+              <label><input type="checkbox" checked /> Alert sound</label>
+            </div>
+          </div>
+          <span class="pv-stage-note">js/notifications.js · alertState()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Try it:</b> click Off / Paused / Blocked / On. The bar changes colour, message and button exactly as the real drawer does. “Blocked” is the denied browser-permission state; “Unsupported” adds a fifth amber variant for browsers with no Notification API.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P6 -->
+      <article class="pv-card" data-area="pos admin" data-title="permission invitation toast turn on pop-ups" data-tags="toast">
+        <div class="pv-card-head"><div><span class="pv-num">P6</span><h3>“Turn on pop-ups” invitation</h3></div><span class="pv-badge info">Toast</span></div>
+        <div class="pv-stage">
+          <div class="toast-card toast-new_order toast-popup-invite">
+            <div class="toast-content">
+              <strong>Get pop-ups for new orders?</strong>
+              <p>See new website orders, customer messages and store changes on this computer, even when the POS is minimised.</p>
+              <div class="toast-actions"><button type="button" class="toast-btn toast-view">Turn on pop-ups</button><button type="button" class="toast-close">×</button></div>
+            </div>
+          </div>
+          <span class="pv-stage-note">js/notifications.js · maybePromptForPopups()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> once per device, only when browser permission is still “default”. The actual permission prompt is only triggered by a click on this card — browsers reject automatic prompts. If the device does not display it, the drawer shows “This device did not show the pop-up. Check that notifications are allowed for this app.”</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P7 -->
+      <article class="pv-card" data-area="pos admin" data-title="classic bottom toast success error" data-tags="toast">
+        <div class="pv-card-head"><div><span class="pv-num">P7</span><h3>Bottom toasts — success &amp; error</h3></div><span class="pv-badge info">Toast</span></div>
+        <div class="pv-stage">
+          <div class="rp">
+            <div class="rp-toast ok" style="margin-bottom:10px">✓ Admin Suite unlocked — every dashboard is open</div>
+            <div class="rp-toast" style="margin-bottom:10px">🔒 Protected areas locked. Checkout is still open.</div>
+            <div class="rp-toast err">⊘ Incorrect master key</div>
+          </div>
+          <span class="pv-stage-note">styles.css .toast · js/pos-access.js notify()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> bottom-right of the POS/Admin after an action. Errors add <code>.err</code> → crimson background; messages auto-dismiss after 4 seconds and never block the UI.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html" data-title="Admin Suite (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P8 -->
+      <article class="pv-card" data-area="pos admin" data-title="notification feed toast card order message low stock" data-tags="toast">
+        <div class="pv-card-head"><div><span class="pv-num">P8</span><h3>Notification feed card</h3></div><span class="pv-badge info">Toast</span></div>
+        <div class="pv-stage">
+          <div class="toast-card toast-low_stock" style="margin-bottom:10px">
+            <div class="toast-content"><strong>Low stock alert</strong><p>3 pieces left in “Indigo Type III Trucker Jacket”.</p></div>
+            <button class="toast-close" type="button">×</button>
+          </div>
+          <div class="toast-card toast-new_message">
+            <div class="toast-content"><strong>New customer message</strong><p>“Is the emerald blazer still available?”</p></div>
+            <button class="toast-close" type="button">×</button>
+          </div>
+          <span class="pv-stage-note">css/notifications.css · .toast-card</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> top-right toast stack and the bell drawer. The left border encodes the type: emerald orders, blue messages, amber stock, slate expenses. Press-and-hold enters multi-select with a confirm-before-delete toolbar.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="pos.html" data-title="POS register (real page)">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P9 -->
+      <article class="pv-card" data-area="admin" data-title="confirm delete area password native dialog" data-tags="confirm">
+        <div class="pv-card-head"><div><span class="pv-num">P9</span><h3>Destructive-action confirmations</h3></div><span class="pv-badge warn">Confirm</span></div>
+        <div class="pv-stage">
+          <div class="rp-native">
+            <h4>Delete this area password?</h4>
+            <p>Delete this area password and revoke its sessions? Area protection will stay on.</p>
+            <div class="rp-actions"><button class="btn" type="button">Cancel</button><button class="btn danger" type="button">Delete</button></div>
+          </div>
+          <span class="pv-stage-note">js/pos-access.js · window.confirm()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> Staff &amp; Permissions. A second confirm asks “Remove the admin password, every area password and all area protection? This cannot be undone.” — irreversible actions always get an explicit second step.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html?view=staff" data-title="Admin Suite — Staff & Permissions">Show it live ↗</button></div>
+        </div>
+      </article>
+
+      <!-- P10 -->
+      <article class="pv-card" data-area="pos admin" data-title="garment tag print preview dialog receipt dialog" data-tags="dialog">
+        <div class="pv-card-head"><div><span class="pv-num">P10</span><h3>Print / tag preview dialogs</h3></div><span class="pv-badge info">Modal</span></div>
+        <div class="pv-stage">
+          <div class="rp-dialog" style="max-width:360px">
+            <p class="rp-eyebrow">CLEAN GARMENT TAG · LAYOUT PREVIEW</p>
+            <h4 style="font-size:16px">Garment tag preview</h4>
+            <p class="rp-sub">Layout preview before printing. The printed tag uses the configured storefront, never a temporary preview origin.</p>
+            <div style="height:78px;border:1px dashed #CBD5E1;border-radius:9px;background:#F8FAFC;display:grid;place-items:center;color:#64748B;font-size:10.5px;font-weight:700;letter-spacing:.08em">ADONAI · TAG LAYOUT</div>
+            <div class="rp-actions"><button class="btn" type="button">Close</button><button class="btn primary" type="button">Print tag</button></div>
+          </div>
+          <span class="pv-stage-note">js/garment-tools.js · GarmentTools.openTag()</span>
+        </div>
+        <div class="pv-card-body">
+          <p class="pv-where"><b>Where:</b> catalog intake (<code>?tagPreview=1</code> opens it automatically) and the POS receipt printer. Both use the same dialog shell and stay fully usable on a 360 px phone.</p>
+          <div class="pv-card-actions"><button class="pv-btn" data-lightbox="admin.html?view=intake&amp;tagPreview=1" data-title="Admin Suite — Intake tag preview">Show it live ↗</button></div>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============================== SCREENS ============================== -->
+  <section class="pv-pane" data-pane="screens" hidden>
+    <p class="pv-intro"><strong>Every viewport, real pages.</strong> The tool below renders the POS register and Admin Suite at true CSS-pixel device sizes — 360 × 740 phone, 780 × 360 landscape terminal, 834 × 1112 tablet and 1280 × 800 laptop — with Display size and Fit layer controls. Under it, the storefront is framed at the same four sizes.</p>
+
+    <article class="pv-card pv-wide" data-area="pos admin" data-title="device fit preview POS admin all viewports">
+      <div class="pv-card-head"><div><span class="pv-num">S1</span><h3>Device fit preview — POS &amp; Admin, four device sizes</h3></div><span class="pv-badge ok">Live iframe</span></div>
+      <div class="pv-stage flush">
+        <iframe class="pv-embed" data-src="device-preview.html" title="Adonai device fit preview" loading="lazy"></iframe>
+      </div>
+      <div class="pv-card-body">
+        <p class="pv-where"><b>Source:</b> <code>device-preview.html</code> · <code>css/adaptive-display.css</code>. Sign in once in a normal tab of this same address and the frames render the real screens instead of the login gate. <em>Fit layer: Off</em> reproduces the old inflated-text bug in the 780 × 360 landscape frame.</p>
+        <div class="pv-card-actions"><a class="pv-btn" href="device-preview.html" target="_blank" rel="noopener">Open full screen ↗</a></div>
+      </div>
+    </article>
+
+    <article class="pv-card pv-wide" data-area="storefront" data-title="storefront frames phone landscape tablet laptop">
+      <div class="pv-card-head"><div><span class="pv-num">S2</span><h3>Storefront at the same four sizes</h3></div><span class="pv-badge ok">Live iframe</span></div>
+      <div class="pv-stage flush" style="padding:16px;overflow-x:auto;display:block">
+        <div class="pv-frame-scroll" id="pvStorefrontFrames">
+          <div class="pv-frame-card"><div class="pv-frame-cap">Phone · portrait <span>360 × 740</span></div><div class="pv-frame-wrap" style="width:180px;height:370px"><iframe data-src="index.html" width="360" height="740" style="transform:scale(.5)" title="Storefront phone portrait" loading="lazy"></iframe></div></div>
+          <div class="pv-frame-card"><div class="pv-frame-cap">Phone · landscape <span>780 × 360</span></div><div class="pv-frame-wrap" style="width:390px;height:180px"><iframe data-src="index.html" width="780" height="360" style="transform:scale(.5)" title="Storefront phone landscape" loading="lazy"></iframe></div></div>
+          <div class="pv-frame-card"><div class="pv-frame-cap">Tablet <span>834 × 1112</span></div><div class="pv-frame-wrap" style="width:292px;height:389px"><iframe data-src="index.html" width="834" height="1112" style="transform:scale(.35)" title="Storefront tablet" loading="lazy"></iframe></div></div>
+          <div class="pv-frame-card"><div class="pv-frame-cap">Laptop <span>1280 × 800</span></div><div class="pv-frame-wrap" style="width:448px;height:280px"><iframe data-src="index.html" width="1280" height="800" style="transform:scale(.35)" title="Storefront laptop" loading="lazy"></iframe></div></div>
+        </div>
+      </div>
+      <div class="pv-card-body">
+        <p class="pv-where"><b>Note:</b> each frame is a real viewport, so it triggers exactly that device's media queries — this is not a resized screenshot. Scroll the row horizontally to see the laptop frame.</p>
+        <div class="pv-links"><a href="index.html" target="_blank" rel="noopener">Storefront full screen ↗</a><a href="product.html" target="_blank" rel="noopener">Product page ↗</a><a href="pos.html" target="_blank" rel="noopener">POS register ↗</a><a href="admin.html" target="_blank" rel="noopener">Admin Suite ↗</a></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- ============================== LIVE ============================== -->
+  <section class="pv-pane" data-pane="live" hidden>
+    <p class="pv-intro"><strong>The real app, running on this server.</strong> Each frame below loads the actual page (not a mockup) at 50% scale. Demo catalogue data is seeded so the storefront, POS and dashboards have content. Click <em>Open full page</em> to use any of them at full size inside the preview.</p>
+    <div class="pv-grid" id="pvLiveGrid">
+
+      <article class="pv-card" data-area="storefront" data-title="storefront homepage live">
+        <div class="pv-card-head"><div><span class="pv-num">L1</span><h3>Storefront</h3></div><span class="pv-badge ok">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="index.html" width="800" height="420" style="transform:scale(.5);width:800px" title="Storefront live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>/</code> · <code>/store</code> — public catalogue, cart, checkout, delivery areas and policies.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="index.html" data-title="Storefront (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="pos" data-title="POS register live">
+        <div class="pv-card-head"><div><span class="pv-num">L2</span><h3>POS register</h3></div><span class="pv-badge ok">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="pos.html" width="800" height="420" style="transform:scale(.5);width:800px" title="POS register live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>/pos</code> — cashier checkout, barcode scan, receipts, notifications, optional area passwords.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="pos.html" data-title="POS register (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="admin" data-title="admin suite dashboards live">
+        <div class="pv-card-head"><div><span class="pv-num">L3</span><h3>Admin Suite</h3></div><span class="pv-badge ok">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="admin.html?view=overview" width="800" height="420" style="transform:scale(.5);width:800px" title="Admin Suite live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>/admin</code> — analytics, orders, inventory, intake, finance, staff &amp; permissions, settings.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="admin.html?view=overview" data-title="Admin Suite (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="pos admin" data-title="staff terminal login live">
+        <div class="pv-card-head"><div><span class="pv-num">L4</span><h3>Staff terminal login</h3></div><span class="pv-badge ok">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="login.html" width="800" height="420" style="transform:scale(.5);width:800px" title="Staff login live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>/login</code> — touch PIN / terminal key. In this preview, staff auth is off, so the open-access notice is shown.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="login.html" data-title="Staff terminal login (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="storefront" data-title="product detail page live">
+        <div class="pv-card-head"><div><span class="pv-num">L5</span><h3>Product detail page</h3></div><span class="pv-badge ok">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="product.html" width="800" height="420" style="transform:scale(.5);width:800px" title="Product page live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>/product/&lt;slug&gt;</code> — measurements, fabric, flaw disclosure, media gallery, order path.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="product.html" data-title="Product detail (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="storefront" data-title="rider delivery demo live">
+        <div class="pv-card-head"><div><span class="pv-num">L6</span><h3>Rider delivery</h3></div><span class="pv-badge ok">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="rider-demo.html" width="800" height="420" style="transform:scale(.5);width:800px" title="Rider demo live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>rider.html</code> / <code>rider-demo.html</code> — assigned orders, GPS sharing consent and the persistent Stop action.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="rider-demo.html" data-title="Rider delivery (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="storefront" data-title="404 error page live">
+        <div class="pv-card-head"><div><span class="pv-num">L7</span><h3>404 error page</h3></div><span class="pv-badge info">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="404.html" width="800" height="420" style="transform:scale(.5);width:800px" title="404 page live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>404.html</code> — served for unknown paths and sold items.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="404.html" data-title="404 (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="storefront" data-title="500 error page live">
+        <div class="pv-card-head"><div><span class="pv-num">L8</span><h3>500 error page</h3></div><span class="pv-badge info">Live</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="500.html" width="800" height="420" style="transform:scale(.5);width:800px" title="500 page live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>500.html</code> — reload button plus direct WhatsApp support link.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="500.html" data-title="500 (real page)">Open full page ↗</button></div></div>
+      </article>
+
+      <article class="pv-card" data-area="delivery" data-title="Adonai Delivery rider partner app live">
+        <div class="pv-card-head"><div><span class="pv-num">L9</span><h3>Adonai Delivery — rider app</h3></div><span class="pv-badge ok">Third app</span></div>
+        <div class="pv-stage" style="padding:14px"><div class="pv-frame-wrap" style="width:100%;height:210px"><iframe data-src="delivery.html?demo=1" width="800" height="420" style="transform:scale(.5);width:800px" title="Adonai Delivery live" loading="lazy"></iframe></div></div>
+        <div class="pv-card-body"><p class="pv-where"><code>/delivery</code> — the separately installable rider application. Sign in or create an account, check in for the day with a selfie and signature, link the phone with the dispatch App code, then accept assigned jobs with one tap. Decline, deliver and history follow. Uses its own manifest and device session.</p><div class="pv-card-actions"><button class="pv-btn solid" data-lightbox="delivery.html?demo=1" data-title="Adonai Delivery (real page)">Open full page ↗</button><a class="pv-btn" href="delivery.html?demo=1" target="_blank" rel="noopener">Open app ↗</a></div></div>
+      </article>
+
+    </div>
+  </section>
+</main>
+
+<footer>
+  Adonai Store · UI states preview — a local review tool, not part of the production storefront. All states shown here are reproducing the shipped strings and styles; “Show it live” frames load the real pages from this same server. Demo catalogue data is seeded locally (SQLite) and is not deployed.
+</footer>
+
+<!-- lightbox -->
+<div class="pv-lightbox" id="pvLightbox" hidden>
+  <div class="pv-lightbox-bar">
+    <strong id="pvLbTitle">Real page</strong>
+    <span class="pv-lb-src" id="pvLbSrc"></span>
+    <div class="pv-lb-actions">
+      <a id="pvLbOpen" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+      <button type="button" id="pvLbClose">✕ Close</button>
+    </div>
+  </div>
+  <iframe id="pvLbFrame" title="Real page preview"></iframe>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.pv-tabs button[data-tab]'));
+  var panes = Array.prototype.slice.call(document.querySelectorAll('.pv-pane'));
+  var chips = Array.prototype.slice.call(document.querySelectorAll('.pv-chip[data-filter]'));
+  var search = document.getElementById('pvSearch');
+  var countEl = document.getElementById('pvCount');
+  var activeTab = 'denied', activeFilter = 'all', keyword = '';
+
+  function hydrate(pane){
+    pane.querySelectorAll('iframe[data-src]').forEach(function(frame){
+      if (frame.src) return;
+      frame.src = frame.getAttribute('data-src');
+    });
+  }
+  function showTab(name, push){
+    activeTab = name;
+    tabs.forEach(function(b){ b.setAttribute('aria-selected', String(b.getAttribute('data-tab') === name)); });
+    panes.forEach(function(p){
+      var on = p.getAttribute('data-pane') === name;
+      p.hidden = !on;
+      if (on) hydrate(p);
+    });
+    applyFilter();
+    if (push !== false) {
+      try { history.replaceState(null, '', '#' + name); } catch (e) {}
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function applyFilter(){
+    var pane = panes.filter(function(p){ return p.getAttribute('data-pane') === activeTab; })[0];
+    if (!pane) return;
+    var cards = Array.prototype.slice.call(pane.querySelectorAll('.pv-card'));
+    var shown = 0;
+    cards.forEach(function(card){
+      var area = (card.getAttribute('data-area') || '') + ' ' + (card.getAttribute('data-tags') || '');
+      var text = ((card.getAttribute('data-title') || '') + ' ' + card.textContent).toLowerCase();
+      var matchArea = activeFilter === 'all' || area.split(/\s+/).indexOf(activeFilter) !== -1;
+      var matchText = !keyword || text.indexOf(keyword) !== -1;
+      var on = matchArea && matchText;
+      card.hidden = !on;
+      if (on) shown++;
+    });
+    var empty = pane.querySelector('.pv-empty');
+    if (!shown && !empty) {
+      var div = document.createElement('div');
+      div.className = 'pv-empty';
+      div.textContent = 'No states match that filter. Try another keyword or area.';
+      var grid = pane.querySelector('.pv-grid');
+      if (grid) grid.appendChild(div);
+    } else if (shown && empty) { empty.remove(); }
+    countEl.textContent = shown + ' of ' + cards.length + ' shown';
+  }
+  tabs.forEach(function(b){ b.addEventListener('click', function(){ showTab(b.getAttribute('data-tab')); }); });
+  chips.forEach(function(c){ c.addEventListener('click', function(){
+    activeFilter = c.getAttribute('data-filter');
+    chips.forEach(function(x){ x.setAttribute('aria-pressed', String(x === c)); });
+    applyFilter();
+  }); });
+  search.addEventListener('input', function(){ keyword = search.value.trim().toLowerCase(); applyFilter(); });
+
+  /* "Replay" re-triggers the rejection shake on the card's flagged element. */
+  document.addEventListener('click', function(event){
+    var replay = event.target.closest('[data-replay]');
+    if (replay) {
+      var card = replay.closest('.pv-card');
+      var target = card && card.querySelector('[data-shake]');
+      if (target) {
+        target.classList.remove('pv-shake');
+        void target.offsetWidth;
+        target.classList.add('pv-shake');
+        setTimeout(function(){ target.classList.remove('pv-shake'); }, 400);
+      }
+      return;
+    }
+    var jump = event.target.closest('[data-tab-jump]');
+    if (jump) { showTab(jump.getAttribute('data-tab-jump')); return; }
+  });
+
+  /* Interactive pop-up settings bar. */
+  var alertInfo = {
+    off: { ico:'🔔', text:'Get a pop-up on this computer for every new order, customer message and store change — even while the POS is minimised.', btn:'Turn on pop-ups', showBtn:true },
+    paused: { ico:'⏸', text:'Pop-ups are paused on this computer.', btn:'Resume pop-ups', showBtn:true },
+    blocked: { ico:'⛔', text:'Pop-ups are blocked for this site. Click the 🔒 icon beside the web address → Notifications → Allow.', btn:'Open settings', showBtn:false },
+    on: { ico:'✓', text:'Pop-ups are on for this computer.', btn:'Turn on pop-ups', showBtn:false }
+  };
+  var alertSwitch = document.getElementById('pvAlertSwitch');
+  if (alertSwitch) alertSwitch.addEventListener('click', function(event){
+    var button = event.target.closest('button[data-state]');
+    if (!button) return;
+    var state = button.getAttribute('data-state'), info = alertInfo[state];
+    if (!info) return;
+    alertSwitch.querySelectorAll('button').forEach(function(b){ b.setAttribute('aria-pressed', String(b === button)); });
+    document.getElementById('pvAlertBar').setAttribute('data-state', state);
+    document.getElementById('pvAlertIco').textContent = info.ico;
+    document.getElementById('pvAlertText').textContent = info.text;
+    var enable = document.getElementById('pvAlertEnable');
+    enable.textContent = info.btn;
+    enable.hidden = !info.showBtn;
+    document.getElementById('pvAlertPanel').style.opacity = (state === 'on' || state === 'paused') ? '1' : '.5';
+  });
+
+  /* Lightbox for real pages. */
+  var box = document.getElementById('pvLightbox');
+  var frame = document.getElementById('pvLbFrame');
+  var titleEl = document.getElementById('pvLbTitle');
+  var srcEl = document.getElementById('pvLbSrc');
+  var openEl = document.getElementById('pvLbOpen');
+  function closeBox(){ box.hidden = true; frame.removeAttribute('src'); document.body.style.overflow = ''; }
+  document.addEventListener('click', function(event){
+    var trigger = event.target.closest('[data-lightbox]');
+    if (!trigger) return;
+    var url = trigger.getAttribute('data-lightbox');
+    titleEl.textContent = trigger.getAttribute('data-title') || 'Real page';
+    srcEl.textContent = url;
+    openEl.href = url;
+    frame.src = url;
+    box.hidden = false;
+    document.body.style.overflow = 'hidden';
+  });
+  document.getElementById('pvLbClose').addEventListener('click', closeBox);
+  box.addEventListener('click', function(event){ if (event.target === box) closeBox(); });
+  document.addEventListener('keydown', function(event){ if (event.key === 'Escape' && !box.hidden) closeBox(); });
+
+  var initial = (location.hash || '').replace('#','');
+  if (panes.some(function(p){ return p.getAttribute('data-pane') === initial; })) showTab(initial, false);
+  else { hydrate(panes[0]); applyFilter(); }
+})();
+</script>
+</body>
+</html>

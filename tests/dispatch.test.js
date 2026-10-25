@@ -8,7 +8,7 @@ function fixture(){
  const win=dom.window,state={requests:0,assigned:[],paired:[],revoked:[],changes:[],locked:false,error:null,delay:null};
  const data={ok:true,gps_access:true,server_time:new Date().toISOString(),fresh_seconds:90,privacy_message:null,riders:[{id:"R1",name:'Andrew <script>',phone:"+256700111222",status:"Available",vehicle:"Motorbike",zone:"Kampala",active_jobs:0,tracking:{state:"live",device_label:"Paired Android",point:{latitude:.313,longitude:32.58,accuracy_m:15,age_seconds:2,fix_at:new Date().toISOString()}}},{id:"R2",name:"Paused partner",phone:"+256700000001",status:"Available",vehicle:"Van",zone:"Central",active_jobs:1,tracking:{state:"paused",point:null}}],orders:[{id:"O1",customer_name:'Sarah <img src=x onerror=alert(1)>',address:"Makerere",total:25000,paid:true,rider_id:null}],events:[]};
  win.confirm=()=>true;win.PosAccess={canUse:()=>!state.locked};
- win.DB={getDispatchBoard:async signal=>{state.requests++;if(state.delay)return state.delay;if(state.error)throw new Error(state.error);return structuredClone(data);},pairRiderPhone:async id=>{state.paired.push(id);return {rider:data.riders[0],code:"ABCDE-F2345",expires_at:new Date(Date.now()+600000).toISOString()};},assignRiderToOrder:async(id,rider)=>{state.assigned.push({id,rider});data.orders[0].rider_id=rider;data.orders[0].rider_name=data.riders.find(r=>r.id===rider).name;},updateRider:async(id,patch)=>{state.changes.push({id,patch});},revokeRiderPhone:async id=>state.revoked.push(id),removeRider:async()=>{}};
+ win.DB={getDispatchBoard:async signal=>{state.requests++;if(state.delay)return state.delay;if(state.error)throw new Error(state.error);return structuredClone(data);},pairRiderPhone:async id=>{state.paired.push(id);return {rider:data.riders[0],code:"ABCDE-F2345",expires_at:new Date(Date.now()+600000).toISOString()};},deliveryAppCode:async id=>{state.appCodes=(state.appCodes||[]).concat(id);return {rider:data.riders[0],code:"APPCO-DEMO1",expires_at:new Date(Date.now()+600000).toISOString()};},assignRiderToOrder:async(id,rider)=>{state.assigned.push({id,rider});data.orders[0].rider_id=rider;data.orders[0].rider_name=data.riders.find(r=>r.id===rider).name;},updateRider:async(id,patch)=>{state.changes.push({id,patch});},revokeRiderPhone:async id=>state.revoked.push(id),removeRider:async()=>{}};
  win.eval(source("js/dispatch-center.js"));
  return{win,doc:win.document,data,state,close:()=>win.close()};
 }
@@ -24,6 +24,13 @@ function fixture(){
   f.doc.querySelector('[data-dispatch-assign="O1"]').click();await settle();await settle();assert.deepEqual(f.state.assigned,[{id:"O1",rider:"R1"}]);
   f.doc.querySelector('[data-pair-rider="R1"]').click();await settle();await settle();
   assert.equal(f.doc.querySelector("#dispatchPairCard").hidden,false);assert.equal(f.doc.querySelector("#dispatchPairCode").textContent,"ABCDE-F2345");
+  assert.match(f.doc.querySelector("#dispatchPairExpiry").textContent,/does not start GPS/);
+  const appCodeBtn=f.doc.querySelector('[data-app-code-rider="R1"]');
+  assert.ok(appCodeBtn,"dispatch can issue a job-inbox-only Adonai Delivery code");
+  appCodeBtn.click();await settle();await settle();await settle();
+  assert.equal(f.doc.querySelector("#dispatchPairCode").textContent,"APPCO-DEMO1");
+  assert.match(f.doc.querySelector("#dispatchPairKicker").textContent,/ADONAI DELIVERY/);
+  assert.match(f.doc.querySelector("#dispatchPairHelp").textContent,/never enables GPS/);
   assert.match(f.doc.querySelector("#dispatchPairExpiry").textContent,/does not start GPS/);
   f.state.error="Server offline";await f.win.DispatchCenter.refresh();assert.equal(f.doc.querySelector("#dcCount-live").textContent,"0");assert.equal(f.win.DispatchCenter.locationState(f.data.riders[0]),"stale");
   assert.equal(f.doc.querySelectorAll(".dc-rider").length,2,"offline retains marked last-known information");

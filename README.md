@@ -7,6 +7,23 @@ A production-grade unified retail and e-commerce system for **Adonai Store** (Pl
 3. 🌐 **Cross-Navigation (POS to Website Only)**: The Android POS app includes a **"🌐 Open Live Web Storefront ↗"** button that triggers an external Android intent to open the live Render site in the phone's default browser. The public website has no return mechanism to the POS app.
 4. 🔒 **Real-Time Data Sync & Endpoint Security**: Atomically decrements database stock across both channels. Checkout stays PIN-free. Admins can optionally create area passwords in Store Settings; protected workspaces use server-validated, scoped database sessions. No environment-key setup is needed.
 
+### The three applications
+
+| # | Application | Entry | Used by |
+| --- | --- | --- | --- |
+| 1 | Public storefront | `/` | Shoppers |
+| 2 | POS register + Admin Suite | `/pos`, `/admin` | Cashiers & dispatchers |
+| 3 | **Adonai Delivery** | **`/delivery`** | **Rider partners** |
+
+**Adonai Delivery** is the separately installable rider app — its own manifest,
+icons, service worker and screens. A rider signs in with their phone and password,
+checks in once a day with a selfie and signature, then links the phone with a
+one-time code from dispatch. Dispatchers assign paid orders in the Admin Suite;
+riders accept (one tap, or decline) and deliver them from the app, recording the
+recipient's name at the door. It never loads the
+storefront or cashier scripts and only shows the customer details of jobs
+assigned to that rider. Full guide: **[DELIVERY_APP.md](DELIVERY_APP.md)**.
+
 ---
 
 ## Architecture Diagram
