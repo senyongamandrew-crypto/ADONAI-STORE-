@@ -201,7 +201,7 @@ ALLOW_FRAME_EMBED=1 ADONAI_DELIVERY_DEMO=1 \
 Open `/delivery?demo=1`. The demo rider signs in with phone **`0772 555 010`**
 and password **`rider-demo-1`**. The demo account is not pre-linked, so the
 demo shows every step: sign in, check in, then the App code **`DEMORIDERS`**,
-which links *Kato Brian*. The orders-area password for the dispatch console is
+which links *Kato Brian*. The demo code lasts 60 minutes so a review is not cut short; production codes last 10 minutes. The orders-area password for the dispatch console is
 **`adonai-demo-1`**. Re-run `scripts/demo_seed.py` to reset the demo: it
 refreshes the consumed code, clears the demo's check-in and link, and rebuilds
 the two demo orders.
