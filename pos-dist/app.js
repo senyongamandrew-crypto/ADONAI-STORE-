@@ -1729,6 +1729,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         <div class="field"><label>Size</label><input id="mpSize" class="sel-full" value="${v("size", "-")}" /></div>
         <div class="field"><label>Condition</label><select id="mpCond" class="sel-full">${DB.CONDITIONS.map(c => `<option ${p && p.condition === c ? "selected" : ""}>${c}</option>`).join("")}</select></div>
       </div>
+      <div class="field"><label>Source supplier<span class="fhint">Direct-upload partner tag · e.g. Finds Ug</span></label><input id="mpSupplier" class="sel-full" maxlength="255" value="${v("supplier_name")}" placeholder="e.g. Finds Ug" /></div>
       <div class="fgrid">
         <div class="field"><label>Unit COGS (UGX)</label><input id="mpCost" type="number" class="sel-full" value="${p ? p.cost_price : ""}" /></div>
         <div class="field"><label>Target retail price (UGX)</label><input id="mpBase" type="number" class="sel-full" value="${p ? (p.base_price || p.selling_price) : ""}" /></div>
@@ -2788,6 +2789,12 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       factory_tag_notes: isIntakeFieldVisible("inFactoryNotes") ? $("#inFactoryNotes").value.trim() : "",
       fabric_grading_notes: isIntakeFieldVisible("inFabricNotes") ? $("#inFabricNotes").value.trim() : "",
       cost_price: partnerSource ? 0 : (Number($("#inCost").value) || 0),
+      // Direct-upload supplier tagging + item-level economics (see
+      // DIRECT_SUPPLIER_UPLOAD.md): source partner, fixed unit cost, and the
+      // base retail price the piece is mapped to at creation.
+      supplier_name: ($("#inSupplier") ? $("#inSupplier").value.trim() : ""),
+      fixed_unit_cost: partnerSource ? 0 : (Number($("#inCost").value) || 0),
+      base_retail_price: Number($("#inSell").value) || 0,
       stock_lot_id: partnerSource ? "" : $("#inStockLot").value,
       lot_grade_id: partnerSource ? "" : (($('#inLotGradeField') && !$('#inLotGradeField').hidden && $('#inLotGrade')) ? $('#inLotGrade').value : ""),
       base_price: Number($("#inSell").value) || 0,
@@ -2859,7 +2866,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       toast(`Tagged & saved — ${p.name} · ${p.sku}`);
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes",
-         "inFabric", "inCare", "inMeasureNote", "inFlaws"].forEach(id => $("#" + id).value = "");
+         "inFabric", "inCare", "inMeasureNote", "inFlaws", "inSupplier"].forEach(id => $("#" + id).value = "");
         $("#inFlawPhoto").value = "-1";
         $("#inSell").dataset.gradeSuggested = "0";
         buildMeasureFields($("#inMeasureSet").value);
@@ -5506,6 +5513,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         size: $("#mpSize").value.trim() || "-", condition: $("#mpCond").value,
         cost_price: Number($("#mpCost").value) || 0,
         base_price: Number($("#mpBase").value) || 0,
+        // Direct-upload supplier tagging + item-level economics.
+        supplier_name: $("#mpSupplier").value.trim(),
+        fixed_unit_cost: Number($("#mpCost").value) || 0,
+        base_retail_price: Number($("#mpBase").value) || 0,
         total_transport_cost: Number($("#mpTransport").value) || 0,
         selling_price: Number($("#mpSell").value) || 0,
         compare_price: Number($("#mpCompare").value) || 0, in_stock_count: Number($("#mpStock").value) || 0,

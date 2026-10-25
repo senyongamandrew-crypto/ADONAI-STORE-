@@ -1,5 +1,24 @@
 # Render PostgreSQL migrations
 
+## Direct-upload supplier catalog intake — 2026-10-25
+
+Run `20261025_direct_supplier_upload.sql` after the dynamic category schemas migration. It adds `supplier_name`, `fixed_unit_cost NUMERIC(12,2) CHECK (>= 0)` and `base_retail_price NUMERIC(12,2) CHECK (>= 0)` to `products` (the physical relation behind the `catalog_items` view — deployments that carry `catalog_items` as a real table get the literal `ALTER TABLE catalog_items` statements), exposes the three columns on the `catalog_items` view alongside intake-vocabulary aliases (`item_name`, `catalog_group`, `size_availability`, `condition_notes`), and installs an `INSTEAD OF INSERT` trigger so the Python ingestion service (`supplier_ingestion.py`) can insert piece-by-piece supplier uploads straight into `catalog_items` via Supabase/PostgREST. `db_init.py` also adds the columns automatically at startup. Full guide: [DIRECT_SUPPLIER_UPLOAD.md](../DIRECT_SUPPLIER_UPLOAD.md).
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20261025_direct_supplier_upload.sql
+```
+
+Example query — supplier direct-upload margin report:
+
+```sql
+SELECT supplier_name,
+       COUNT(*)                                   AS pieces,
+       SUM(fixed_unit_cost)                       AS cost_outlay,
+       SUM(base_retail_price - fixed_unit_cost)   AS projected_margin
+FROM catalog_items
+GROUP BY supplier_name;
+```
+
 ## Dynamic category field schemas — 2026-10-18
 
 Run `20261018_dynamic_category_schemas.sql` after the consignment migration. It adds `products.subcategory`, `products.attributes` (JSONB object, GIN-indexed with `jsonb_path_ops`), `products.search_tags_json` and `products.fulfillment_notes`; creates `category_field_schemas` (one JSON intake form per item family — earrings, rings & bracelets, necklaces, tops, scarves, footwear, bags…); and installs the read-only `catalog_items` view that exposes products in intake vocabulary (`title`, `lot_id`, `cogs_unit_cost`, `suggested_retail_price`, `attributes`…).

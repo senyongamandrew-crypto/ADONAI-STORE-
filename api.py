@@ -498,6 +498,71 @@ def parse_positive_int(value, field: str, allow_zero: bool = False) -> int:
     return result
 
 
+def parse_money_amount(value, field: str, allow_zero: bool = True) -> Decimal:
+    """Validate a direct-upload money figure (NUMERIC(12, 2), UGX).
+
+    ``fixed_unit_cost`` and ``base_retail_price`` keep two decimals end to end
+    (matching the Supabase CHECK-guarded columns), so unlike the legacy
+    whole-shilling fields they accept fractional amounts but reject negatives,
+    non-finite values and anything outside NUMERIC(12, 2).
+    """
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a number")
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, AttributeError):
+        raise ValueError(f"{field} must be a number")
+    if not amount.is_finite():
+        raise ValueError(f"{field} must be a finite number")
+    try:
+        amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        raise ValueError(f"{field} is out of range")
+    if amount < 0 or (amount == 0 and not allow_zero):
+        raise ValueError(f"{field} must be {'zero or greater' if allow_zero else 'greater than zero'}")
+    if amount > Decimal("9999999999.99"):
+        raise ValueError(f"{field} cannot exceed 9,999,999,999.99")
+    return amount
+
+
+# The direct-upload ingestion payload (supplier_ingestion.py) names its form
+# fields in intake vocabulary; the storefront API historically uses the catalog
+# vocabulary below. Forms and direct-upload scripts may send either — or both —
+# so aliases only fill keys the caller omitted.
+INTAKE_VOCABULARY_ALIASES = (
+    ("item_name", "name"),
+    ("catalog_group", "category"),
+    ("size_availability", "size"),
+    ("condition_notes", "condition"),
+)
+
+
+def normalize_intake_vocabulary(body: dict) -> dict:
+    """Fold the direct-upload payload field names onto the canonical ones."""
+    for alias, canonical in INTAKE_VOCABULARY_ALIASES:
+        if alias in body and canonical not in body:
+            body[canonical] = body[alias]
+    return body
+
+
+def supplier_economics_fields(body: dict) -> dict:
+    """Extract direct-upload supplier tagging + item-level economics fields.
+
+    ``supplier_name`` tags the source partner of a direct upload;
+    ``fixed_unit_cost`` is the item's unit COGS and ``base_retail_price`` the
+    retail price it was mapped to at creation. Send ``None`` to clear a
+    nullable figure; omit a key entirely to leave it unchanged.
+    """
+    fields = {}
+    if "supplier_name" in body:
+        fields["supplier_name"] = clean_text(body.get("supplier_name"), 255) or None
+    for key, label in (("fixed_unit_cost", "Fixed unit cost"), ("base_retail_price", "Base retail price")):
+        if key in body:
+            value = body.get(key)
+            fields[key] = None if value in (None, "") else parse_money_amount(value, label)
+    return fields
+
+
 def parse_lot_grades(raw_grades) -> list[dict]:
     """Validate the multi-tier in-batch grading payload for a new stock lot.
 
@@ -2062,6 +2127,20 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 }, status=401)
 
             try:
+                # Payloads that speak the ingestion-service vocabulary (see
+                # DIRECT_SUPPLIER_UPLOAD.md) get its defaults and required-field
+                # rules; canonical catalog payloads keep the legacy behavior.
+                direct_upload_shaped = "item_name" in body and "name" not in body
+                # Accept the direct-upload ingestion payload vocabulary
+                # (item_name, catalog_group, size_availability, condition_notes)
+                # alongside the canonical catalog field names.
+                normalize_intake_vocabulary(body)
+                supplier_fields = supplier_economics_fields(body)
+                if direct_upload_shaped and (
+                    not str(body.get("name") or "").strip()
+                    or not supplier_fields.get("supplier_name")
+                ):
+                    raise ValueError("Item name and supplier name are required fields.")
                 inventory_source = str(body.get("inventory_source") or ("partner" if body.get("consignment_partner_id") else "store")).strip().lower()
                 if inventory_source not in {"store", "partner"}:
                     raise ValueError("Inventory source must be store-owned or partner consignment")
@@ -2072,7 +2151,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 if not is_consignment and consignment_partner_id:
                     raise ValueError("Choose Partner consignment as the inventory source")
                 commission_rate = parse_commission_rate(body.get("commission_rate"), nullable=True) if is_consignment else None
-                supplied_base = body.get("base_price", body.get("selling_price"))
+                # Direct uploads map straight onto a base retail price; keep the
+                # legacy base_price/selling_price fallbacks for existing forms.
+                supplied_base = body.get("base_price", body.get("base_retail_price", body.get("selling_price")))
                 # A graded tier pre-fills the retail price from its target —
                 # only then is a blank/missing base price tolerated up front.
                 tier_link = bool(str(body.get("lot_grade_id") or "").strip()) and not is_consignment
@@ -2084,19 +2165,32 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     transport_cost = parse_positive_int(body.get("total_transport_cost", 0) or 0, "Total transport cost", allow_zero=True)
                     if transport_cost:
                         raise ValueError("Consignment items use their base price without a store transport allocation")
-                elif body.get("total_transport_cost") is None:
+                elif body.get("total_transport_cost") is not None:
+                    transport_cost = parse_positive_int(body.get("total_transport_cost"), "Total transport cost", allow_zero=True)
+                elif "base_retail_price" in body and "base_price" not in body and "selling_price" not in body:
+                    # Direct-upload pricing (mirrors the catalog_items INSERT
+                    # trigger): the mapped base retail price IS the retail tag,
+                    # so no transport allocation is layered on top.
+                    transport_cost = 0
+                else:
                     # Global default: inherit the System Parameters base
                     # delivery fee so intake forms never require re-typing it.
                     with get_db() as settings_session:
                         fee_row = settings_session.query(StoreSetting).filter_by(key="base_delivery_fee").first()
                         fee_text = str(fee_row.value).strip() if fee_row and fee_row.value is not None else ""
                     transport_cost = parse_positive_int(fee_text or 7000, "Total transport cost", allow_zero=True)
-                else:
-                    transport_cost = parse_positive_int(body.get("total_transport_cost"), "Total transport cost", allow_zero=True)
                 allocation = transport_allocation(base_price, transport_cost)
                 selling_price = whole_money(allocation["final_selling_price"])
                 stock_count = parse_positive_int(body.get("in_stock_count", 1), "Stock quantity", allow_zero=True)
-                supplied_cost = 0 if is_consignment else parse_positive_int(body.get("cost_price", 0), "Cost price", allow_zero=True)
+                if is_consignment:
+                    supplied_cost = 0
+                elif "cost_price" in body:
+                    supplied_cost = parse_positive_int(body.get("cost_price", 0), "Cost price", allow_zero=True)
+                elif "fixed_unit_cost" in body:
+                    # Direct-upload payload: the fixed unit cost is the COGS.
+                    supplied_cost = whole_money(parse_money_amount(body.get("fixed_unit_cost"), "Fixed unit cost"))
+                else:
+                    supplied_cost = 0
                 compare_price = parse_positive_int(body.get("compare_price", 0), "Compare price", allow_zero=True)
                 if is_consignment:
                     if stock_count != 1:
@@ -2106,7 +2200,12 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     item_condition = ItemCondition.PRE_LOVED.value
                     quantity_type = QuantityType.PRE_LOVED.value
                 else:
-                    item_condition = normalize_item_condition(body.get("item_condition", body.get("inventory_type")))
+                    item_condition = normalize_item_condition(
+                        body.get("item_condition", body.get("inventory_type")),
+                        # Direct uploads are ingested piece-by-piece as unique
+                        # curated garments (same default as the SQL trigger).
+                        default=(ItemCondition.PRE_LOVED.value if direct_upload_shaped else ItemCondition.BRAND_NEW.value),
+                    )
                     quantity_type = normalize_quantity_type(body.get("quantity_type"), item_condition)
                     if item_condition == ItemCondition.PRE_LOVED.value and stock_count not in (0, 1):
                         raise ValueError("PRE_LOVED inventory must have quantity 1 (or 0 after it is sold)")
@@ -2125,7 +2224,10 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     )
                 else:
                     _, _, resolved_sub = catalog_schemas.resolve(intake_category, intake_subcategory) if intake_subcategory else (None, None, "")
-                    schema_result = {"subcategory": resolved_sub or None, "attributes": {}, "projections": {}}
+                    # Direct uploads carry free-text sub-groups ("Full-Zip
+                    # Hooded Windbreaker") outside the taxonomy — keep the
+                    # supplied text when the schema engine resolved nothing.
+                    schema_result = {"subcategory": resolved_sub or (intake_subcategory or None), "attributes": {}, "projections": {}}
             except SchemaValidationError as exc:
                 return schema_error_response(exc)
             except ValueError as exc:
@@ -2231,6 +2333,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     measurements_json=json.dumps({str(k)[:40]: clean_text(v, 80) for k, v in measurements.items()}),
                     fabric_grading_notes=clean_multiline_text(body.get("fabric_grading_notes", ""), 1000),
                     cost_price=supplied_cost,
+                    supplier_name=supplier_fields.get("supplier_name"),
+                    fixed_unit_cost=supplier_fields.get("fixed_unit_cost"),
+                    base_retail_price=supplier_fields.get("base_retail_price"),
                     base_price=allocation["base_price"],
                     total_transport_cost=allocation["total_transport_cost"],
                     selling_price=selling_price,
@@ -2283,6 +2388,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
             if auth_error:
                 return auth_error
             pid = clean_path.split("/")[-1]
+            # Accept the direct-upload payload vocabulary on edits too
+            # (item_name, catalog_group, size_availability, condition_notes).
+            normalize_intake_vocabulary(body)
             with get_db() as session:
                 prod = session.query(Product).filter_by(id=pid).with_for_update().first()
                 if not prod:
@@ -2395,6 +2503,13 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     if key in body:
                         setattr(prod, key, clean_text(body[key], max_len))
                 try:
+                    # Direct-upload supplier tagging + item-level economics.
+                    supplier_updates = supplier_economics_fields(body)
+                except ValueError as exc:
+                    return json_response({"ok": False, "error": str(exc)}, status=400)
+                for key, value in supplier_updates.items():
+                    setattr(prod, key, value)
+                try:
                     if "item_condition" in body or "inventory_type" in body:
                         current_condition = prod.item_condition.value if isinstance(prod.item_condition, ItemCondition) else (prod.item_condition or ItemCondition.PRE_LOVED.value)
                         prod.item_condition = normalize_item_condition(body.get("item_condition", body.get("inventory_type")), current_condition)
@@ -2446,9 +2561,11 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     prod.slug = unique_product_slug(
                         session, prod.name, prod.sku, prod.id, clean_text(body.get("slug", ""), 200)
                     )
-                if "base_price" in body or "total_transport_cost" in body or "selling_price" in body:
+                if "base_price" in body or "base_retail_price" in body or "total_transport_cost" in body or "selling_price" in body:
                     try:
-                        base = body.get("base_price", prod.base_price or prod.selling_price)
+                        base = body.get("base_price", body.get("base_retail_price"))
+                        if base is None:
+                            base = prod.base_price or prod.selling_price
                         transport = body.get("total_transport_cost", prod.total_transport_cost or 0)
                         allocation = transport_allocation(base, transport)
                     except (ValueError, TypeError) as exc:

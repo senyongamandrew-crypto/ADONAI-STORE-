@@ -420,6 +420,10 @@ python3 scripts/optimize-product-images.py --check
   or minimised; if the browser or Android fully closes it, alerts resume when it
   is reopened.
 
+## Direct-upload supplier intake (supplier tagging & item economics)
+
+Partners such as **Finds Ug** can also supply pre-photographed pieces that are ingested **piece-by-piece** — no bale lot, no tier weights, no batch invoice. Every item carries a `supplier_name` tag, a `fixed_unit_cost` and the `base_retail_price` it is mapped to at creation (`NUMERIC(12,2)` columns on `catalog_items`, installed by `migrations/20261025_direct_supplier_upload.sql` and at boot by `db_init.py`). The **Source supplier** field in Catalog Intake and the edit modal transmits the direct-upload payload (`supplier_name`, `fixed_unit_cost`, `base_retail_price`), and the standalone Python service `supplier_ingestion.py` inserts the same payload straight into Supabase (`supabase-py` → `catalog_items`, which accepts inserts through a purpose-built trigger). Writes land in shared PostgreSQL state, so the storefront, admin suite and Android POS stay synchronized in real time. Full architecture, schema, payload contract and integration rules: **[DIRECT_SUPPLIER_UPLOAD.md](DIRECT_SUPPLIER_UPLOAD.md)**.
+
 ## Schema-driven Catalog Intake (category field schemas)
 
 Catalog Intake builds its form from the selected **Category → Sub-group**. Each pair resolves one JSON schema in `category_field_schemas`, so staff only see the fields, units and photo angles that apply to that item. Earrings are measured in millimetres and grams and are never asked for inches, garment sizes or fabric. Metal rings have no fabric-texture question. Pre-loved shoes get tread, insole, heel-counter and toebox inspection points.
