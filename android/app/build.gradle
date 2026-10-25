@@ -26,7 +26,7 @@ android {
         targetSdk 34
         versionCode 20500
         versionName previewBuild ? "2.5.0-preview" : "2.5.0"
-        manifestPlaceholders = [adonaiAppLabel: previewBuild ? "Adonai Store Preview" : "@string/app_name"]
+        manifestPlaceholders = [adonaiAppLabel: previewBuild ? "Adonai Delivery" : "@string/app_name"]
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

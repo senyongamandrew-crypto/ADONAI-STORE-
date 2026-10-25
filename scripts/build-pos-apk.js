@@ -175,7 +175,7 @@ function buildApk() {
   console.log('\n====================================================');
   console.log('✅ Installable Android APK built successfully');
   console.log('   ' + path.relative(ROOT, target) + ` (${sizeMb} MB)`);
-  console.log('   Build type: ' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? 'Adonai Store Preview (separate installation)' : 'Adonai POS'));
+  console.log('   Build type: ' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? 'Adonai Delivery (separate installation)' : 'Adonai POS'));
   console.log('   Version: 2.5.0' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? '-preview' : ''));
   console.log('   Install: adb install -r ' + path.relative(ROOT, target));
   console.log('====================================================\n');
