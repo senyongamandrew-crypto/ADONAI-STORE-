@@ -5,23 +5,32 @@
      storefront  -> shopper
      pos/admin   -> cashier & dispatcher
      delivery    -> the rider partner (this app)
-   It has its own device-bound session, its own installable manifest and its
-   own screens. Everything it displays comes from /api/rider/* on this server;
-   it never reads the cashier session, the shopper's cart or another rider's
-   customer details.
+   A rider moves through four stages, enforced by the server and mirrored
+   here so the screen always matches what dispatch will accept:
+     1. sign in / create account (phone + password)     -> account token
+     2. daily check-in: selfie + drawn signature        -> one per Kampala day
+     3. dispatch's one-time App code                    -> device token, linked rider
+     4. the job inbox: assigned orders, one-tap accept
+   Everything displayed comes from /api/rider-account/* and /api/rider/* on
+   this server. The app never reads the cashier session, the shopper's cart,
+   or another rider's customer details.
    ===================================================================== */
 (function (global) {
   "use strict";
 
-  var $ = function (id) { return document.getElementById(id); };
+  var $ = function (id) { return global.document.getElementById(id); };
   var esc = function (value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, function (c) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   };
+  var ACCOUNT_KEY = "adonai.delivery.account.v1";
   var SESSION_KEY = "adonai.delivery.session.v1";
   var PENDING_KEY = "adonai.delivery.pending.v1";
   var DEMO_PARAM = new URLSearchParams(global.location.search).get("demo") === "1";
+  var STEPS = ["signin", "checkin", "connect"];
+  var SELFIE_MAX_BYTES = 300 * 1024;
+  var SIGNATURE_MAX_BYTES = 120 * 1024;
   var STAGES = ["assigned", "accepted", "collected", "arrived", "delivered"];
   var STAGE_LABEL = {
     assigned: "Assigned", accepted: "Accepted", collected: "Collected",
@@ -30,6 +39,7 @@
   var TABS = ["jobs", "active", "history", "profile"];
   var DECLINE_REASONS = ["Too far for this trip", "Vehicle problem", "Customer unreachable", "Finishing another job", "Other"];
   var ISSUE_HINTS = ["Customer not answering", "Address is unclear", "Heavy traffic delay", "Parcel needs checking"];
+  var NO_SESSION_PATHS = ["/api/rider-account/login", "/api/rider-account/signup"];
 
   function readJSON(key, fallback) {
     try { return JSON.parse(global.localStorage.getItem(key) || "null") || fallback; }
@@ -38,15 +48,22 @@
   function writeJSON(key, value) {
     try { global.localStorage.setItem(key, JSON.stringify(value)); } catch (_) {}
   }
+  function removeKey(key) {
+    try { global.localStorage.removeItem(key); } catch (_) {}
+  }
 
   var state = {
-    token: "", base: global.location.origin, label: "", connectedAt: null,
-    rider: null, orders: [], tracking: null, history: null,
+    accountToken: "", account: null, attendance: null, day: "", authMode: "signin",
+    token: "", deviceAccountId: "", label: "", connectedAt: null, base: global.location.origin,
+    rider: null, orders: [], tracking: null, history: null, gate: { required: false, checkedIn: true },
     gpsPolicy: false, demo: false, online: global.navigator.onLine !== false,
     tab: "jobs", known: new Set(), fresh: new Set(), pending: readJSON(PENDING_KEY, []),
     busy: false, syncing: false, detail: {}, watchId: null, mockTimer: null, seq: 0,
-    installPrompt: null, sessionExpired: false, lastSync: null
+    installPrompt: null, lastSync: null, checkinOverlay: false, selfie: null
   };
+  var ink = false;          // the signature pad has at least one stroke
+  var drawing = false;
+  var last = null;
 
   /* ---------------------------------------------------------------- utils */
   function money(n) {
@@ -77,12 +94,22 @@
     if (d.length === 10 && d.charAt(0) === "0") d = "256" + d.slice(1);
     return d;
   }
+  function formatPhone(phone) {
+    var d = String(phone || "").replace(/\D/g, "");
+    if (/^2567\d{8}$/.test(d)) return "+256 " + d.slice(3, 6) + " " + d.slice(6, 9) + " " + d.slice(9);
+    return phone || "";
+  }
   function stageOf(order) { return (order && order.progress && order.progress.stage) || "assigned"; }
   function stageChip(stage) {
     if (stage === "assigned") return "lime";
     if (stage === "delivered") return "green";
     if (stage === "issue" || stage === "declined") return "red";
     return "slate";
+  }
+  function currentStage() {
+    if (!state.accountToken) return "signin";
+    if (!state.token) return state.attendance ? "connect" : "checkin";
+    return "app";
   }
   function setOnline(value) {
     state.online = !!value;
@@ -135,38 +162,39 @@
       });
     } catch (_) {}
   }
+  function dataUrlBytes(url) {
+    var comma = String(url).indexOf(",");
+    var payload = String(url).slice(comma + 1);
+    var padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+    return Math.ceil(payload.length * 3 / 4) - padding;
+  }
 
   /* ------------------------------------------------------------------ api */
-  function call(path, method, body) {
+  function call(path, method, body, opts) {
+    opts = opts || {};
     method = method || "GET";
+    var token = opts.anon ? "" : opts.account ? state.accountToken : state.token;
     var controller = typeof AbortController === "function" ? new AbortController() : null;
     var timer = controller ? global.setTimeout(function () { controller.abort(); }, 16000) : null;
     var headers = { "Content-Type": "application/json" };
-    if (state.token) headers.Authorization = "Bearer " + state.token;
+    if (token) headers.Authorization = "Bearer " + token;
     return global.fetch(state.base + path, {
       method: method, headers: headers, cache: "no-store",
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller ? controller.signal : undefined
     }).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (data) {
-        return { status: response.status, ok: response.ok && data.ok !== false, data: data || {} };
+        return { status: response.status, ok: response.ok && (data || {}).ok !== false, data: data || {} };
       });
     }).then(function (result) {
       setOnline(true);
-      if (result.status === 401 && path !== "/api/rider/connect") {
-        state.sessionExpired = true;
-        clearSession();
-        render();
-        var message = "This phone's session expired. Ask dispatch for a new connection code.";
-        showConnectError(message);
-        throw new Error(message);
-      }
+      if (result.status === 401 && NO_SESSION_PATHS.indexOf(path) === -1) return handleUnauthorized(path, opts, result);
       return result;
     }).catch(function (error) {
       if (error && error.name === "AbortError") throw new Error("The server took too long. Check your connection and try again.");
       // Browsers reject a dead network with a TypeError, a DOMException or a
-      // bare "Failed to fetch" error depending on the engine/realm. Treat all
-      // of them as offline so a delivery update can be queued, not lost.
+      // bare "Failed to fetch" depending on the engine. Treat them all as
+      // offline so a delivery update can be queued instead of lost.
       var offline = error instanceof TypeError ||
         (error && (error.name === "TypeError" || error.name === "NetworkError" ||
           /failed to fetch|networkerror|load failed|network request failed/i.test(String(error.message || ""))));
@@ -178,66 +206,373 @@
     }).finally(function () { if (timer) global.clearTimeout(timer); });
   }
 
-  function saveSession() {
-    writeJSON(SESSION_KEY, {
-      token: state.token, base: state.base, label: state.label,
-      connectedAt: state.connectedAt, rider: state.rider
+  function handleUnauthorized(path, opts, result) {
+    if (opts.account) {
+      expireAccount("Your sign-in expired. Sign in again.");
+      return { status: 401, ok: false, data: { ok: false, error: "Your sign-in expired. Sign in again." } };
+    }
+    if (path.indexOf("/api/rider/") === 0 && path !== "/api/rider/demo-status") {
+      var message = "This phone's connection expired. Enter a new App code from dispatch.";
+      expireDevice(message);
+      return { status: 401, ok: false, data: { ok: false, error: message } };
+    }
+    return result;
+  }
+
+  /* -------------------------------------------------------------- storage */
+  function saveAccount() {
+    writeJSON(ACCOUNT_KEY, {
+      token: state.accountToken, account: state.account, attendance: state.attendance,
+      day: state.day, base: state.base
     });
   }
-  function clearSession() {
-    state.token = ""; state.rider = null; state.orders = []; state.history = null;
-    state.known = new Set(); state.fresh = new Set(); state.detail = {};
-    try { global.localStorage.removeItem(SESSION_KEY); } catch (_) {}
+  function saveDevice() {
+    writeJSON(SESSION_KEY, {
+      token: state.token, base: state.base, label: state.label, connectedAt: state.connectedAt,
+      rider: state.rider, accountId: state.deviceAccountId
+    });
+  }
+  function clearDevice() {
+    state.token = ""; state.deviceAccountId = ""; state.rider = null; state.orders = []; state.history = null;
+    state.known = new Set(); state.fresh = new Set(); state.detail = {}; state.gate = { required: false, checkedIn: true };
+    removeKey(SESSION_KEY);
     stopLocation();
+  }
+  function clearAccount() {
+    state.accountToken = ""; state.account = null; state.attendance = null; state.day = "";
+    state.checkinOverlay = false; state.selfie = null; state.tab = "jobs";
+    clearDevice();
+    state.pending = []; writeJSON(PENDING_KEY, state.pending);
+    removeKey(ACCOUNT_KEY);
   }
   function savePending() { writeJSON(PENDING_KEY, state.pending); }
 
-  /* -------------------------------------------------------------- connect */
+  function expireAccount(message) {
+    clearAccount();
+    render();
+    showAuthError(message);
+  }
+  function expireDevice(message) {
+    clearDevice();
+    render();
+    showConnectError(message);
+  }
+
+  /* ------------------------------------------------------ account sign-in */
+  function paintAuthMode() {
+    var signup = state.authMode === "signup";
+    document.querySelectorAll("[data-auth]").forEach(function (btn) {
+      btn.setAttribute("aria-pressed", String(btn.getAttribute("data-auth") === state.authMode));
+    });
+    $("nameField").hidden = !signup;
+    $("authName").required = signup;
+    $("authBtn").innerHTML = (signup ? "Create account" : "Sign in") + " <span>→</span>";
+    $("passwordHint").textContent = signup ? "At least 8 characters. Keep it private." : "Your password for this app.";
+    $("authPassword").setAttribute("autocomplete", signup ? "new-password" : "current-password");
+  }
+  function setAuthMode(mode) {
+    state.authMode = mode === "signup" ? "signup" : "signin";
+    paintAuthMode();
+    showAuthError("");
+  }
+  function readServer() {
+    var raw = ($("serverUrl").value || "").trim().replace(/\/+$/, "");
+    return raw || global.location.origin;
+  }
+  function showAuthError(text) {
+    var box = $("authError");
+    if (!box) return;
+    box.hidden = !text;
+    box.textContent = text || "";
+  }
+  function submitAuth(event) {
+    event.preventDefault();
+    if (state.busy) return;
+    var signup = state.authMode === "signup";
+    var phone = $("authPhone").value.trim();
+    var password = $("authPassword").value;
+    var name = $("authName").value.trim();
+    if (signup && !name) return showAuthError("Enter your full name.");
+    if (!phone) return showAuthError("Enter your mobile number.");
+    if (!password) return showAuthError("Enter your password.");
+    if (signup && password.length < 8) return showAuthError("Choose a password of at least 8 characters.");
+    state.base = readServer();
+    state.busy = true;
+    showAuthError("");
+    $("authBtn").disabled = true;
+    var body = signup ? { name: name, phone: phone, password: password } : { phone: phone, password: password };
+    call(signup ? "/api/rider-account/signup" : "/api/rider-account/login", "POST", body, { anon: true })
+      .then(function (result) {
+        if (!result.ok) { showAuthError(result.data.error || "Could not sign you in. Try again."); return null; }
+        state.accountToken = result.data.session_token;
+        state.account = result.data.account || null;
+        state.attendance = null;
+        $("authPassword").value = "";
+        saveAccount();
+        return refreshAccount().then(function () {
+          render();
+          toast(signup ? "Account created. Next: check in for today." : "Signed in. Next: check in for today.", "ok");
+          deskLog((signup ? "account created" : "signed in") + " · " + formatPhone(state.account && state.account.phone));
+          if (currentStage() === "app") return sync();
+        });
+      })
+      .catch(function (error) { showAuthError(error.message || "Could not reach dispatch."); })
+      .finally(function () { state.busy = false; $("authBtn").disabled = false; });
+  }
+  function refreshAccount() {
+    if (!state.accountToken) return Promise.resolve();
+    return call("/api/rider-account/me", "GET", undefined, { account: true }).then(function (result) {
+      if (result.ok) applyAccount(result.data);
+    }).catch(function () {});
+  }
+  function applyAccount(data) {
+    state.account = data.account || state.account;
+    state.attendance = data.attendance || null;
+    state.day = data.day || state.day;
+    // A device session only belongs to the account that linked it.
+    if (state.token && (!state.account || state.deviceAccountId !== state.account.id)) clearDevice();
+    saveAccount();
+  }
+  function signOutAccount() {
+    if (state.busy) return;
+    var go = state.accountToken ? call("/api/rider-account/logout", "POST", {}, { account: true }) : Promise.resolve();
+    go.catch(function () {}).then(function () {
+      clearAccount();
+      render();
+      toast("Signed out. This phone no longer has a rider session.");
+      deskLog("signed out");
+    });
+  }
+
+  /* ------------------------------------------------------- daily check-in */
+  function openCheckinOverlay(message) {
+    state.checkinOverlay = true;
+    render();
+    showCheckinError(message || "");
+  }
+  function closeCheckinOverlay() {
+    state.checkinOverlay = false;
+    clearCheckinForm();
+    render();
+  }
+  function showCheckinError(text) {
+    var box = $("checkinError");
+    if (!box) return;
+    box.hidden = !text;
+    box.textContent = text || "";
+  }
+  function clearCheckinForm() {
+    state.selfie = null;
+    var img = $("selfiePreview");
+    if (img) { img.removeAttribute("src"); img.hidden = true; }
+    $("selfieEmpty").hidden = false;
+    $("selfieInput").value = "";
+    $("checkinConsent").checked = false;
+    clearSignature();
+  }
+  function prepareSelfie(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//.test(file.type || "image/x")) return reject(new Error("Choose a photo file."));
+      var url = global.URL.createObjectURL(file);
+      var img = new global.Image();
+      img.onload = function () {
+        try {
+          var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+          if (!w || !h) throw new Error("That picture could not be read. Take it again.");
+          var canvas = global.document.createElement("canvas");
+          var scale = Math.min(1, 800 / Math.max(w, h));
+          canvas.width = Math.max(1, Math.round(w * scale));
+          canvas.height = Math.max(1, Math.round(h * scale));
+          var ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("This browser cannot prepare the photo. Try another browser.");
+          ctx.fillStyle = "#FFFFFF";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          var qualities = [0.86, 0.76, 0.66, 0.56, 0.46, 0.36];
+          for (var i = 0; i < qualities.length; i++) {
+            var candidate = canvas.toDataURL("image/jpeg", qualities[i]);
+            if (candidate.indexOf("data:image/jpeg") !== 0) throw new Error("This browser cannot save a JPEG photo.");
+            if (dataUrlBytes(candidate) <= SELFIE_MAX_BYTES) return resolve(candidate);
+          }
+          throw new Error("That photo is too large even when compressed. Take it again.");
+        } catch (error) {
+          reject(error);
+        } finally {
+          global.URL.revokeObjectURL(url);
+        }
+      };
+      img.onerror = function () {
+        global.URL.revokeObjectURL(url);
+        reject(new Error("That picture could not be read. Take it again."));
+      };
+      img.src = url;
+    });
+  }
+  function onSelfieChosen() {
+    var input = $("selfieInput");
+    var file = input.files && input.files[0];
+    if (!file) return;
+    showCheckinError("");
+    prepareSelfie(file).then(function (dataUrl) {
+      state.selfie = dataUrl;
+      var img = $("selfiePreview");
+      img.src = dataUrl;
+      img.hidden = false;
+      $("selfieEmpty").hidden = true;
+    }).catch(function (error) {
+      state.selfie = null;
+      showCheckinError(error.message);
+    }).finally(function () { input.value = ""; });
+  }
+  function initSignPad() {
+    var canvas = $("signPad");
+    if (!canvas) return;
+    $("signClear").addEventListener("click", clearSignature);
+    var ctx = canvas.getContext ? canvas.getContext("2d") : null;
+    clearSignature();
+    if (!ctx) return;
+    function point(event) {
+      var rect = canvas.getBoundingClientRect();
+      var sx = rect.width ? canvas.width / rect.width : 1;
+      var sy = rect.height ? canvas.height / rect.height : 1;
+      return { x: ((event.clientX || 0) - rect.left) * sx, y: ((event.clientY || 0) - rect.top) * sy };
+    }
+    canvas.addEventListener("pointerdown", function (event) {
+      drawing = true;
+      last = point(event);
+      ctx.fillStyle = "#0B1F16";
+      ctx.beginPath();
+      ctx.arc(last.x, last.y, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+      ink = true;
+      try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
+      event.preventDefault();
+    });
+    canvas.addEventListener("pointermove", function (event) {
+      if (!drawing) return;
+      var p = point(event);
+      ctx.strokeStyle = "#0B1F16";
+      ctx.lineWidth = 3.4;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+      event.preventDefault();
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (type) {
+      canvas.addEventListener(type, function () { drawing = false; });
+    });
+  }
+  function clearSignature() {
+    var canvas = $("signPad");
+    ink = false;
+    drawing = false;
+    if (!canvas || !canvas.getContext) return;
+    var ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  function signatureDataUrl() {
+    if (!ink) return null;
+    var url = $("signPad").toDataURL("image/png");
+    if (url.indexOf("data:image/png") !== 0) throw new Error("This browser cannot save the signature. Try another browser.");
+    if (dataUrlBytes(url) > SIGNATURE_MAX_BYTES) throw new Error("The signature is too large. Sign more simply and try again.");
+    return url;
+  }
+  function submitCheckin(event) {
+    event.preventDefault();
+    if (state.busy) return;
+    showCheckinError("");
+    if (!state.selfie) return showCheckinError("Take a selfie first.");
+    var signature;
+    try { signature = signatureDataUrl(); } catch (error) { return showCheckinError(error.message); }
+    if (!signature) return showCheckinError("Sign in the box to confirm your attendance.");
+    if (!$("checkinConsent").checked) return showCheckinError("Tick the consent box to check in.");
+    state.busy = true;
+    $("checkinBtn").disabled = true;
+    call("/api/rider-account/attendance", "POST", {
+      consent: true, selfie: state.selfie, signature: signature, device_label: "Adonai Delivery phone"
+    }, { account: true }).then(function (result) {
+      if (!result.ok) return showCheckinError(result.data.error || "Could not save your check-in. Try again.");
+      state.attendance = result.data.attendance || null;
+      state.day = (state.attendance && state.attendance.day) || state.day;
+      saveAccount();
+      clearCheckinForm();
+      toast(result.data.already ? "You are already checked in for today." : "Checked in for today. Thank you.", "ok");
+      deskLog("attendance · checked in");
+      if (state.checkinOverlay) {
+        state.checkinOverlay = false;
+        render();
+        return sync();
+      }
+      render();
+    }).catch(function (error) { showCheckinError(error.message); })
+      .finally(function () { state.busy = false; $("checkinBtn").disabled = false; });
+  }
+
+  /* ----------------------------------------------------- connect to dispatch */
   function showConnectError(text) {
     var box = $("connectError");
     if (!box) return;
     box.hidden = !text;
     box.textContent = text || "";
   }
-  function connect(event) {
+  function submitConnect(event) {
     event.preventDefault();
     if (state.busy) return;
     var code = $("connectCode").value.trim();
     var label = $("deviceLabel").value.trim() || "My delivery phone";
-    var server = ($("serverUrl").value || "").trim().replace(/\/+$/, "") || global.location.origin;
-    if (!code) { showConnectError("Enter the connection code from dispatch."); return; }
-    state.base = server;
+    if (!code) return showConnectError("Enter the connection code from dispatch.");
     state.busy = true;
-    showConnectError(state.sessionExpired ? "This phone's session expired. Ask dispatch for a new connection code." : "");
-    state.sessionExpired = false;
+    showConnectError("");
     $("connectBtn").disabled = true;
-    $("connectBtn").innerHTML = "Connecting… <span>→</span>";
-    call("/api/rider/connect", "POST", { code: code, device_label: label })
+    call("/api/rider-account/connect", "POST", { code: code, device_label: label }, { account: true })
       .then(function (result) {
         if (!result.ok) {
+          if (result.data.code === "ATTENDANCE_REQUIRED") {
+            state.attendance = null;
+            saveAccount();
+            render();
+            toast("Check in for today first.", "err");
+            return null;
+          }
           showConnectError(result.data.error || "Could not connect this phone. Check the code and try again.");
           return null;
         }
         state.token = result.data.session_token;
         state.rider = result.data.rider || null;
         state.label = label;
+        state.deviceAccountId = state.account ? state.account.id : "";
         state.connectedAt = new Date().toISOString();
         state.gpsPolicy = !!result.data.gps_policy;
         state.demo = !!result.data.demo;
         state.known = new Set(); state.fresh = new Set();
-        saveSession();
+        if (state.account) state.account.linked = true;
+        saveDevice();
+        saveAccount();
         $("connectCode").value = "";
         render();
-        toast("Connected — loading your assigned deliveries.", "ok");
-        deskLog("phone connected" + (state.rider ? " · " + state.rider.name : ""));
+        toast("Connected. Loading your assigned deliveries.", "ok");
+        deskLog("phone linked" + (state.rider ? " · " + state.rider.name : ""));
         return sync();
       })
       .catch(function (error) { showConnectError(error.message || "Could not reach dispatch."); })
-      .finally(function () {
-        state.busy = false;
-        $("connectBtn").disabled = false;
-        $("connectBtn").innerHTML = "Connect this phone <span>→</span>";
-      });
+      .finally(function () { state.busy = false; $("connectBtn").disabled = false; });
+  }
+  function unlinkPhone() {
+    if (state.busy) return;
+    var stop = state.token ? call("/api/rider/duty/stop", "POST", {}) : Promise.resolve();
+    stop.catch(function () {}).then(function () {
+      clearDevice();
+      state.tab = "jobs";
+      render();
+      toast("This phone is unlinked. Enter a new App code from dispatch to reconnect.");
+      deskLog("phone unlinked");
+    });
   }
 
   /* ----------------------------------------------------------------- sync */
@@ -260,17 +595,14 @@
       if (fresh.length) announce(fresh);
     }
     state.known = ids;
-    // A job that vanished (delivered, declined or cancelled) is no longer new.
     state.fresh.forEach(function (id) { if (!ids.has(id)) state.fresh.delete(id); });
   }
   function flushPending() {
-    if (!state.pending.length || !state.online) return Promise.resolve();
+    if (!state.pending.length || !state.online || !state.token) return Promise.resolve();
     var queue = state.pending.slice();
     return queue.reduce(function (chain, item) {
       return chain.then(function () {
         return call(item.path, "POST", item.body).then(function (result) {
-          // Any definitive answer means the server has seen this attempt; the
-          // progress endpoint is idempotent for a repeated stage.
           state.pending = state.pending.filter(function (p) { return p.id !== item.id; });
           savePending();
           if (!result.ok) toast(result.data.error || "A queued update was rejected by dispatch.", "err");
@@ -284,16 +616,20 @@
     state.syncing = true;
     return call("/api/rider/me")
       .then(function (result) {
-        if (!result.ok) throw new Error(result.data.error || "Could not load your deliveries.");
+        if (!result.ok) {
+          if (result.status === 401) return null;
+          throw new Error(result.data.error || "Could not load your deliveries.");
+        }
         var data = result.data;
         state.rider = data.rider || state.rider;
         state.tracking = data.tracking || null;
         state.gpsPolicy = !!data.gps_policy;
         state.demo = !!data.demo;
+        state.gate = { required: !!data.attendance_required, checkedIn: data.checked_in_today !== false };
         state.orders = data.orders || [];
         state.lastSync = new Date();
         ingest(state.orders);
-        saveSession();
+        saveDevice();
         render();
         return flushPending();
       })
@@ -320,15 +656,29 @@
     });
     savePending();
   }
+  function acceptJob(orderId) {
+    if (state.gate.required && !state.gate.checkedIn) {
+      return openCheckinOverlay("Check in for today before you accept deliveries. It takes under a minute.");
+    }
+    return doProgress(orderId, "accepted", {});
+  }
   function doProgress(orderId, stage, extra) {
     if (state.busy) return;
     state.busy = true;
     var body = Object.assign({ stage: stage }, extra || {});
     return call("/api/rider/orders/" + encodeURIComponent(orderId) + "/progress", "POST", body)
       .then(function (result) {
-        if (!result.ok) { toast(result.data.error || "That update could not be saved.", "err"); return; }
+        if (!result.ok) {
+          if (result.data.code === "ATTENDANCE_REQUIRED") {
+            state.gate = { required: true, checkedIn: false };
+            closeSheet();
+            return openCheckinOverlay(result.data.error);
+          }
+          toast(result.data.error || "That update could not be saved.", "err");
+          return;
+        }
         closeSheet();
-        toast(stage === "delivered" ? "Delivery confirmed. Nice work!" : "Update saved · " + STAGE_LABEL[stage], "ok");
+        toast(stage === "delivered" ? "Delivery confirmed. Nice work!" : stage === "accepted" ? "Accepted. Head to the store to collect." : "Update saved · " + STAGE_LABEL[stage], "ok");
         deskLog(orderId + " → " + stage);
         if (stage === "delivered") loadHistory();
         return sync();
@@ -337,7 +687,7 @@
         if (/offline/i.test(error.message)) {
           queueProgress(orderId, stage, extra);
           closeSheet();
-          toast("Saved on this phone — it will send when you are back online.", "ok");
+          toast("Saved on this phone. It will send when you are back online.", "ok");
           render();
         } else toast(error.message, "err");
       })
@@ -364,7 +714,7 @@
       .then(function (result) {
         if (!result.ok) { toast(result.data.error || "Could not change your availability.", "err"); return; }
         state.rider = result.data.rider || state.rider;
-        saveSession();
+        saveDevice();
         toast("You are now " + status + ".", "ok");
         deskLog("availability → " + status);
         render();
@@ -373,7 +723,7 @@
       .finally(function () { state.busy = false; });
   }
   function demoOrder() {
-    if (!state.token) { toast("Connect this phone first, then send a demo order."); return; }
+    if (!state.token) { toast("Link this phone first, then send a demo order."); return; }
     if (state.busy) return;
     state.busy = true;
     call("/api/rider/demo/order", "POST", {})
@@ -443,7 +793,7 @@
   function openIssueSheet(orderId) {
     openSheet(
       sheetHead("Report a problem", "Dispatch sees this immediately. The job stays yours until they reassign it.") +
-      '<p class="dl-hint">Quick notes — tap one or write your own:</p>' +
+      '<p class="dl-hint">Quick notes. Tap one or write your own:</p>' +
       '<div class="dl-reasons" id="issueHints">' + ISSUE_HINTS.map(function (h) {
         return '<button type="button" data-hint="' + esc(h) + '">' + esc(h) + "</button>";
       }).join("") + "</div>" +
@@ -540,7 +890,7 @@
       permission === "unsupported" ? "This browser cannot show system pop-ups" : "Turn on pop-ups";
     openSheet(
       sheetHead("New order alerts", "Get told the moment dispatch assigns you a delivery.") +
-      '<div class="dl-consent"><strong style="font-size:14px">🔔</strong><label style="font-size:12px">New jobs also appear with a sound, a vibration and a banner inside this app — no browser permission needed. System pop-ups additionally work when the app is in the background.</label></div>' +
+      '<div class="dl-consent"><strong style="font-size:14px">🔔</strong><label style="font-size:12px">New jobs also appear with a sound, a vibration and a banner inside this app. No browser permission needed. System pop-ups additionally work when the app is in the background.</label></div>' +
       '<p class="dl-hint">Current status: <strong>' + esc(label) + "</strong></p>" +
       '<div class="dl-btn-row"><button class="dl-btn" type="button" data-close>Close</button>' +
       (permission === "default" ? '<button class="dl-btn primary" type="button" id="sheetGo">Allow pop-ups</button>' : "") + "</div>",
@@ -550,7 +900,7 @@
         go.addEventListener("click", function () {
           global.Notification.requestPermission().then(function (result) {
             closeSheet();
-            toast(result === "granted" ? "Pop-ups are on for new deliveries." : "Pop-ups were not enabled — in-app alerts still work.", result === "granted" ? "ok" : "");
+            toast(result === "granted" ? "Pop-ups are on for new deliveries." : "Pop-ups were not enabled. In-app alerts still work.", result === "granted" ? "ok" : "");
           }).catch(function () { closeSheet(); });
         });
       }
@@ -578,7 +928,7 @@
       .then(function (result) {
         if (!result.ok) { toast(result.data.error || "Could not start the duty.", "err"); return; }
         closeSheet();
-        toast(mock ? "Duty started · sending simulated Kampala fixes." : "Duty started · sharing your latest fix only.", "ok");
+        toast(mock ? "Duty started. Sending simulated Kampala fixes." : "Duty started. Sharing your latest fix only.", "ok");
         deskLog("GPS duty started" + (mock ? " · simulated" : ""));
         stopLocation();
         state.seq = 0;
@@ -593,7 +943,7 @@
           state.watchId = global.navigator.geolocation.watchPosition(function (pos) {
             postLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy || 0, pos.timestamp, false);
           }, function () {
-            toast("Location was not granted. Duty is active but dispatch will see no fix — stop it or use a simulated duty.", "err");
+            toast("Location was not granted. Duty is active but dispatch will see no fix. Stop it or use a simulated duty.", "err");
           }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 });
         } else {
           toast("This browser has no location support. Stop the duty when you finish.");
@@ -606,8 +956,8 @@
   function openDutySheet() {
     openSheet(
       sheetHead("Start a delivery duty", "Sharing is your choice. You can stop it at any time.") +
-      '<div class="dl-consent"><input id="dutyConsent" type="checkbox" /><label for="dutyConsent">I agree to share my phone\'s location with Adonai dispatch for this duty (max 12 hours). Only the latest fix is stored — no route history, no phone serial, no IMEI.</label></div>' +
-      '<p class="dl-hint">Choose how this preview shares a position. On a real phone, use the device GPS. Simulated fixes are honestly labelled “simulated” on the dispatch map.</p>' +
+      '<div class="dl-consent"><input id="dutyConsent" type="checkbox" /><label for="dutyConsent">I agree to share my phone\'s location with Adonai dispatch for this duty (max 12 hours). Only the latest fix is stored. No route history, no phone serial, no IMEI.</label></div>' +
+      '<p class="dl-hint">On a real phone, use the device GPS. Simulated fixes are honestly labelled “simulated” on the dispatch map.</p>' +
       '<p class="dl-sheet-error" id="sheetError" hidden></p>' +
       '<div class="dl-btn-row"><button class="dl-btn" type="button" data-close>Cancel</button>' +
       '<button class="dl-btn primary" type="button" id="dutyReal">Use device GPS</button></div>' +
@@ -641,7 +991,7 @@
 
   /* --------------------------------------------------------------- render */
   function stepper(stage) {
-    var current = STAGES.indexOf(stage);
+    var current = ["assigned", "accepted", "collected", "arrived", "delivered"].indexOf(stage);
     if (current < 0) current = stage === "issue" ? 1 : 0;
     return '<ol class="dl-steps">' + STAGES.map(function (s, i) {
       var cls = i < current ? "done" : i === current ? "current" : "";
@@ -660,11 +1010,14 @@
       "</div>";
   }
   function actionButtons(stage, id) {
-    var p = function (label, next, cls) {
-      return '<button type="button" class="dl-btn ' + (cls || "primary") + '" data-progress="' + esc(id) + '" data-stage="' + esc(next) + '">' + label + "</button>";
+    var p = function (label, next, cls, extra) {
+      return '<button type="button" class="dl-btn ' + (cls || "primary") + '" data-progress="' + esc(id) + '" data-stage="' + esc(next) + '"' + (extra || "") + ">" + label + "</button>";
     };
-    if (stage === "assigned")
-      return p("Accept delivery ✓", "accepted") + '<button type="button" class="dl-btn danger" data-decline="' + esc(id) + '">Decline</button>';
+    if (stage === "assigned") {
+      var blocked = state.gate.required && !state.gate.checkedIn;
+      return p(blocked ? "Check in to accept" : "Accept ✓", "accepted", "primary big") +
+        '<button type="button" class="dl-btn danger" data-decline="' + esc(id) + '">Decline</button>';
+    }
     if (stage === "accepted") return p("Collected from store", "collected");
     if (stage === "collected") return p("Arrived at destination", "arrived") + p("Delivered", "delivered", "");
     if (stage === "arrived") return p("Confirm delivered ✓", "delivered");
@@ -705,19 +1058,25 @@
         "Live tracking is not enabled by dispatch. Deliveries still work normally.") + "</small></div></div>" +
       '<div class="dl-btn-row">' + (sharing ?
         '<button type="button" class="dl-btn" data-duty="stop">■ Stop sharing</button>' :
-        '<button type="button" class="dl-btn" data-duty="start"' + (state.gpsPolicy ? "" : " disabled") + '>▶ Start a duty</button>') +
+        '<button type="button" class="dl-btn" data-duty="start"' + (state.gpsPolicy ? "" : " disabled") + ">▶ Start a duty</button>") +
       "</div></div>";
+  }
+  function checkinBanner() {
+    if (!(state.gate.required && !state.gate.checkedIn)) return "";
+    return '<div class="dl-checkin-card"><div><strong>Check in for today to accept jobs</strong>' +
+      "<p>Take a selfie and sign once per day. It takes under a minute.</p></div>" +
+      '<button type="button" class="dl-btn primary" data-open-checkin="1">Check in</button></div>';
   }
   function renderJobs() {
     var orders = state.orders || [];
     var fresh = orders.filter(function (o) { return stageOf(o) === "assigned"; });
     var working = orders.filter(function (o) { return stageOf(o) !== "assigned"; });
-    var html = statusCard();
+    var html = checkinBanner() + statusCard();
     if (state.pending.length) {
       html += '<div class="dl-banner warn" style="border-radius:12px;margin-bottom:12px"><span class="dl-banner-ico">⏳</span><span>' +
-        state.pending.length + " update" + (state.pending.length > 1 ? "s" : "") + " saved on this phone — waiting for a connection.</span></div>";
+        state.pending.length + " update" + (state.pending.length > 1 ? "s" : "") + " saved on this phone, waiting for a connection.</span></div>";
     }
-    html += '<div class="dl-sec-head"><h3>Waiting for you · ' + fresh.length + "</h3><span>Accept or decline</span></div>";
+    html += '<div class="dl-sec-head"><h3>Waiting for you · ' + fresh.length + "</h3><span>Tap to accept</span></div>";
     html += fresh.length ? fresh.map(jobCard).join("") :
       '<div class="dl-card dl-empty"><div class="dl-empty-ico">📭</div><strong>No new assignments</strong><p>When dispatch sends you a paid delivery it will appear here with an alert.</p></div>';
     if (working.length) {
@@ -738,7 +1097,8 @@
     }
     var stage = stageOf(current);
     var next = { assigned: "accepted", accepted: "collected", collected: "arrived", arrived: "delivered", issue: "accepted" }[stage];
-    var label = { accepted: "Accept this delivery ✓", collected: "Collected from store", arrived: "Arrived at destination", delivered: "Confirm delivered ✓" }[next] || "Continue";
+    var label = { assigned: "Accept delivery ✓", accepted: "Collected from store", collected: "Arrived at destination", arrived: "Confirm delivered ✓", issue: "Resume delivery" }[stage] || "Continue";
+    if (stage === "assigned" && state.gate.required && !state.gate.checkedIn) label = "Check in to accept";
     return '<div class="dl-active-hero"><p class="dl-eyebrow-sm">IN PROGRESS · ' + esc(current.id) + "</p>" +
       "<h3>" + esc(current.customer_name || "Customer") + "</h3>" +
       "<p>📍 " + esc(current.address || current.area || "Confirm the address with dispatch") + "</p>" + stepper(stage) + "</div>" +
@@ -759,9 +1119,9 @@
     var html = '<div class="dl-card"><p class="dl-eyebrow-sm">DELIVERY FEES ON YOUR COMPLETED JOBS</p>' +
       '<h3 class="dl-h2">UGX ' + money(e.all) + "</h3>" +
       '<div class="dl-earn"><div><strong>' + money(e.today) + "</strong><small>Today</small></div>" +
-      '<div><strong>' + money(e.week) + "</strong><small>7 days</small></div>" +
-      '<div><strong>' + money(e.jobs) + "</strong><small>Jobs</small></div></div>" +
-      '<p class="dl-muted" style="margin:11px 0 0">These are the delivery fees attached to orders you completed — an activity record, not a payout statement. Settlements are agreed with dispatch.</p></div>';
+      "<div><strong>" + money(e.week) + "</strong><small>7 days</small></div>" +
+      "<div><strong>" + money(e.jobs) + "</strong><small>Jobs</small></div></div>" +
+      '<p class="dl-muted" style="margin:11px 0 0">These are the delivery fees attached to orders you completed. An activity record, not a payout statement. Settlements are agreed with dispatch.</p></div>';
     var list = data.history || [];
     html += '<div class="dl-sec-head"><h3>Completed · ' + list.length + "</h3><span>Latest first</span></div>";
     html += list.length ? '<div class="dl-card">' + list.map(function (h) {
@@ -774,7 +1134,9 @@
   }
   function renderProfile() {
     var r = state.rider || {};
+    var a = state.account || {};
     var connected = state.connectedAt ? fullTime(state.connectedAt) : "this device";
+    var checked = state.gate.required ? (state.gate.checkedIn ? "✓ Done today" : "Not yet today") : (state.attendance ? "✓ Done today" : "Not yet today");
     var rows = [
       ["🔔", "New order alerts", "Sound, banner and optional system pop-ups", "alerts"],
       ["⬇", "Install Adonai Delivery", "Add this app to your home screen", "install"],
@@ -783,40 +1145,77 @@
     if (state.demo) rows.push(["🧪", "Send me a demo order", "Preview a new assignment arriving", "demo"]);
     rows.push(["🏬", "Public storefront", "What the customer sees", "store"]);
     return '<div class="dl-card"><p class="dl-eyebrow-sm">SIGNED IN RIDER</p>' +
-      '<div class="dl-profile-top"><div class="dl-avatar">' + esc(String(r.name || "R").charAt(0).toUpperCase()) + "</div><div>" +
-      "<strong>" + esc(r.name || "Rider") + "</strong><small>" + esc(r.phone || "") + " · " + esc(r.status || "") + "</small></div></div>" +
-      '<div class="dl-row" style="margin-top:12px"><span class="k">Device</span><span class="v">' + esc(state.label || "This phone") + "</span></div>" +
-      '<div class="dl-row"><span class="k">Connected</span><span class="v">' + esc(connected) + "</span></div>" +
+      '<div class="dl-profile-top"><div class="dl-avatar">' + esc(String(r.name || a.name || "R").charAt(0).toUpperCase()) + "</div><div>" +
+      "<strong>" + esc(r.name || a.name || "Rider") + "</strong><small>" + esc(formatPhone(a.phone || r.phone || "")) + " · " + esc(r.status || "") + "</small></div></div>" +
+      '<div class="dl-row" style="margin-top:12px"><span class="k">Today\'s check-in</span><span class="v">' + esc(checked) + "</span></div>" +
+      '<div class="dl-row"><span class="k">Device</span><span class="v">' + esc(state.label || "This phone") + "</span></div>" +
+      '<div class="dl-row"><span class="k">Linked</span><span class="v">' + esc(connected) + "</span></div>" +
       '<div class="dl-row"><span class="k">Pending updates</span><span class="v">' + state.pending.length + "</span></div></div>" +
       '<div class="dl-card"><p class="dl-eyebrow-sm">APP &amp; TOOLS</p><div class="dl-list">' +
       rows.map(function (row) {
         return '<button type="button" data-profile="' + row[3] + '"><span class="ico">' + row[0] + "</span><span>" + esc(row[1]) +
           '<span class="note" style="display:block">' + esc(row[2]) + '</span></span><span class="arrow">›</span></button>';
       }).join("") + "</div></div>" +
-      '<div class="dl-privacy"><strong>Your data, kept narrow.</strong><br />This app stores only its own device session on this phone. It shows the customer details of jobs assigned to you and nobody else. Location is off until you start a duty, and only your latest fix is kept — never a route history. Sign out on shared phones.</div>' +
-      '<button type="button" class="dl-btn danger" data-profile="signout" style="width:100%;margin-top:14px">Sign out / replace this phone</button>' +
+      '<div class="dl-privacy"><strong>Your data, kept narrow.</strong><br />This app stores only its own sign-in on this phone. It shows the customer details of jobs assigned to you and nobody else. Location is off until you start a duty, and only your latest fix is kept. Sign out on shared phones.</div>' +
+      '<button type="button" class="dl-btn" data-profile="unpair" style="width:100%;margin-top:14px">Replace this phone (new App code)</button>' +
+      '<button type="button" class="dl-btn danger" data-profile="signout" style="width:100%;margin-top:10px">Sign out of Adonai Delivery</button>' +
       '<p class="dl-muted" style="text-align:center;margin:16px 0 0">Adonai Delivery · rider partner app<br />Separate from the storefront and the cashier register</p>';
   }
   function renderDesk() {
     var pulse = $("deskPulse"), title = $("deskState"), sub = $("deskStateSub"), demo = $("deskDemo");
     if (!title) return;
-    pulse.classList.toggle("on", !!state.token);
-    if (state.token) {
-      title.textContent = (state.rider && state.rider.name ? state.rider.name : "Rider") + " · connected";
-      var fresh = (state.orders || []).filter(function (o) { return stageOf(o) === "assigned"; }).length;
-      sub.textContent = (state.orders || []).length + " active job(s), " + fresh + " waiting for acceptance";
-    } else {
-      title.textContent = "Waiting for a rider to connect";
+    var stage = currentStage();
+    pulse.classList.toggle("on", stage === "app");
+    var name = (state.account && state.account.name) || (state.rider && state.rider.name) || "Rider";
+    if (stage === "signin") {
+      title.textContent = "Waiting for a rider to sign in";
       sub.textContent = "The same screen is an installable phone app.";
+    } else if (stage === "checkin") {
+      title.textContent = name + " · signed in";
+      sub.textContent = "Next: a selfie and signature check-in for today.";
+    } else if (stage === "connect") {
+      title.textContent = name + " · checked in";
+      sub.textContent = "Next: link this phone with the App code from dispatch.";
+    } else {
+      var fresh = (state.orders || []).filter(function (o) { return stageOf(o) === "assigned"; }).length;
+      title.textContent = (state.rider && state.rider.name ? state.rider.name : "Rider") + " · connected";
+      sub.textContent = (state.orders || []).length + " active job(s), " + fresh + " waiting for acceptance";
     }
     demo.hidden = !(DEMO_PARAM || state.demo);
   }
+  function paintSteps(index) {
+    document.querySelectorAll(".dl-onboard li[data-step]").forEach(function (item) {
+      var pos = STEPS.indexOf(item.getAttribute("data-step"));
+      var done = pos < index, current = pos === index;
+      item.classList.toggle("done", done);
+      item.classList.toggle("current", current);
+      var badge = item.querySelector("span");
+      if (badge) badge.textContent = done ? "✓" : String(pos + 1);
+    });
+  }
   function render() {
-    var connected = !!state.token;
-    $("connectScreen").hidden = connected;
-    $("appScreen").hidden = !connected;
+    var stage = currentStage();
+    var screen = (stage === "app" && state.checkinOverlay) ? "checkin" : stage;
+    $("authScreen").hidden = screen !== "signin";
+    $("checkinScreen").hidden = screen !== "checkin";
+    $("connectScreen").hidden = screen !== "connect";
+    $("appScreen").hidden = screen !== "app";
+    $("checkinBack").hidden = !(stage === "app" && state.checkinOverlay);
+    $("checkinEyebrow").textContent = stage === "app" ? "TODAY'S CHECK-IN" : "STEP 2 OF 3 · TODAY'S CHECK-IN";
+    paintSteps(screen === "app" ? 3 : STEPS.indexOf(screen));
+    var demoChip = $("demoChip"), connectChip = $("connectDemoChip");
+    if (demoChip) demoChip.hidden = !(DEMO_PARAM || state.demo) || stage !== "signin";
+    if (connectChip) connectChip.hidden = !(DEMO_PARAM || state.demo) || stage !== "connect";
     renderDesk();
-    if (!connected) return;
+    if (screen === "signin") paintAuthMode();
+    document.querySelectorAll("#checkinScreen .dl-onboard").forEach(function (list) { list.hidden = stage === "app"; });
+    if (screen === "connect") {
+      var a = state.account || {};
+      $("connectName").textContent = a.name || "—";
+      $("connectPhone").textContent = formatPhone(a.phone) || "—";
+    }
+    if (screen !== "app") return;
+
     var r = state.rider;
     $("topRider").textContent = r && r.name ? r.name : "Rider";
     setOnline(state.online);
@@ -848,15 +1247,6 @@
     if (tab === "history" && !state.history) loadHistory();
     render();
   }
-  function signOut() {
-    if (state.token) call("/api/rider/duty/stop", "POST", {}).catch(function () {});
-    clearSession();
-    state.pending = []; savePending();
-    state.tab = "jobs";
-    render();
-    toast("Signed out. This phone no longer has a rider session.");
-    deskLog("signed out");
-  }
   function installApp() {
     if (state.installPrompt) {
       state.installPrompt.prompt();
@@ -866,8 +1256,18 @@
       toast("Open /delivery, then use your browser’s “Add to Home screen / Install app” option.");
     }
   }
+  function fillDemoSignIn() {
+    setAuthMode("signin");
+    $("authPhone").value = "0772555010";
+    $("authPassword").value = "rider-demo-1";
+    $("authPhone").focus();
+    toast("Demo sign-in filled. Tap Sign in.");
+  }
   function bind() {
-    $("connectForm").addEventListener("submit", connect);
+    $("authForm").addEventListener("submit", submitAuth);
+    document.querySelectorAll("[data-auth]").forEach(function (btn) {
+      btn.addEventListener("click", function () { setAuthMode(btn.getAttribute("data-auth")); });
+    });
     $("advancedToggle").addEventListener("click", function () {
       var box = $("advancedBox"), open = box.hidden;
       box.hidden = !open;
@@ -875,13 +1275,17 @@
       this.textContent = open ? "Advanced · store server ▴" : "Advanced · store server ▾";
       if (open && !$("serverUrl").value) $("serverUrl").value = global.location.origin;
     });
-    var demoFill = $("demoFill");
-    if (demoFill) demoFill.addEventListener("click", function () {
+    $("demoFill").addEventListener("click", fillDemoSignIn);
+    $("checkinForm").addEventListener("submit", submitCheckin);
+    $("selfieInput").addEventListener("change", onSelfieChosen);
+    $("checkinBack").addEventListener("click", closeCheckinOverlay);
+    $("connectForm").addEventListener("submit", submitConnect);
+    $("connectDemoFill").addEventListener("click", function () {
       $("connectCode").value = "DEMORIDERS";
       $("connectCode").focus();
-      toast("Demo code filled — tap Connect this phone.");
+      toast("Demo code filled. Tap Connect this phone.");
     });
-    if (DEMO_PARAM) $("demoChip").hidden = false;
+    $("connectSignOut").addEventListener("click", signOutAccount);
 
     global.document.querySelectorAll(".dl-tabs button").forEach(function (btn) {
       btn.addEventListener("click", function () { goTab(btn.getAttribute("data-tab")); });
@@ -889,6 +1293,8 @@
     $("bellBtn").addEventListener("click", openAlertsSheet);
     $("view").addEventListener("click", function (event) {
       var t = event.target;
+      var openCheckin = t.closest("[data-open-checkin]");
+      if (openCheckin) { event.preventDefault(); openCheckinOverlay(""); return; }
       var detail = t.closest("[data-detail]");
       if (detail) { event.preventDefault(); openDetailSheet(detail.getAttribute("data-detail")); return; }
       var issue = t.closest("[data-issue]");
@@ -898,6 +1304,7 @@
       var progress = t.closest("[data-progress]");
       if (progress) {
         var id = progress.getAttribute("data-progress"), stage = progress.getAttribute("data-stage");
+        if (stage === "accepted") return acceptJob(id);
         var order = (state.orders || []).filter(function (o) { return o.id === id; })[0];
         openProgressSheet(id, stage, order && order.customer_name);
         return;
@@ -914,7 +1321,8 @@
         else if (action === "dispatch") global.open("admin.html?view=dispatch", "_blank", "noopener,noreferrer");
         else if (action === "store") global.open("index.html", "_blank", "noopener,noreferrer");
         else if (action === "demo") demoOrder();
-        else if (action === "signout") signOut();
+        else if (action === "unpair") unlinkPhone();
+        else if (action === "signout") signOutAccount();
         return;
       }
       var jump = t.closest("[data-tab-jump]");
@@ -935,9 +1343,8 @@
     global.addEventListener("beforeinstallprompt", function (event) {
       event.preventDefault(); state.installPrompt = event;
     });
-    var deskNew = $("deskNewOrder"), deskInstall = $("deskInstall");
-    if (deskNew) deskNew.addEventListener("click", demoOrder);
-    if (deskInstall) deskInstall.addEventListener("click", installApp);
+    $("deskNewOrder").addEventListener("click", demoOrder);
+    $("deskInstall").addEventListener("click", installApp);
   }
 
   /* ----------------------------------------------------------------- boot */
@@ -949,43 +1356,65 @@
   }
   function bootstrapDemo() {
     // The public capability flag carries no secret. It only tells this UI that
-    // the server is a local review sandbox, so the demo code can be offered.
-    return call("/api/rider/demo-status")
+    // the server is a local review sandbox, so the demo sign-in can be offered.
+    return call("/api/rider/demo-status", "GET", undefined, { anon: true })
       .then(function (result) {
         if (!result.ok || !result.data.demo) return;
         state.demo = true;
-        var chip = $("demoChip");
-        if (chip) chip.hidden = false;
-        renderDesk();
-        if (!state.token && !$("connectCode").value) $("connectCode").value = "DEMORIDERS";
-        deskLog("local demo mode · code DEMORIDERS ready");
+        deskLog("local demo mode · sign-in 0772555010 ready");
+        render();
+        prefillDemo();
       })
       .catch(function () {});
+  }
+  function prefillDemo() {
+    if (!(DEMO_PARAM || state.demo)) return;
+    var stage = currentStage();
+    if (stage === "signin" && !$("authPhone").value) {
+      $("authPhone").value = "0772555010";
+      $("authPassword").value = "rider-demo-1";
+    }
+    if (stage === "connect" && !$("connectCode").value) $("connectCode").value = "DEMORIDERS";
   }
   var booted = false;
   function boot() {
     if (booted) return;
     booted = true;
     bind();
-    var saved = readJSON(SESSION_KEY, {});
-    if (saved && saved.token) {
+    initSignPad();
+    var acc = readJSON(ACCOUNT_KEY, null);
+    if (acc && acc.token) {
+      state.accountToken = acc.token;
+      state.account = acc.account || null;
+      state.attendance = acc.attendance || null;
+      state.day = acc.day || "";
+      if (acc.base) state.base = acc.base;
+    }
+    var saved = readJSON(SESSION_KEY, null);
+    if (saved && saved.token && state.accountToken) {
       state.token = saved.token;
-      state.base = saved.base || global.location.origin;
+      state.base = saved.base || state.base;
       state.label = saved.label || "";
       state.connectedAt = saved.connectedAt || null;
       state.rider = saved.rider || null;
+      state.deviceAccountId = saved.accountId || "";
+      if (!state.account || state.deviceAccountId !== state.account.id) clearDevice();
+    } else if (saved && saved.token) {
+      clearDevice();
     }
     var tab = global.location.hash.replace("#", "");
     if (TABS.indexOf(tab) !== -1) state.tab = tab;
+    setAuthMode("signin");
     render();
     bootstrapDemo();
-    if (state.token) {
-      sync();
-      if (state.tab === "history") loadHistory();
-    } else if (DEMO_PARAM) {
-      $("connectCode").value = "DEMORIDERS";
-      deskLog("demo mode · code DEMORIDERS ready");
-    }
+    refreshAccount().then(function () {
+      render();
+      prefillDemo();
+      if (currentStage() === "app") {
+        sync();
+        if (state.tab === "history") loadHistory();
+      }
+    });
     global.setInterval(function () {
       if (!global.document.hidden && state.token) sync();
     }, 12000);

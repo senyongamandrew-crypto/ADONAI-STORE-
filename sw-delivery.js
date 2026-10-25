@@ -6,7 +6,7 @@
  * stale service-worker response. Navigation is network-first so a deployed
  * update is visible on the next visit, with the shell as a fallback.
  */
-const CACHE = "adonai-delivery-v1";
+const CACHE = "adonai-delivery-v2"; // v2: sign-in, check-in and connect screens
 const SHELL = [
   "/delivery",
   "/css/delivery.css",

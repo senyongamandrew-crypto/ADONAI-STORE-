@@ -157,8 +157,8 @@
       const card=$("#dispatchPairCard");if(!card)return;card.hidden=false;
       $("#dispatchPairName").textContent=result.rider.name;$("#dispatchPairCode").textContent=result.code;
       $("#dispatchPairExpiry").textContent=`Single-use code · expires ${new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Kampala",hour:"2-digit",minute:"2-digit"}).format(new Date(result.expires_at))} EAT. This code does not start GPS.`;
-      pairCopy("ADONAI DELIVERY · CONNECTION CODE","Open /delivery on the rider's phone (or install the Adonai Delivery app) and enter this code on the Connect screen. The rider sees only jobs assigned to them. Location sharing stays off until they start a duty separately — this code never enables GPS.");
-    },"Connection code ready. It signs the rider into Adonai Delivery only — GPS stays off.");
+      pairCopy("ADONAI DELIVERY · CONNECTION CODE","The rider signs in to Adonai Delivery (/delivery), checks in for the day with a selfie and signature, then enters this code on the Link step. The code links their account to this roster profile, works once and expires in 10 minutes. The rider sees only jobs assigned to them. Location sharing stays off until they start a duty separately, and this code never enables GPS.");
+    },"Connection code ready. It links the rider's Adonai Delivery account only, and GPS stays off.");
     if(target.matches("#btnCloseDispatchPair")) {$("#dispatchPairCard").hidden=true;return;}
     if(target.hasAttribute("data-revoke-rider")) {
       if(global.confirm("Revoke this phone's pairing? New GPS uploads and access to its assigned deliveries will stop."))return void mutate(()=>DB.revokeRiderPhone(target.dataset.revokeRider),"Phone pairing revoked. The rider must pair again.");return;

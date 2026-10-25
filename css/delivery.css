@@ -327,3 +327,47 @@ a{color:inherit}
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important}
 }
+
+/* ------------------- onboarding: sign-in, check-in, connect ------------------- */
+/* Three-step progress shown on every onboarding screen. */
+.dl-onboard{list-style:none;margin:0 0 18px;padding:0;display:flex;gap:6px;align-items:center}
+.dl-onboard li{flex:1;display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:800;color:#7A8C7E;letter-spacing:.02em;min-width:0}
+.dl-onboard li span{flex:none;width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;background:#E3ECDF;color:#4B5F50;font-size:11px}
+.dl-onboard li:not(:last-child)::after{content:"";flex:1;height:2px;background:#D6E2D0;border-radius:2px;min-width:8px}
+.dl-onboard li.done{color:#2F6B3C}
+.dl-onboard li.done span{background:#2F6B3C;color:#fff}
+.dl-onboard li.current{color:#0B1F16}
+.dl-onboard li.current span{background:var(--lime);color:#0B1F16;box-shadow:0 0 0 4px rgba(200,245,59,.3)}
+.dl-onboard li.done:not(:last-child)::after{background:#2F6B3C}
+/* Sign in / Create account switch. */
+.dl-auth-seg{display:grid;grid-template-columns:1fr 1fr;padding:4px;border-radius:14px;background:#E3ECDF;margin-bottom:6px}
+.dl-auth-seg button{min-height:42px;border:0;border-radius:11px;background:transparent;color:#33483B;font-size:13px;font-weight:800}
+.dl-auth-seg button[aria-pressed="true"]{background:var(--ink);color:var(--lime);box-shadow:0 4px 12px rgba(11,31,22,.18)}
+.dl-connect-body label.dl-file-btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;margin:0;border:1.5px dashed #5E8F3B;border-radius:12px;background:#F5FBE6;color:#1B3B2B;font-size:13px;font-weight:800;cursor:pointer}
+.dl-connect-body label.dl-file-btn:focus-within{box-shadow:0 0 0 3px rgba(200,245,59,.4)}
+.dl-section-label{margin:16px 0 8px;font-size:10.5px;font-weight:800;letter-spacing:.14em;color:#4B5F50;text-transform:uppercase}
+.dl-section-label:first-child{margin-top:0}
+/* Selfie preview: a fixed square so the layout never jumps. */
+.dl-selfie{position:relative;width:100%;aspect-ratio:4/3;border-radius:16px;overflow:hidden;background:#0B1F16;display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+.dl-selfie img{width:100%;height:100%;object-fit:cover;display:block}
+.dl-selfie-empty{color:#9DB3A5;font-size:13px;font-weight:700}
+/* Signature pad: white paper, touch-friendly, no page scroll while signing. */
+.dl-sign-wrap{border:1.5px solid #C9D8C6;border-radius:14px;background:#fff;overflow:hidden;margin-bottom:6px}
+.dl-sign-wrap canvas{display:block;width:100%;height:auto;aspect-ratio:600/220;touch-action:none;cursor:crosshair}
+.dl-sign-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.dl-sign-row .dl-field-hint{margin:0;flex:1}
+.dl-link{border:0;background:none;color:#2F6B3C;font-size:12px;font-weight:800;padding:8px 4px;text-decoration:underline;text-underline-offset:3px}
+.dl-link.dl-center{display:block;margin:16px auto 0;text-align:center}
+.dl-consent-light{background:#fff;border-color:#D6E5CF}
+.dl-back{display:inline-flex;margin:0 0 10px;border:0;background:none;color:var(--lime);font-size:12px;font-weight:800;padding:4px 0}
+.dl-ok{color:#2F6B3C;font-weight:800}
+.dl-account-card{margin-bottom:14px}
+.dl-connect-body .dl-card.tight{margin:0 0 14px}
+.dl-connect-body .dl-demo-chip{margin-top:0}
+.dl-checkin-card{display:flex;align-items:center;gap:12px;padding:14px;margin-bottom:12px;border-radius:14px;background:var(--ink);color:#F7FAF5;box-shadow:0 10px 24px rgba(11,31,22,.22)}
+.dl-checkin-card strong{display:block;font-size:13px;color:var(--lime)}
+.dl-checkin-card p{margin:4px 0 0;font-size:11.5px;line-height:1.5;color:#B7C9BC}
+.dl-checkin-card .dl-btn{flex:none;min-height:42px}
+.dl-job-actions .dl-btn.big{min-height:48px;margin-top:0;font-size:14px}
+.dl-job-actions .dl-btn.primary.big{flex:1.4}
+@media (prefers-reduced-motion:reduce){ .dl-onboard li span{transition:none} }

@@ -3,6 +3,7 @@ Admin location data requires an authenticated staff deployment or a deliberately
 protected Orders scope, independently of the always-open cashier register.
 """
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import base64
 import hashlib
 import json
@@ -18,7 +19,8 @@ import uuid
 from urllib.parse import quote
 
 from database import get_db
-from models import Rider, RiderDevice, RiderPairing, DeliveryEvent, Order, OrderItem, Product, User
+from models import (Rider, RiderAccount, RiderAttendance, RiderDevice, RiderPairing, DeliveryEvent,
+                    Order, OrderItem, Product, User)
 from media import MediaResponse
 import access_control
 from notifications import broadcast_event
@@ -76,6 +78,29 @@ def text(value, maximum, field, required=False):
 
 def policy_active(session, staff_required):
     return staff_required or "orders" in access_control.state(session=session)["protected"]
+
+
+def demo_mode():
+    return os.environ.get("ADONAI_DELIVERY_DEMO") == "1"
+
+
+KAMPALA_TZ = ZoneInfo("Africa/Kampala")
+
+
+def kampala_day():
+    return datetime.now(KAMPALA_TZ).strftime("%Y-%m-%d")
+
+
+def attendance_gate(session, rider):
+    """Riders who sign in to an account must check in once per Kampala day.
+
+    Riders paired through the native APK path (no account) are not gated.
+    """
+    account = session.query(RiderAccount).filter_by(rider_id=rider.id).first()
+    if account is None:
+        return {"required": False, "checked_in_today": True}
+    row = session.query(RiderAttendance).filter_by(account_id=account.id, day=kampala_day()).first()
+    return {"required": True, "checked_in_today": row is not None}
 
 
 def gps_access(session, headers, staff, staff_required):
@@ -435,34 +460,22 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
         notify_rider(session, "RIDER_PHONE_PAIRED", "Partner phone paired",
                      f"{rider.name}'s phone was paired. Location sharing stays off until a duty starts.", rider)
         return response({"ok":True,"session_token":token,"rider":rider.to_dict(),"device_id":device.id,"expires_at":iso(device.expires_at)},201)
+    if path == "/api/dispatch/attendance" and method == "GET":
+        import rider_accounts
+        return rider_accounts.dispatch_attendance(session)
+    match = re.fullmatch(r"/api/dispatch/attendance/([^/]+)/(selfie|signature)", path)
+    if match and method == "GET":
+        import rider_accounts
+        return rider_accounts.dispatch_image(session, match[1], match[2])
     if path == "/api/rider/demo-status" and method == "GET":
         # Public capability flag with no secrets: lets the rider app offer the
         # local demo connect code when this deployment is a review sandbox.
         # Production deployments never set ADONAI_DELIVERY_DEMO.
         return response({"ok":True,"demo":os.environ.get("ADONAI_DELIVERY_DEMO")=="1"})
     if path == "/api/rider/connect" and method == "POST":
-        # Adonai Delivery — the standalone rider application (third entity).
-        # Unlike /pair (native APK GPS phone), connecting to the job inbox
-        # shares NO location, so it deliberately does not require the GPS
-        # privacy policy. duty/start and /location below still do. A store can
-        # therefore run deliveries without ever enabling live tracking.
-        code = re.sub(r"[\s-]","",str(body.get("code",""))).upper()
-        if not re.fullmatch(r"[A-Z2-7]{10}",code): fail("That connection code is not valid. Ask dispatch for a fresh one.",403)
-        pairing = session.query(RiderPairing).filter_by(code_hash=digest(code)).with_for_update().first()
-        if not pairing or pairing.expires_at<=now(): fail("That connection code expired. Ask dispatch for a fresh one.",403)
-        rider = rider_by_id(session,pairing.rider_id,True)
-        label = text(body.get("device_label","Adonai Delivery phone"),100,"Phone label",True)
-        device = session.query(RiderDevice).filter_by(rider_id=rider.id).with_for_update().first()
-        token = secrets.token_urlsafe(32)
-        if not device: device=RiderDevice(id=uid("RDP"),rider_id=rider.id);session.add(device)
-        device.label=label;device.token_hash=digest(token);device.expires_at=now()+SESSION_LIFE;device.revoked=False;device.sharing=False
-        device.duty_until=None;device.latitude=None;device.longitude=None;device.accuracy=None;device.fix_at=None;device.received_at=None;device.sequence=0;device.paired_at=now()
-        session.delete(pairing);session.flush()
-        notify_rider(session, "DELIVERY_APP_CONNECTED", "Delivery app connected",
-                     f"{rider.name} connected the Adonai Delivery app. Location sharing stays off until a duty starts.", rider)
-        return response({"ok":True,"session_token":token,"rider":rider.to_dict(),"device_id":device.id,
-                         "expires_at":iso(device.expires_at),"gps_policy":policy_active(session,staff_required),
-                         "demo":os.environ.get("ADONAI_DELIVERY_DEMO")=="1"},201)
+        # Retired: a connection code alone no longer links a phone. Riders sign
+        # in to their Adonai Delivery account, check in, then enter the code.
+        fail("Sign in to your Adonai Delivery account first, then enter the connection code.", 410, "CONNECT_MOVED")
     if path.startswith("/api/rider/"):
         device,rider=device_from_request(session,headers);prune_points(session)
         if path=="/api/rider/me" and method=="GET":
@@ -470,10 +483,12 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             latest={}
             for event in session.query(DeliveryEvent).filter(DeliveryEvent.order_id.in_([o.id for o in jobs]),DeliveryEvent.rider_id==rider.id).order_by(DeliveryEvent.created_at.desc(),DeliveryEvent.id.desc()).all():
                 if event.order_id not in latest: latest[event.order_id]=event
+            gate=attendance_gate(session,rider)
             return response({"ok":True,"rider":rider.to_dict(),"tracking":live_state(device),
                              "orders":[order_brief(o,latest.get(o.id)) for o in jobs],"server_time":iso(now()),
                              "gps_policy":policy_active(session,staff_required),
-                             "demo":os.environ.get("ADONAI_DELIVERY_DEMO")=="1"})
+                             "attendance_required":gate["required"],"checked_in_today":gate["checked_in_today"],
+                             "demo":demo_mode()})
         # ---- Adonai Delivery: job inbox detail, acceptance, refusal, --------
         # availability, completed history and delivery fees. Every route is
         # scoped to the paired device's own rider; a rider can never read or
@@ -621,6 +636,8 @@ def _route(session, outbox, method, path, body, headers, staff, staff_required):
             last=session.query(DeliveryEvent).filter_by(order_id=order.id,rider_id=rider.id).order_by(DeliveryEvent.created_at.desc(),DeliveryEvent.id.desc()).first()
             if last and last.stage==stage: return response({"ok":True,"event":event_dict(last),"order":order_brief(order,last)})
             if order.dispatch_status!="Dispatched" or order.payment_status!="paid": fail("This delivery is not active/paid. Contact dispatch.",409)
+            if stage=="accepted" and not attendance_gate(session,rider)["checked_in_today"]:
+                fail("Check in for today first: take your selfie and sign.",409,"ATTENDANCE_REQUIRED")
             previous=last.stage if last else "assigned"
             transitions={"assigned":{"accepted","issue"},"accepted":{"collected","issue"},"collected":{"arrived","delivered","issue"},"arrived":{"delivered","issue"},"issue":{"accepted","collected","arrived","delivered","issue"},"declined":{"accepted","issue"}}
             if stage not in transitions.get(previous,set()): fail(f"Cannot report {stage} before the preceding delivery step.",409)

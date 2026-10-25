@@ -16,9 +16,11 @@ A production-grade unified retail and e-commerce system for **Adonai Store** (Pl
 | 3 | **Adonai Delivery** | **`/delivery`** | **Rider partners** |
 
 **Adonai Delivery** is the separately installable rider app — its own manifest,
-icons, service worker, device-bound sign-in and screens. Dispatchers assign paid
-orders in the Admin Suite; riders receive, accept (or decline) and deliver them
-from the app, recording the recipient's name at the door. It never loads the
+icons, service worker and screens. A rider signs in with their phone and password,
+checks in once a day with a selfie and signature, then links the phone with a
+one-time code from dispatch. Dispatchers assign paid orders in the Admin Suite;
+riders accept (one tap, or decline) and deliver them from the app, recording the
+recipient's name at the door. It never loads the
 storefront or cashier scripts and only shows the customer details of jobs
 assigned to that rider. Full guide: **[DELIVERY_APP.md](DELIVERY_APP.md)**.
 

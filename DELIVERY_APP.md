@@ -14,11 +14,49 @@ from the cashier register / Admin Suite.
 The rider app has its **own manifest, icon set, service worker, sign-in,
 screens and device session**. It does not load `app.js`, `storefront.js`,
 `auth.js` or `db.js`, and it never reads the cashier's session or the shopper's
-cart. Everything it renders comes from `/api/rider/*` on the same server.
+cart. Everything it renders comes from `/api/rider-account/*` and `/api/rider/*`
+on the same server.
 
 ---
 
-## The flow the app implements
+## Onboarding: four steps, in this order
+
+A rider reaches the job inbox only after all of these:
+
+1. **Sign in or create an account** with a mobile number and password.
+   A new account grants no jobs by itself.
+2. **Check in for today** with a selfie and a drawn signature, plus a consent
+   tick. One check-in per rider per Kampala day.
+3. **Link the phone** with the one-time App code from dispatch. The code links
+   the account to the roster rider and issues the device session.
+4. **Accept assigned deliveries with one tap.** Accepting is blocked until the
+   rider has checked in today.
+
+```
+ Rider's phone                                     Dispatch (Admin Suite)
+ ─────────────                                     ──────────────────────
+ 1 Sign in / create account  ─ phone + password
+ 2 Selfie + signature        ─ once per Kampala day
+                                                   3 App code ──► (10 min, single use)
+ 3 Enter App code            ─ links account to rider profile
+ 4 Accept (one tap)          ─ blocked without today's check-in
+ Collect → Arrive → Deliver  ─ recipient name required
+```
+
+**Phone numbers** are normalised to `2567XXXXXXXX` (`0772 123 456`,
+`+256 772 123 456` and `256772123456` are the same account).
+
+**Each roster rider can link to only one account, and each account to only one
+rider profile.** An App code is single-use and expires after 10 minutes. The
+device session is tied to the account that linked it. If a different rider
+signs in on the same phone, the old device link is dropped.
+
+**Riders who pair through the APK path** (`/api/rider/pair`, native GPS app)
+have no rider account and are **not** gated by the check-in.
+
+---
+
+## The order flow once linked
 
 ```
  Dispatcher (Admin Suite → Delivery Partners & Dispatch)
@@ -29,7 +67,8 @@ cart. Everything it renders comes from `/api/rider/*` on the same server.
  Adonai Delivery (this app, on the rider's phone)
    ├─ receives the job (12 s poll + visibility refresh)
    │    → banner, sound, vibration, optional system notification, tab badge
-   ├─ ACCEPT  → stage "accepted"     (or DECLINE → job returns to In Assembly)
+   ├─ ACCEPT  → stage "accepted"     (one tap; needs today's check-in)
+   │            (or DECLINE → job returns to In Assembly)
    ├─ COLLECT → stage "collected"
    ├─ ARRIVE  → stage "arrived"
    ├─ DELIVER → stage "delivered"     (recipient name is mandatory)
@@ -38,55 +77,66 @@ cart. Everything it renders comes from `/api/rider/*` on the same server.
 
 Each stage is a durable `DeliveryEvent` row. When the rider confirms delivery
 the order becomes `Completed` and the rider returns to `Available` if they have
-no other active jobs. Declining is only allowed **before collection** — after
+no other active jobs. Declining is only allowed **before collection**. After
 that the rider must call dispatch, because the parcel is already in their hands.
 
-The customer-facing side is unchanged: the shopper orders on the storefront,
-pays, and receives the parcel. The rider app only ever shows the customer
-details of jobs assigned to that specific rider.
+The rider app only ever shows the customer details of jobs assigned to that
+specific rider.
 
 ---
 
 ## Screens
 
-- **Connect** — single-use code issued by dispatch, a label for the phone, and
-  an optional server address. Connecting shows only jobs; it never starts GPS.
-  A rejected/expired code is explained in plain language; repeat failures are
-  rate limited by the server.
-- **Jobs** — availability (`Available` / `On delivery` / `Offline`), the GPS
-  duty switch, *Waiting for you* (new assignments with **Accept** / **Decline**)
-  and *On the way* (accepted jobs). Each card has call, WhatsApp, directions,
-  parcel details and a five-step progress strip.
+- **Sign in / Create account** — phone and password, with an advanced server
+  address for dispatch-provided HTTPS addresses. Shows the three setup steps.
+- **Check in** — selfie (front camera; compressed to a JPEG under 300 KB on the
+  phone), a signature pad (PNG under 120 KB) and a consent checkbox. When it is
+  opened from Jobs it can return to the inbox.
+- **Connect** — the App code, a label for the phone, and the rider's name and
+  check-in state. Connecting shows jobs; it never starts GPS.
+- **Jobs** — the check-in banner (when today's check-in is missing), availability
+  (`Available` / `On delivery` / `Offline`), the GPS duty switch, *Waiting for
+  you* (new assignments with **Accept** / **Decline**) and *On the way*. Each
+  card has call, WhatsApp, directions, parcel details and a five-step strip.
 - **Active** — pins the current job with one large next-step button.
 - **History** — completed deliveries, recipient names, and the delivery fees
   attached to those jobs (explicitly labelled an activity record, **not** a
   payout statement).
-- **Profile** — rider identity, device label, alert settings, install action,
-  dispatch console link, privacy explanation and sign out.
+- **Profile** — rider identity, today's check-in state, device label, alert
+  settings, install action, dispatch console link, "Replace this phone" (a new
+  App code is then needed), and sign out.
 
 A desktop-only side panel explains the flow and, in local demo mode, can push a
 fresh order to the connected rider so the whole journey can be reviewed.
 
 ---
 
-## API added for this app
+## API
 
-All routes are device-scoped: the `Authorization: Bearer <device token>` header
-identifies the rider, so one rider cannot read or mutate another rider's
-customer data.
+Rider-account routes are public but bound to the account's own sign-in token.
+Rider device routes are bound to the device token. Dispatch attendance routes
+are staff-only (`/api/dispatch/*`).
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/dispatch/riders/{id}/app-code` | Dispatcher issues the onboarding code for this app. Job-inbox only — it cannot enable GPS. Works in a default store without the GPS privacy setup. |
-| `POST /api/rider/connect` | Sign in the delivery app with a single-use pairing code. Unlike the native `/pair` route it does **not** require the GPS privacy policy, because connecting shares no location. |
-| `GET /api/rider/me` | Rider, tracking state, assigned orders, GPS-policy and demo flags. |
-| `GET /api/rider/orders/{id}` | Parcel contents (names/quantities only — no costs or supplier data), payment state and the delivery timeline. |
-| `POST /api/rider/orders/{id}/progress` | `accepted → collected → arrived → delivered`, plus `issue`. |
+| `POST /api/rider-account/signup` | Create an account (`name`, `phone`, `password` ≥ 8). Returns a 30-day sign-in token. Grants no jobs. |
+| `POST /api/rider-account/login` | Sign in (`phone`, `password`). Rate limited with the other credential routes. |
+| `GET /api/rider-account/me` | The account, linked rider (if any), and today's attendance. |
+| `POST /api/rider-account/attendance` | Today's check-in: `consent: true`, `selfie` (`data:image/jpeg;base64,…`, ≤ 300 KB), `signature` (`data:image/png;base64,…`, ≤ 120 KB). Images are checked by their magic bytes. One record per account per Kampala day. |
+| `POST /api/rider-account/connect` | Link the account to a roster rider with an App code. Requires today's check-in. Returns the device session. |
+| `POST /api/rider-account/logout` | Ends the account session and revokes the linked device. |
+| `POST /api/dispatch/riders/{id}/app-code` | Dispatcher issues the onboarding code. Job-inbox only; it cannot enable GPS. |
+| `GET /api/dispatch/attendance` | Staff: today's check-ins with names, phones and image URLs. Images are never inlined. |
+| `GET /api/dispatch/attendance/{id}/selfie` · `/signature` | Staff: the stored JPEG or PNG for today's record. |
+| `POST /api/rider/connect` | **Retired.** Returns `410 CONNECT_MOVED` and points the rider to sign-in. |
+| `GET /api/rider/me` | Rider, tracking state, assigned orders, `attendance_required`, `checked_in_today`, GPS-policy and demo flags. |
+| `GET /api/rider/orders/{id}` | Parcel contents (names/quantities only, no costs or supplier data), payment state and the timeline. |
+| `POST /api/rider/orders/{id}/progress` | `accepted → collected → arrived → delivered`, plus `issue`. `accepted` returns `409 ATTENDANCE_REQUIRED` without today's check-in. |
 | `POST /api/rider/orders/{id}/decline` | Refuse a job with a reason; returns it to `In Assembly` for reassignment. |
-| `POST /api/rider/status` | Rider changes their own availability. |
+| `POST /api/rider/status` | The rider changes their own availability. |
 | `GET /api/rider/history` | Completed deliveries and the delivery fees on them. |
-| `POST /api/rider/duty/start` · `/stop` · `POST /api/rider/location` | Existing consent-based GPS duty (unchanged). |
-| `POST /api/rider/demo/order` | **Local preview only**, gated behind `ADONAI_DELIVERY_DEMO=1`. Creates a paid demo order and assigns it through the same code path as the dispatch console. |
+| `POST /api/rider/duty/start` · `/stop` · `POST /api/rider/location` | Consent-based GPS duty (unchanged). |
+| `POST /api/rider/demo/order` | **Local preview only**, gated behind `ADONAI_DELIVERY_DEMO=1`. |
 
 The native APK screen (`rider.html` → `js/rider-app.js`) is untouched. It still
 requires the Java bridge for background GPS. Adonai Delivery is the **web/PWA
@@ -96,38 +146,40 @@ counterpart** that works in any modern browser and can be installed on a phone.
 
 ## Installation (rider's phone)
 
-1. Open `https://<your-store>/delivery` in Chrome/Android (or Safari iOS).
+1. Open `https://<your-store>/delivery` in Chrome/Android (or Safari on iOS).
 2. Use the browser's **Install app / Add to Home screen** action. The app has
    its own `manifest-delivery.json` (`display: standalone`, its own lime boda
    icon set, shortcuts for Jobs / Active / History) and its own service worker
    scoped to `/delivery`.
-3. Ask the dispatcher for a connection code: Admin Suite → Delivery Partners &
-   Dispatch → **App code** (the Adonai Delivery path). The older **Pair phone**
-   button is the GPS/Android path and only works once the Orders area is
-   protected. Both codes are single-use, expire in 10 minutes, and work with
-   `/delivery?…` — but only **App code** is guaranteed to work in a store that
-   has not enabled live tracking.
-4. Enter the code once. The device session lasts 30 days and lives only in this
-   browser's local storage; **Sign out** on shared phones.
-5. New jobs arrive automatically. Tap the bell to allow background system
-   pop-ups; in-app banners, sound and vibration work without that permission.
+3. Sign in, or create an account with your mobile number.
+4. Take today's selfie and sign the box, then tick the consent box.
+5. Ask the dispatcher for an App code (Admin Suite → Delivery Partners &
+   Dispatch → **App code**), and enter it. Codes are single-use and expire in
+   10 minutes.
+6. New jobs arrive automatically. Tap the bell to allow system pop-ups; in-app
+   banners, sound and vibration work without that permission.
 
 The service worker caches only the app shell. **API responses are never
-cached** — a delivery state always comes from the server. If the network drops,
+cached.** A delivery state always comes from the server. If the network drops,
 a progress update is saved on the device and re-sent on the next successful
-sync (the progress endpoint is idempotent for a repeated stage).
+sync (the progress endpoint is idempotent for a repeated stage). Sign out on
+shared phones.
 
 ---
 
 ## Privacy
 
+- Attendance selfies and signatures are visible to dispatch staff only. They
+  are stored once per rider per day, and the rider consents at check-in.
 - Connecting shows jobs; it never reads location.
 - GPS is a separate explicit duty with a consent checkbox, at most 12 hours,
-  and a visible Stop action. Only the **latest** fix is stored — no route
+  and a visible Stop action. Only the **latest** fix is stored: no route
   history, no phone serial, no IMEI.
 - Simulated fixes used by the local demo are flagged `mock: true` and are
   labelled "simulated" on the dispatch map.
 - A rider sees only orders whose `rider_id` is their own.
+- The password is never stored on the phone. The sign-in token is kept in local
+  storage and expires after 30 days. The server stores only its hash.
 - Delivery fees shown in History are an activity record, not a wage statement.
 
 ---
@@ -135,7 +187,7 @@ sync (the progress endpoint is idempotent for a repeated stage).
 ## Local preview / demo
 
 ```bash
-# 1. one-time (adds the rider, an orders-area password, 2 paid orders and a code)
+# 1. one-time (adds the rider, a demo sign-in, an orders-area password, 2 paid orders and a code)
 .venv/bin/python scripts/demo_seed.py
 
 # 2. rebuild the PWA icons if you change scripts/build-delivery-icons.py
@@ -146,10 +198,13 @@ ALLOW_FRAME_EMBED=1 ADONAI_DELIVERY_DEMO=1 \
   .venv/bin/python serve.py 8000
 ```
 
-Open `/delivery?demo=1`. Use code **`DEMORIDERS`** to sign in as *Kato Brian*.
-The orders-area password for the dispatch console is **`adonai-demo-1`**.
-Re-run `scripts/demo_seed.py` to reset the demo (it refreshes the consumed code
-and rebuilds the two demo orders).
+Open `/delivery?demo=1`. The demo rider signs in with phone **`0772 555 010`**
+and password **`rider-demo-1`**. The demo account is not pre-linked, so the
+demo shows every step: sign in, check in, then the App code **`DEMORIDERS`**,
+which links *Kato Brian*. The orders-area password for the dispatch console is
+**`adonai-demo-1`**. Re-run `scripts/demo_seed.py` to reset the demo: it
+refreshes the consumed code, clears the demo's check-in and link, and rebuilds
+the two demo orders.
 
 Optional preview root switches in `serve.py` (never affect production):
 
@@ -165,13 +220,28 @@ enables the demo-order endpoint.
 ## Tests
 
 ```bash
-node tests/delivery-app.test.js    # or: npm test
+node tests/delivery-app.test.js                # jsdom: the real HTML + app script
+.venv/bin/python -m unittest tests/rider_accounts_test.py   # API, temporary SQLite
+.venv/bin/python -m unittest tests/test_dispatch.py          # dispatch regressions
+npm test                                       # the full Node suite
 ```
 
-The suite drives the real `delivery.html` + `js/delivery-app.js` against an
-in-memory rider API and verifies: separation from storefront/cashier scripts,
-manifest/worker/assets, connect failure and success, literal (non-injected)
-customer text, parcel details, accept, new-order alerts, decline, the full
-delivery with mandatory recipient proof, history, rider-scoped availability,
-consent-gated GPS duty with honestly labelled simulated fixes, demo orders,
-sign-out and offline update queuing.
+The jsdom suite drives the rider journey against an in-memory API that follows
+the server's rules. It covers: separation from the storefront and cashier
+scripts, manifest, worker and assets, sign-in with a wrong and a right password,
+the password never being stored on the phone, check-in with selfie
+compression, the 300 KB refusal, signature and consent, the App code (wrong and
+right), literal customer text, one-tap accept, parcel details, new-order alerts,
+decline, the delivery with mandatory recipient proof, history, rider-scoped
+availability, consented GPS duty with honestly labelled simulated fixes, demo
+orders, the daily check-in gate (a refused accept routes to check-in, and the
+banner appears on later syncs), a new rider not inheriting a previous device
+link, expired device sessions, sign-out, and offline update queuing.
+
+The Python suite (`tests/rider_accounts_test.py`) covers: phone normalisation,
+signup and hashed storage, sign-in, consent, JPEG and PNG validation and size
+limits, one check-in per day, the App code gate (single use, expiry, the
+retired `/api/rider/connect`), one account per roster rider, the accept gate
+for account riders, APK riders not being gated, rider-scoped orders,
+staff-only attendance images, session expiry and logout, and sign-in rate
+limiting.
