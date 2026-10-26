@@ -3,9 +3,10 @@
 Catalog Intake resolves ONE JSON form per category + sub-group
 (category_field_schemas). These tests pin the contract the browser relies
 on: the public schema endpoint, unit-aware validation (earrings in mm, never
-inches), hidden fields that never leak, required details that block intake,
-inspection points for pre-loved shoes only, legacy column projections,
-automated search tags, and edit rules that keep complete records complete.
+inches), hidden fields that never leak, essentials-first intake (price and
+quantity only; optional details may stay blank), the manager's strict
+details gate, inspection points for pre-loved shoes only, legacy column
+projections, automated search tags, and strict edit rollback.
 """
 import copy
 import json
@@ -211,15 +212,36 @@ class SchemaApiTests(unittest.TestCase):
         status, data = call("GET", "/api/catalog/field-schemas", query="category=Boots&subcategory=Tiaras")
         self.assertEqual(status, 400)
 
-    def test_required_details_and_units_block_intake(self):
-        status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Stud Earrings", {"schema_key": "earrings", "values": {"length": {"value": 8, "unit": "mm"}}}))
+    def test_essentials_first_intake_accepts_partial_details(self):
+        """Only price and quantity are mandatory: category details may stay blank."""
+        partial = {"schema_key": "earrings", "values": {"length": {"value": 8, "unit": "mm"}}}
+        status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Stud Earrings", partial))
+        self.assertEqual(status, 201, data)
+        attributes = data["product"]["attributes"]
+        self.assertFalse(attributes["complete"], "the item is still flagged as not fully catalogued")
+        self.assertNotIn("primary_metal", attributes["values"])
+        self.assertEqual(attributes["values"]["length"], {"value": 8, "unit": "mm"})
+
+    def test_selling_price_and_quantity_are_the_only_blockers(self):
+        payload = new_item("Tops & Shirts", "T-Shirts", {"schema_key": "tops", "values": {}})
+        payload["base_price"] = 0
+        status, data = call("POST", "/api/products", payload)
+        self.assertEqual(status, 400)
+        self.assertIn("price", data["error"].lower())
+        status, data = call("POST", "/api/products", new_item("Tops & Shirts", "T-Shirts", {"schema_key": "tops", "values": {}}, in_stock_count=0))
+        self.assertEqual(status, 201, data)
+        self.assertEqual(data["product"]["in_stock_count"], 0)
+
+    def test_strict_details_gate_still_blocks_and_validates_typed_values(self):
+        partial = {"schema_key": "earrings", "values": {"length": {"value": 8, "unit": "mm"}}}
+        status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Stud Earrings", partial, details_required=True))
         self.assertEqual(status, 400)
         self.assertEqual(set(data["field_errors"]), {"primary_metal", "backing_type", "nickel_free"})
         inches = copy.deepcopy(EARRINGS)
         inches["values"]["length"] = {"value": 0.3, "unit": "in"}
         status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Stud Earrings", inches))
         self.assertEqual(status, 400)
-        self.assertIn("mm", data["field_errors"]["length"], "earrings are never measured in inches")
+        self.assertIn("mm", data["field_errors"]["length"], "typed values are still validated")
         mismatch = copy.deepcopy(EARRINGS)
         mismatch["schema_key"] = "tops"
         status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Stud Earrings", mismatch))
@@ -259,7 +281,13 @@ class SchemaApiTests(unittest.TestCase):
     def test_footwear_inspection_only_for_pre_loved_and_inch_projection(self):
         partial = copy.deepcopy(BOOTS)
         partial["inspection"] = {"tread_wear": "Light wear"}
+        # Inspection ratings are optional details in essentials mode…
         status, data = call("POST", "/api/products", new_item("Boots", "Chelsea Boots", partial, item_condition="PRE_LOVED"))
+        self.assertEqual(status, 201, data)
+        self.assertEqual(data["product"]["attributes"]["inspection"], {"tread_wear": "Light wear"})
+        self.assertFalse(data["product"]["attributes"]["complete"])
+        # …and a strict manager check still requires every point.
+        status, data = call("POST", "/api/products", new_item("Boots", "Chelsea Boots", partial, item_condition="PRE_LOVED", details_required=True))
         self.assertEqual(status, 400)
         self.assertIn("inspection.heel_counter", data["field_errors"])
         status, data = call("POST", "/api/products", new_item("Boots", "Chelsea Boots", copy.deepcopy(BOOTS), item_condition="PRE_LOVED"))
@@ -294,16 +322,20 @@ class SchemaApiTests(unittest.TestCase):
         status, data = call("PUT", f"/api/products/{pid}", {"search_tags": []})
         self.assertIn("pandora", data["product"]["search_tags"], "an empty list regenerates tags")
 
-    def test_complete_records_cannot_regress_and_failed_edit_rolls_back(self):
+    def test_strict_edits_cannot_regress_and_failed_edit_rolls_back(self):
         status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Stud Earrings", copy.deepcopy(EARRINGS)))
         pid = data["product"]["id"]
-        status, data = call("PUT", f"/api/products/{pid}", {"name": "Renamed studs", "attributes": {"schema_key": "earrings", "values": {"length": {"value": 9, "unit": "mm"}}}})
+        status, data = call("PUT", f"/api/products/{pid}", {"name": "Renamed studs", "details_required": True, "attributes": {"schema_key": "earrings", "values": {"length": {"value": 9, "unit": "mm"}}}})
         self.assertEqual(status, 400)
         self.assertIn("primary_metal", data["field_errors"])
         with get_db() as session:
             stored = session.get(Product, pid)
             self.assertNotEqual(stored.name, "Renamed studs", "a rejected edit must not half-apply")
             self.assertEqual(stored.attribute_record["values"]["length"]["value"], 8)
+        # Essentials mode: the same edit may clear an optional detail.
+        status, data = call("PUT", f"/api/products/{pid}", {"attributes": {"schema_key": "earrings", "values": {"length": {"value": 9, "unit": "mm"}}}})
+        self.assertEqual(status, 200, data)
+        self.assertNotIn("primary_metal", data["product"]["attributes"]["values"])
 
     def test_category_resend_keeps_and_subgroup_switch_clears(self):
         status, data = call("POST", "/api/products", new_item("Rings & Earrings", "Hoop Earrings", copy.deepcopy(EARRINGS)))

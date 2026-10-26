@@ -1607,6 +1607,16 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return values;
   }
 
+  /** A readable name for a new item saved from the rack editor. */
+  function autoModalProductName() {
+    const brand = (($("#mpBrand") && $("#mpBrand").value) || "").trim();
+    const sub = ($("#mpSubCatField") && !$("#mpSubCatField").hidden && $("#mpSubCat")) ? $("#mpSubCat").value : "";
+    const category = (($("#mpCat") && $("#mpCat").value) || "").trim();
+    const color = (($("#mpColor") && $("#mpColor").value) || "").trim();
+    const base = [brand && !/^unbranded$/i.test(brand) ? brand : "", String(sub || category || "Garment").trim()].filter(Boolean).join(" ");
+    return (base + (color ? ` · ${color}` : "")).slice(0, 255);
+  }
+
   function mountModalSchema(product, photos) {
     const engine = schemaEngine();
     const section = $("#mpSpecsSection");
@@ -1614,7 +1624,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     modalBox._schemaPhotos = (photos || []).slice();
     if (!engine || !section) return;
     const stored = (product && product.attributes) || {};
-    const enforce = !product || !!stored.complete;
+    // Essentials-first policy: category details never block a save unless a
+    // manager switched on "Strict details" in Catalog Intake.
+    const enforce = intakeStrictDetails();
     const context = () => ({ subcategory: $("#mpSubCat").value, item_condition: $("#mpItemCondition").value });
     let mountedKey = "";
 
@@ -1632,7 +1644,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (!form || !box) return;
       const required = form.requiredStatus();
       const angles = modalBox._schemaPhotoProtocol ? modalBox._schemaPhotoProtocol.status() : { requiredMapped: 0, required: 0 };
-      box.textContent = `${required.done}/${required.total} required · ${angles.requiredMapped}/${angles.required} angles${enforce ? "" : " · gaps allowed for this older record"}`;
+      box.textContent = `${required.done}/${required.total} ${enforce ? "required" : "optional"} · ${angles.requiredMapped}/${angles.required} angles${enforce ? "" : " · gaps can be filled later"}`;
     };
     const remount = () => {
       const subs = engine.subcategoriesFor($("#mpCat").value);
@@ -1688,14 +1700,15 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const engine = schemaEngine();
     const form = modalBox._schemaForm;
     if (!engine || !form || $("#mpSpecsSection").hidden) return null;
-    const strict = form.validate({ enforceRequired: true });
-    const result = modalBox._schemaEnforce ? strict : form.validate({ enforceRequired: false });
+    const enforce = !!modalBox._schemaEnforce;
+    const result = form.validate({ enforceRequired: enforce });
     if (!result.ok) {
       const messages = Object.values(result.errors);
       form.focusFirstError();
       return { error: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}` };
     }
-    if (!strict.ok) form.showErrors({}); // older record: gaps are reminders, not blockers
+    // Suggested gaps are computed without painting errors on optional fields.
+    const strict = enforce ? result : engine.validate(form.schema, form.read(), form.context, { enforceRequired: true });
     const attributes = { schema_key: form.schema.key, values: result.values, photo_angles: modalBox._schemaPhotoProtocol ? modalBox._schemaPhotoProtocol.read() : {} };
     if (engine.inspectionApplies(form.schema, form.context)) attributes.inspection = result.inspection;
     const projections = engine.project(form.schema, result.values);
@@ -2258,6 +2271,52 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   let intakePhotoUrls = [];
   let intakeTagsEdited = false;
 
+  /* Essentials-first intake: the selling price and the quantity are the only
+     blocking fields. Name, SKU, category details, photos, measurements and
+     notes are optional, and a blank name / SKU is filled in automatically.
+     Managers can switch on "Strict details" when a batch really must be
+     catalogued in full. */
+  const INTAKE_STRICT_KEY = "adonai.intake.strict-details.v1";
+
+  function intakeStrictDetails() {
+    const box = $("#inStrictDetails");
+    if (box && box.dataset.ready === "1") return !!box.checked;
+    try { return localStorage.getItem(INTAKE_STRICT_KEY) === "1"; } catch (e) { return false; }
+  }
+
+  function applyIntakeStrictDetails(value, persist) {
+    const enabled = !!value;
+    const box = $("#inStrictDetails");
+    if (box) { box.checked = enabled; box.dataset.ready = "1"; }
+    if (persist) {
+      try { localStorage.setItem(INTAKE_STRICT_KEY, enabled ? "1" : "0"); } catch (e) { /* private mode */ }
+    }
+    return enabled;
+  }
+
+  function intakeSchemaPolicy() { return intakeStrictDetails() ? "required" : "optional"; }
+
+  /** A readable garment name for a save that left the title blank. */
+  function autoIntakeName() {
+    const brand = (($("#inBrand") && $("#inBrand").value) || "").trim();
+    const sub = ($("#inSubCatRow") && !$("#inSubCatRow").hidden && $("#inSubCat")) ? $("#inSubCat").value : "";
+    const category = (($("#inCat") && $("#inCat").value) || "").trim();
+    const color = (($("#inColor") && $("#inColor").value) || "").trim();
+    const base = [brand && !/^unbranded$/i.test(brand) ? brand : "", String(sub || category || "Garment").trim()].filter(Boolean).join(" ");
+    return (base + (color ? ` · ${color}` : "")).slice(0, 255);
+  }
+
+  /** SKUs are optional: repair what staff typed instead of refusing the save. */
+  function normalizeIntakeSku(raw) {
+    return String(raw || "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/[^\x21-\x7e]/g, "")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 45);
+  }
+
   function schemaEngine() {
     return window.CatalogSchemas && window.CatalogSchemas.document ? window.CatalogSchemas : null;
   }
@@ -2320,25 +2379,33 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function updateIntakeReadiness() {
     const box = $("#intakeReadiness");
     if (!box) return;
-    if (!intakeSchemaForm) { box.hidden = true; return; }
-    const specs = intakeSchemaForm.requiredStatus();
+    const strict = intakeStrictDetails();
+    const specs = intakeSchemaForm ? intakeSchemaForm.requiredStatus() : { total: 0, done: 0 };
     const angles = intakePhotoProtocol ? intakePhotoProtocol.status() : { requiredMapped: 0, required: 0, missing: [] };
     const progress = $("#intakeSpecsProgress");
     if (progress) {
-      progress.textContent = specs.total ? `${specs.done} / ${specs.total} required details` : "No required details";
+      progress.textContent = specs.total
+        ? (strict ? `${specs.done} / ${specs.total} recommended details` : `${specs.done} / ${specs.total} optional details filled`)
+        : "No extra details for this item";
       progress.classList.toggle("done", specs.done === specs.total);
     }
+    const qtyRaw = ($("#inQty") && $("#inQty").value || "").trim();
+    const qtyReady = qtyRaw === "" || (Number.isFinite(Number(qtyRaw)) && Number(qtyRaw) >= 0);
     const checks = [
-      ["Title", !!$("#inTitle").value.trim(), true],
-      ["SKU / barcode", !!$("#inSku").value.trim(), true],
-      ["Retail price", Number($("#inSell").value) > 0, true],
-      [`Category details ${specs.done}/${specs.total}`, specs.done === specs.total, true],
-      [`Photo angles ${angles.requiredMapped}/${angles.required}`, angles.requiredMapped === angles.required, false]
+      ["Selling price", Number($("#inSell").value) > 0, true],
+      ["Quantity", qtyReady, true]
     ];
+    if (intakeSchemaForm) checks.push([`Category details ${specs.done}/${specs.total}`, specs.done === specs.total, strict]);
+    if (intakePhotoProtocol) checks.push([`Photo angles ${angles.requiredMapped}/${angles.required}`, angles.requiredMapped === angles.required, false]);
+    const name = ($("#inTitle").value || "").trim();
+    const notes = [];
+    if (!name) notes.push(`Saving as “${autoIntakeName()}” — you can rename it later.`);
+    if (angles.missing.length) notes.push(`Suggested next shot: ${angles.missing[0]}.`);
+    if (!notes.length) notes.push("Everything except the selling price and quantity is optional.");
     box.hidden = false;
     box.innerHTML = `<span class="ir-label">Ready to save?</span>` + checks.map(([label, ok, blocking]) =>
       `<span class="ir-chip ${ok ? "ok" : blocking ? "todo" : "advice"}">${ok ? "✓" : blocking ? "•" : "!"} ${esc(label)}</span>`).join("") +
-      (angles.missing.length ? `<span class="ir-note">Recommended next shot: ${esc(angles.missing[0])}</span>` : "");
+      `<span class="ir-note">${esc(notes.join(" "))}</span>`;
   }
 
   function onIntakeSchemaChange() {
@@ -2381,14 +2448,19 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (intakePhotoProtocol) intakePhotoProtocol.destroy();
       intakeSchemaKey = key;
       intakeSchemaJSON = json;
-      intakeSchemaForm = engine.mountForm($("#intakeSpecs"), { schema, context, values: carry || {}, onChange: onIntakeSchemaChange });
+      intakeSchemaForm = engine.mountForm($("#intakeSpecs"), {
+        schema, context, values: carry || {}, onChange: onIntakeSchemaChange, detailsPolicy: intakeSchemaPolicy()
+      });
       $("#intakePhotoProtocol").hidden = false;
       intakePhotoProtocol = engine.mountPhotoProtocol($("#intakePhotoProtocol"), {
-        schema, context, photos: intakePhotoUrls, angles: carryAngles || {}, onChange: updateIntakeReadiness
+        schema, context, photos: intakePhotoUrls, angles: carryAngles || {}, onChange: updateIntakeReadiness,
+        detailsPolicy: intakeSchemaPolicy()
       });
     } else {
       intakeSchemaForm.setContext(context);
       intakePhotoProtocol.setContext(context);
+      intakeSchemaForm.setDetailsPolicy(intakeSchemaPolicy());
+      intakePhotoProtocol.setDetailsPolicy(intakeSchemaPolicy());
     }
     // Legacy controls the schema owns: no inch measurement set for jewelry,
     // no free-text size when the schema records a scaled size, no fabric
@@ -2411,11 +2483,17 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     updateIntakeReadiness();
   }
 
-  /** Validated attributes payload for the save request, or an error message. */
+  /**
+   * Validated attributes payload for the save request, or an error message.
+   * In essentials mode only values staff actually typed are checked (wrong
+   * units, impossible ranges), so a half-filled form never blocks the save.
+   * "Strict details" restores the recommended-field gate.
+   */
   function collectIntakeSchema() {
     const engine = schemaEngine();
     if (!engine || !intakeSchemaForm || $("#intakeSpecsSection").hidden) return null;
-    const result = intakeSchemaForm.validate({ enforceRequired: true });
+    const strict = intakeStrictDetails();
+    const result = intakeSchemaForm.validate({ enforceRequired: strict });
     if (!result.ok) {
       const messages = Object.values(result.errors);
       return { ok: false, message: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}${messages.length > 2 ? "…" : ""}` };
@@ -2423,7 +2501,18 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const attributes = { schema_key: intakeSchemaKey, values: result.values };
     if (engine.inspectionApplies(intakeSchemaForm.schema, intakeSchemaForm.context)) attributes.inspection = result.inspection;
     attributes.photo_angles = intakePhotoProtocol ? intakePhotoProtocol.read() : {};
-    return { ok: true, subcategory: $("#inSubCat").value, attributes, projections: engine.project(intakeSchemaForm.schema, result.values) };
+    // Suggested gaps, computed without touching the on-screen error state.
+    const gaps = strict ? [] : Object.keys(engine.validate(
+      intakeSchemaForm.schema, intakeSchemaForm.read(), intakeSchemaForm.context, { enforceRequired: true }
+    ).errors);
+    return {
+      ok: true,
+      subcategory: $("#inSubCat").value,
+      attributes,
+      projections: engine.project(intakeSchemaForm.schema, result.values),
+      missing: gaps,
+      details_required: strict
+    };
   }
 
   function intakeSearchTagsValue() {
@@ -2659,6 +2748,22 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (routePartnerId) $("#inConsignmentPartner").dataset.pendingPartnerId = routePartnerId;
     }
     intakeBound = true;
+    // Restore the essentials / strict-details preference before the first
+    // schema form renders, so the labels match how saving will behave.
+    applyIntakeStrictDetails((() => {
+      try { return localStorage.getItem(INTAKE_STRICT_KEY) === "1"; } catch (e) { return false; }
+    })(), false);
+    if ($("#inStrictDetails")) {
+      $("#inStrictDetails").addEventListener("change", () => {
+        applyIntakeStrictDetails($("#inStrictDetails").checked, true);
+        if (intakeSchemaForm) intakeSchemaForm.setDetailsPolicy(intakeSchemaPolicy());
+        if (intakePhotoProtocol) intakePhotoProtocol.setDetailsPolicy(intakeSchemaPolicy());
+        updateIntakeReadiness();
+        toast(intakeStrictDetails()
+          ? "Strict details on — every recommended category detail must be filled before saving."
+          : "Essentials mode — only the selling price and quantity are required.", true);
+      });
+    }
     loadIntakeStockLots();
 
     $$('[data-intake-condition]').forEach(button => button.addEventListener("click", () => setIntakeCondition(button.dataset.intakeCondition)));
@@ -2706,7 +2811,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       paintTag();
     }));
     ["inBrand", "inColor"].forEach(id => $("#" + id).addEventListener("input", () => refreshIntakeSearchTags()));
-    ["inTitle", "inSku", "inSell"].forEach(id => $("#" + id).addEventListener("input", updateIntakeReadiness));
+    ["inTitle", "inSku", "inSell", "inQty"].forEach(id => $("#" + id).addEventListener("input", updateIntakeReadiness));
     if ($("#inSearchTags")) $("#inSearchTags").addEventListener("input", () => {
       // Hand edits stick; clearing the box hands control back to automation.
       intakeTagsEdited = $("#inSearchTags").value.trim() !== "";
@@ -2754,16 +2859,20 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   function paintTag() {
     const settings = DB.getSettings() || {};
     $("#tagStoreName").textContent = settings.store_name || "ADONAI STORE";
-    $("#tagTitle").textContent = $("#inTitle").value.trim() || "Garment name";
+    $("#tagTitle").textContent = $("#inTitle").value.trim() || autoIntakeName() || "Garment name";
     $("#tagWebsite").textContent = window.GarmentTools ? GarmentTools.websiteLabel(settings) : "adonaithrift-store.online";
     const basePrice = Number($("#inSell").value) || 0;
     const transport = intakeSource() === "partner" ? 0 : (Number($("#inTransport").value) || 0);
     const sell = basePrice + (transport * 0.5);
-    const code = $("#inSku").value.trim() || "ADN-XXX-0000";
+    const code = normalizeIntakeSku($("#inSku").value) || "ADN-XXX-0000";
     $("#tagCode").textContent = code;
     // Print the saved SKU: a stable checkout alias without condition markers.
     $("#tagBars").innerHTML = DB.barcodeSVG(code, 58);
-    if (!intakeSaving) $("#btnIntakeSave").textContent = `Save Garment (${ugx(sell)})`;
+    if (!intakeSaving) {
+      $("#btnIntakeSave").textContent = basePrice > 0
+        ? `Save Garment (${ugx(sell)})`
+        : "Save Garment · set selling price";
+    }
   }
 
   async function saveIntake(again, printAfter = false) {
@@ -2820,10 +2929,39 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       fulfillment_notes: (($("#inFulfillment") && $("#inFulfillment").value) || "").trim(),
       ...garmentMedia
     };
-    if (!vals.name) return toast("Item title is required", false);
-    if (!vals.selling_price) return toast("Set a sell price first", false);
-    // Category schema: required specification fields block the save; photo
-    // angles are guidance only (shown in the readiness strip).
+    // Essentials first: a blank name, SKU or category detail is filled in or
+    // left for later instead of refusing the garment. Only the selling price
+    // and the quantity block the save.
+    if (!vals.name) vals.name = autoIntakeName();
+    vals.sku = normalizeIntakeSku(vals.sku);
+    if (!vals.sku || ["ADN-000000", "ADONAI-SAMPLE"].includes(vals.sku.toUpperCase())) vals.sku = newIntakeSku();
+    if ($("#inSku")) $("#inSku").value = vals.sku;
+    vals.barcode_id = intakeCondition() === "PRE_LOVED" ? `${vals.sku.slice(0, 45)}-1OF1` : vals.sku;
+    let qtyRaw = ($("#inQty").value || "").trim();
+    if (qtyRaw === "" && $("#inQty")) { qtyRaw = "1"; $("#inQty").value = "1"; }
+    const qty = Math.max(0, Math.floor(Number(qtyRaw) || 0));
+    if (!partnerSource) vals.in_stock_count = Number($("#inStatus").value) ? qty : 0;
+    // A duplicate code used to surface as a server error long after typing;
+    // roll a fresh SKU up front instead.
+    const existingCodes = new Set(DB.listProducts()
+      .flatMap(product => [product.sku, product.barcode_id])
+      .map(code => String(code || "").toUpperCase()));
+    if (existingCodes.has(vals.sku.toUpperCase()) || existingCodes.has(vals.barcode_id.toUpperCase())) {
+      vals.sku = newIntakeSku();
+      vals.barcode_id = intakeCondition() === "PRE_LOVED" ? `${vals.sku.slice(0, 45)}-1OF1` : vals.sku;
+      if ($("#inSku")) $("#inSku").value = vals.sku;
+    }
+    if (!(Number(vals.selling_price) > 0)) {
+      if ($("#inSell")) $("#inSell").focus();
+      return toast("Set the selling price — it is the only price the register needs", false);
+    }
+    if (!partnerSource && Number($("#inStatus").value) && qty < 1) {
+      if ($("#inQty")) $("#inQty").focus();
+      return toast("Set the quantity received — at least 1 unit for available stock", false);
+    }
+    // Category schema: in essentials mode optional details never block, while
+    // values staff did type are still checked. "Strict details" re-enables
+    // the recommended-field gate.
     const schemaPayload = collectIntakeSchema();
     if (schemaPayload && !schemaPayload.ok) {
       intakeSchemaForm.focusFirstError();
@@ -2832,6 +2970,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (schemaPayload) {
       vals.subcategory = schemaPayload.subcategory;
       vals.attributes = schemaPayload.attributes;
+      vals.details_required = !!schemaPayload.details_required;
       if (schemaPayload.projections.fabric && !isIntakeFieldVisible("inFabric")) vals.fabric = schemaPayload.projections.fabric;
       if (schemaPayload.projections.size && !isIntakeFieldVisible("inSize")) vals.size = schemaPayload.projections.size;
     }
@@ -2845,8 +2984,6 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         return toast("Item commission must be from 0 to 100 percent", false);
       }
     }
-    if (["ADN-000000", "ADONAI-SAMPLE"].includes(vals.sku.toUpperCase())) return toast("This code is reserved for printer setup. Roll a different SKU.", false);
-    if (!vals.sku || vals.sku.length > 45 || !/^[\x21-\x7e]+$/.test(vals.sku)) return toast("Use a unique SKU of 1–45 English letters, numbers or symbols, without spaces.", false);
     if (vals.stock_lot_id && !vals.lot_grade_id) {
       const lot = findIntakeLot(vals.stock_lot_id);
       if (lot && (lot.grades || []).length) {
@@ -2863,7 +3000,11 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       intakeMedia.markSaved();
       lastTaggedProductId = p.id;
       $("#btnPrintLastTag").disabled = false;
-      toast(`Tagged & saved — ${p.name} · ${p.sku}`);
+      const optionalGaps = (schemaPayload && schemaPayload.missing) ? schemaPayload.missing.length : 0;
+      toast(`Tagged & saved — ${p.name} · ${p.sku}` + (optionalGaps
+        ? ` · ${optionalGaps} optional detail${optionalGaps === 1 ? "" : "s"} can be added later`
+        : ""));
+
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes",
          "inFabric", "inCare", "inMeasureNote", "inFlaws", "inSupplier"].forEach(id => $("#" + id).value = "");
@@ -5505,7 +5646,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       let garmentMedia;
       try { garmentMedia = modalBox._mediaEditor.snapshot(); } catch (error) { return toast(error.message, false); }
       const vals = {
-        name: $("#mpName").value.trim(),
+        name: $("#mpName").value.trim() || autoModalProductName(),
         item_condition: $("#mpItemCondition").value,
         quantity_type: $("#mpItemCondition").value,
         brand: $("#mpBrand").value.trim() || "Unbranded",
@@ -5531,10 +5672,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         search_tags: ($("#mpSearchTags").value || "").split(",").map(tag => tag.trim()).filter(Boolean),
         fulfillment_notes: $("#mpFulfillment").value.trim()
       };
-      if (!vals.name) return toast("Name required", false);
+      if (!(Number($("#mpBase").value) > 0)) {
+        if ($("#mpBase")) $("#mpBase").focus();
+        return toast("Set the retail price — it is the only price the register needs", false);
+      }
       const editing = btnSaveProd.dataset.saveProd ? DB.getProduct(btnSaveProd.dataset.saveProd) : null;
       const modalSchema = collectModalSchema(editing);
       if (modalSchema && modalSchema.error) return toast(modalSchema.error, false);
+      if (modalSchema) vals.details_required = !!modalBox._schemaEnforce;
       if (modalSchema) {
         vals.subcategory = modalSchema.subcategory;
         vals.attributes = modalSchema.attributes;
@@ -5549,7 +5694,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       try {
         if (btnSaveProd.dataset.saveProd) {
           await DB.updateProduct(btnSaveProd.dataset.saveProd, vals);
-          toast(modalSchema && modalSchema.missing ? `Item updated — ${modalSchema.missing} required category detail${modalSchema.missing === 1 ? "" : "s"} still to fill` : "Item updated — live everywhere");
+          toast(modalSchema && modalSchema.missing ? `Item updated — ${modalSchema.missing} optional category detail${modalSchema.missing === 1 ? "" : "s"} still to fill` : "Item updated — live everywhere");
         }
         else { const p = await DB.addProduct(vals); toast(`Added ${p.name} · ${p.sku}`); }
         editor.markSaved(); modalBox._mediaSaving = false;

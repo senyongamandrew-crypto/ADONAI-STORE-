@@ -775,9 +775,11 @@ def update_catalog_schema(prod, body: dict) -> bool:
         subcategory = ""  # the stored sub-category belonged to the previous category
     condition = _condition_value(prod)
     if "attributes" in body:
+        # Essentials-first policy: an edit may leave optional category details
+        # blank. Only an explicit strict check (details_required) blocks it.
         result = catalog_schemas.normalize_attributes(
             body.get("attributes") or {}, prod.category, subcategory, condition,
-            enforce_required=bool(record.get("complete")),
+            enforce_required=bool(body.get("details_required")),
         )
         apply_catalog_schema_result(prod, result, body)
         return True
@@ -2231,10 +2233,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 # fields dropped and legacy columns projected server-side.
                 intake_category = clean_text(body.get("category", "Outerwear & Jackets"), 100) or "Outerwear & Jackets"
                 intake_subcategory = clean_text(body.get("subcategory", ""), 100)
+                # Essentials-first intake: the selling price and quantity are
+                # the only mandatory fields, so optional category details never
+                # block a new garment. A manager can send
+                # ``details_required`` to restore the strict completeness gate.
+                details_required = bool(
+                    body.get("details_required") or body.get("require_details") or body.get("strict_details")
+                )
                 if "attributes" in body:
                     schema_result = catalog_schemas.normalize_attributes(
                         body.get("attributes") or {}, intake_category, intake_subcategory, item_condition,
-                        enforce_required=True,
+                        enforce_required=details_required,
                     )
                 else:
                     _, _, resolved_sub = catalog_schemas.resolve(intake_category, intake_subcategory) if intake_subcategory else (None, None, "")

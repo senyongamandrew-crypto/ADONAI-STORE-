@@ -16,7 +16,7 @@
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
 <link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
 <link rel="stylesheet" href="css/garment-media.css?v=1.0" />
-<link rel="stylesheet" href="css/catalog-schemas.css?v=1.1" />
+<link rel="stylesheet" href="css/catalog-schemas.css?v=1.2" />
 <link rel="stylesheet" href="css/adaptive-display.css?v=1.1" />
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
@@ -274,6 +274,17 @@
 
       <div class="card intake-card">
         <div class="flip" id="flipDemo" hidden></div>
+        <div class="intake-policy" id="intakePolicyBar">
+          <div class="intake-policy-copy">
+            <span class="intake-policy-eyebrow">SAVE RULES · ESSENTIALS FIRST</span>
+            <strong>Only the selling price and quantity are required</strong>
+            <p>Garment name, SKU, category details, photos and notes are optional. A name and SKU are generated automatically when you leave them blank, and every extra detail can be added later from the inventory rack.</p>
+          </div>
+          <label class="intake-policy-toggle" for="inStrictDetails">
+            <input type="checkbox" id="inStrictDetails" />
+            <span><strong>Strict details</strong><em>Manager check — block the save until every recommended category detail is filled.</em></span>
+          </label>
+        </div>
         <section class="intake-source-panel" aria-labelledby="intakeSourceTitle">
           <div class="intake-source-intro">
             <span class="intake-source-step">STEP 1 · ITEM SOURCE</span>
@@ -311,9 +322,9 @@
           <button type="button" class="inventory-toggle-btn active" data-intake-condition="BRAND_NEW">Brand-New Apparel · Multi-Quantity</button>
         </div>
         <input type="hidden" id="inItemCondition" value="BRAND_NEW" />
-        <div class="field"><label>Item title / name</label><input class="sel-full" id="inTitle" placeholder="e.g. Factory Cotton Crew Tee or 1990s Denim Jacket" /></div>
+        <div class="field"><label>Item title / name<span class="fhint">Optional · generated from brand, category and colour when blank</span></label><input class="sel-full" id="inTitle" placeholder="e.g. Factory Cotton Crew Tee or 1990s Denim Jacket" /></div>
         <div class="fgrid third">
-          <div class="field"><label>Barcode / SKU</label>
+          <div class="field"><label>Barcode / SKU<span class="fhint">Optional · rolled automatically when blank</span></label>
             <div class="sku-row"><input class="sel-full" id="inSku" maxlength="45" aria-label="Unique garment SKU" /><button class="btn sm ghost" id="btnRollSku" type="button">Roll</button></div>
           </div>
           <div class="field"><label>Condition grade</label><select id="inCond" class="sel-full"></select></div>
@@ -333,7 +344,7 @@
           <div class="field"><label>Color / wash</label><input class="sel-full" id="inColor" placeholder="e.g. Indigo, Olive, Terracotta" /></div>
         </div>
         <div class="fgrid">
-          <div class="field"><label>Quantity / units received<span class="fhint" id="inQtyHint">Pre-loved must be 1 · brand-new supports multi-stock</span></label>
+          <div class="field"><label>Quantity / units received<span class="fhint" id="inQtyHint">Required · defaults to 1 · pre-loved must be 1</span></label>
             <input id="inQty" class="sel-full" type="number" min="0" step="1" value="1" placeholder="1" /></div>
           <div class="field"><label>Stock status</label>
             <select id="inStatus" class="sel-full"><option value="1">Available</option><option value="0">Sold</option></select></div>
@@ -349,7 +360,7 @@
           <div class="field full" id="inLotGradeField" hidden><label>Graded tier<span class="fhint" id="inLotGradeHint">Pre-graded tier · locks the unit COGS</span></label><select class="sel-full" id="inLotGrade"><option value="">Choose tier…</option></select></div>
           <div class="field" id="inSupplierField"><label>Source supplier<span class="fhint">Direct-upload partner tag · e.g. Finds Ug</span></label><input class="sel-full" id="inSupplier" maxlength="255" placeholder="e.g. Finds Ug" /></div>
           <div class="field" id="inCostField"><label>Weighted landed unit COGS (UGX)<span class="fhint" id="inCostHint"></span></label><input class="sel-full" id="inCost" type="number" min="0" placeholder="12000" /></div>
-          <div class="field"><label>Target retail selling price (UGX)<span class="fhint">Suggested retail · before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
+          <div class="field"><label>Target retail selling price (UGX)<span class="fhint">Required · the register price · before transport</span></label><input class="sel-full" id="inSell" type="number" min="0" placeholder="35000" /></div>
           <div class="field" id="inTransportField"><label>Total transport / shipping (UGX)<span class="fhint">Auto-filled from System Parameters base fee · Split 50 / 50 · edit only for exceptions</span></label><input class="sel-full" id="inTransport" type="number" min="0" data-auto="1" placeholder="7000" /></div>
           <div class="field"><label>Original price / RRP (UGX)<span class="fhint">Optional valuation</span></label><input class="sel-full" id="inRrp" type="number" min="0" placeholder="70000" /></div>
         </div>
@@ -357,7 +368,7 @@
         <section class="intake-specs" id="intakeSpecsSection" hidden aria-labelledby="intakeSpecsTitle">
           <div class="intake-specs-head">
             <div><h4 class="sec" id="intakeSpecsTitle">4. Category Specifications</h4>
-              <p class="muted small" id="intakeSpecsLead">Only the details that apply to this exact item type are shown, with the units it is measured in.</p></div>
+              <p class="muted small" id="intakeSpecsLead">Optional — only the details that apply to this exact item type are shown, with the units it is measured in. Fill what you know now; the rest can be added later.</p></div>
             <span class="intake-specs-progress" id="intakeSpecsProgress" aria-live="polite"></span>
           </div>
           <div id="intakeSpecs"></div>
@@ -412,7 +423,7 @@
         <div class="field"><label>Measurement note<span class="fhint">Optional — how the piece was laid out</span></label>
           <input class="sel-full" id="inMeasureNote" placeholder="Measured flat, buttoned, without stretching." /></div>
 
-        <div class="field"><label>Flaw &amp; condition notes<span class="fhint">Mandatory for anything below Grade A — shown in a warning callout</span></label>
+        <div class="field"><label>Flaw &amp; condition notes<span class="fhint">Recommended for anything below Grade A — shown in a warning callout</span></label>
           <textarea class="sel-full" id="inFlaws" placeholder="Small moth nibble (3mm) on the lower left front panel. Replaced third button."></textarea></div>
 
         <div class="field"><label>Which photo shows the flaw?<span class="fhint">Flags that thumbnail with a warning icon</span></label>
@@ -531,7 +542,7 @@
         <aside class="dc-jobs-panel"><div class="dc-panel-heading"><div><p class="kicker">ORDER ALLOCATION</p><h2>Delivery queue <span id="dispatchOrderCount">0</span></h2></div></div><div id="dispatchOrders"></div></aside>
       </div>
       <div class="dc-pair-card" id="dispatchPairCard" hidden><button class="dc-text-button" id="btnCloseDispatchPair" type="button">Close</button><p class="kicker" id="dispatchPairKicker">PAIR AN AUTHORIZED ANDROID PHONE</p><h3 id="dispatchPairName"></h3><strong class="dc-pair-code" id="dispatchPairCode"></strong><p id="dispatchPairExpiry"></p><p id="dispatchPairHelp">On the rider's updated Android app: Menu → Rider delivery app → enter this code. The rider then chooses Start sharing and permits Location + the visible tracking notification. A phone serial/IMEI is not required.</p><a class="btn" href="rider.html">View rider app instructions ↗</a> <a class="btn" href="delivery.html">Open Adonai Delivery web app ↗</a></div>
-      <div class="dc-section-heading"><div><p class="kicker">AUTHORIZED DELIVERY TEAM</p><h2>Partners &amp; device status</h2></div><span class="muted small">GPS stops when the rider ends duty or phone access is revoked.</span></div><div class="rider-list dc-rider-grid" id="riderList"></div>
+      <div class="dc-section-heading"><div><p class="kicker">AUTHORIZED DELIVERY TEAM</p><h2>Partners &amp; device status</h2></div><span class="muted small">Choose the code for the rider's app: <strong>Delivery account code</strong> is for /delivery after sign-in/check-in; <strong>APK GPS code</strong> is for Menu → Rider delivery app in the installed Android APK. Both phones need internet to this same store server; no direct phone-to-phone pairing or Bluetooth is involved. GPS stops when the rider ends duty or phone access is revoked.</span></div><div class="rider-list dc-rider-grid" id="riderList"></div>
       <div class="dc-bottom-grid"><section class="dc-activity"><p class="kicker">DELIVERY ACCOUNTABILITY</p><h2>Latest delivery updates</h2><ul id="dispatchEvents"></ul></section><section class="dc-how"><p class="kicker">ANDROID SCREEN-LOCK TRACKING</p><h2>Pair → start duty → deliver</h2><ol><li>Add a delivery partner and create a private pairing code.</li><li>The rider pairs their phone in the updated Android app and explicitly starts GPS sharing.</li><li>Assign a prepared, paid delivery order. The rider reports acceptance, collection, arrival and recipient-confirmed delivery.</li><li>End sharing from the app or its ongoing notification. Each duty ends after 12 hours.</li></ol><p>GPS, mobile data and notifications must be enabled. Battery controls, force-stop or lost network can interrupt updates; the locator shows stale data honestly. Existing APKs need a rebuild/install for this service.</p><a class="btn" href="rider.html">Open rider app instructions ↗</a></section></div>
     </section>
 
@@ -871,7 +882,7 @@
       </div>
 
       <section class="card pa-settings-card" id="passwordsSettingsCard" aria-labelledby="passwordSettingsTitle">
-        <div class="pa-settings-heading"><div><p class="pa-eyebrow">OPTIONAL POS SECURITY</p><h3 id="passwordSettingsTitle">Passwords &amp; protected areas</h3><p>Admin-controlled passwords for important workspaces — never for the cashier register.</p></div><span class="pa-status-badge" id="posPasswordStatus">Optional</span></div>
+        <div class="pa-settings-heading"><div><p class="pa-eyebrow">OPTIONAL POS SECURITY</p><h3 id="passwordSettingsTitle">Passwords &amp; protected areas</h3><p>Admin-controlled passwords for important workspaces — never for the cashier register.</p><p class="muted small">For native APK phone pairing/GPS, protect <strong>Orders, dispatch &amp; audit</strong> below, save, then unlock that area in Dispatch. Rider account codes for <code>/delivery</code> do not require GPS protection.</p></div><span class="pa-status-badge" id="posPasswordStatus">Optional</span></div>
         <div id="posPasswordSettings" aria-live="polite"><p class="muted small">Loading password settings…</p></div>
       </section>
 
@@ -945,14 +956,14 @@
 <script src="js/intake.js?v=5.1"></script>
 <script src="js/garment-media.js?v=1.0"></script>
 <script src="js/catalog-schemas.data.js?v=2026.10.18"></script>
-<script src="js/catalog-schemas.js?v=1.1"></script>
+<script src="js/catalog-schemas.js?v=1.2"></script>
 <script src="js/garment-tools.js?v=1.1"></script>
 <script src="js/file-downloads.js?v=1.0"></script>
 <script src="js/audit-exports.js?v=1.1"></script>
 <script src="js/receipt-printing.js?v=1.0"></script>
 <script src="js/vendor/leaflet/leaflet.js"></script>
 <script src="js/dispatch-center.js?v=1.0"></script>
-<script src="app.js?v=8.5"></script>
+<script src="app.js?v=8.6"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser
        re-reads the HTML and skips any stale or frozen in-memory state. Cached data is kept. */

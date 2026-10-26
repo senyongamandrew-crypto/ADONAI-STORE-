@@ -416,6 +416,10 @@
     const schema = options.schema;
     const uid = `csf${++mountCounter}`;
     let context = Object.assign({}, options.context || {});
+    // Essentials-first intake labels every field: "Optional" when it never
+    // blocks a save, "Recommended" when the strict manager check would ask
+    // for it. In strict mode the classic asterisk marks the blockers.
+    let detailsPolicy = options.detailsPolicy === "required" ? "required" : "optional";
     const initial = options.values || {};
     const initialValues = initial.values || {};
     const initialInspection = initial.inspection || {};
@@ -429,7 +433,7 @@
           ${(section.fields || []).map(field => {
             const id = `${uid}-${field.key}`;
             return `<div class="field csf-field" data-csf-key="${esc(field.key)}" data-csf-type="${esc(field.type)}">
-              <label for="${id}">${esc(field.label)}<span class="csf-req" data-csf-req hidden aria-hidden="true">*</span>${unitBadge(field)}</label>
+              <label for="${id}">${esc(field.label)}<span class="csf-req" data-csf-req hidden aria-hidden="true">*</span><span class="csf-tag" data-csf-tag hidden></span>${unitBadge(field)}</label>
               ${fieldControlHTML(field, id, initialValues[field.key])}
               ${field.hint ? `<span class="fhint">${esc(field.hint)}</span>` : ""}
               <span class="csf-error" data-csf-error role="alert" hidden></span>
@@ -448,7 +452,7 @@
             const id = `${uid}-insp-${point.key}`;
             const current = initialInspection[point.key] || "";
             return `<div class="field csf-field" data-csf-point="${esc(point.key)}">
-              <label for="${id}">${esc(point.label)}${point.required ? '<span class="csf-req" aria-hidden="true">*</span>' : ""}</label>
+              <label for="${id}">${esc(point.label)}${point.required ? '<span class="csf-req" data-csf-req aria-hidden="true">*</span>' : ""}<span class="csf-tag" data-csf-tag hidden></span></label>
               <select class="sel-full" id="${id}" data-csf-rating><option value="">Rate…</option>${(inspection.ratings || []).map(r => `<option${r === current ? " selected" : ""}>${esc(r)}</option>`).join("")}</select>
               <span class="csf-error" data-csf-error role="alert" hidden></span>
             </div>`;
@@ -538,19 +542,41 @@
       }
     }
 
+    /** Paint the Optional / Recommended chips for the current policy. */
+    function paintPolicyTags() {
+      const marker = (wrap, required) => {
+        const req = wrap.querySelector("[data-csf-req]");
+        const tag = wrap.querySelector("[data-csf-tag]");
+        const strict = detailsPolicy === "required";
+        if (req) req.hidden = !required || !strict;
+        if (tag) {
+          tag.hidden = required && strict;
+          tag.textContent = required ? "Recommended" : "Optional";
+          tag.classList.toggle("is-recommended", required);
+        }
+      };
+      eachField(schema, field => {
+        const wrap = fieldEl(field.key);
+        if (wrap) marker(wrap, isRequired(field, context));
+      });
+      root.querySelectorAll("[data-csf-point]").forEach(wrap => {
+        const point = ((schema.inspection || {}).points || []).find(row => row.key === wrap.dataset.csfPoint);
+        marker(wrap, !!(point && point.required));
+      });
+    }
+
     function applyVisibility() {
       eachField(schema, field => {
         const wrap = fieldEl(field.key);
         if (!wrap) return;
         wrap.hidden = !isVisible(field, context);
-        const req = wrap.querySelector("[data-csf-req]");
-        if (req) req.hidden = !isRequired(field, context);
       });
       root.querySelectorAll("[data-csf-section]").forEach(sectionEl => {
         sectionEl.hidden = !Array.from(sectionEl.querySelectorAll("[data-csf-key]")).some(wrap => !wrap.hidden);
       });
       const inspectionEl = root.querySelector("[data-csf-inspection]");
       if (inspectionEl) inspectionEl.hidden = !inspectionApplies(schema, context);
+      paintPolicyTags();
     }
 
     /** Payload in the server shape. Hidden fields never leak stale values. */
@@ -630,6 +656,11 @@
     return {
       schema,
       get context() { return Object.assign({}, context); },
+      get detailsPolicy() { return detailsPolicy; },
+      setDetailsPolicy(next) {
+        detailsPolicy = next === "required" ? "required" : "optional";
+        paintPolicyTags();
+      },
       setContext(next) { context = Object.assign({}, context, next || {}); applyVisibility(); changed(); },
       read,
       validate: validateNow,
@@ -664,6 +695,7 @@
     if (!root) throw new Error("Photo protocol container is missing");
     const schema = options.schema;
     let context = Object.assign({}, options.context || {});
+    let detailsPolicy = options.detailsPolicy === "required" ? "required" : "optional";
     let photos = (options.photos || []).slice();
     const byUrl = {};             // angle key -> photo URL
     const initial = options.angles || {};
@@ -700,7 +732,7 @@
         <div class="cpp" data-photo-protocol="${esc(schema.key)}">
           <div class="cpp-head"><div><span class="cpp-eyebrow">INTAKE PHOTO PROTOCOL · ${esc(String(schema.label).toUpperCase())}</span>
             <p>Shoot these single-angle views in order. Each one is mapped to a gallery photo below.</p></div>
-            <span class="cpp-count ${s.requiredMapped === s.required ? "done" : ""}" data-cpp-count>${s.requiredMapped} / ${s.required} required angles</span></div>
+            <span class="cpp-count ${s.requiredMapped === s.required ? "done" : ""}" data-cpp-count>${s.requiredMapped} / ${s.required} ${detailsPolicy === "required" ? "required" : "suggested"} angles</span></div>
           <ol class="cpp-list">
             ${angles().map(angle => `
               <li class="cpp-angle ${angle.key in map ? "mapped" : ""}" data-cpp-angle="${esc(angle.key)}">
@@ -731,6 +763,7 @@
       setContext(next) { context = Object.assign({}, context, next || {}); render(); },
       read: indices,
       status,
+      setDetailsPolicy(next) { detailsPolicy = next === "required" ? "required" : "optional"; render(); },
       reset() { Object.keys(byUrl).forEach(key => delete byUrl[key]); touched = false; photos = []; render(); },
       destroy() { root.innerHTML = ""; }
     };
