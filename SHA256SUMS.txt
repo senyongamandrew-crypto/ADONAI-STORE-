@@ -1,0 +1,2 @@
+b8b7556122395f28bcca421c9802255b9d57ab0d282dd104e458ebff75cc83c8  adonai-delivery.apk
+e5d5b79b06fc54857571df5ceda8b69a087a0202fcecc5e0763bd8a5631703b7  adonai-pos-v2.apk
