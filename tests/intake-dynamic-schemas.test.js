@@ -243,6 +243,18 @@ async function main() {
     assert.match($("#toast").textContent, /quantity/i);
     $("#inQty").value = "1";
 
+    /* --- A mistyped optional detail is skipped, never refused --- */
+    cat.value = "Rings & Earrings"; change(cat);
+    doc.querySelector('[data-intake-condition="BRAND_NEW"]').click();
+    $("#inTitle").value = "Oversized hoops";
+    $("#inSell").value = "45000";
+    setValue("length", "500"); // 500 mm is far outside the earring range
+    await save();
+    assert.ok(savedProduct, "an impossible optional measurement never refuses the garment");
+    assert.ok(!("length" in savedProduct.attributes.values), "the rejected value is left out of the payload");
+    assert.match($("#toast").textContent, /skipped/);
+    assert.ok(field("length").classList.contains("csf-invalid"), "the inline message still shows what to correct");
+
     /* Fresh measured tee: typed digits are never rewritten, and the other
        unit is visible on every keystroke and unit change. */
     cat.value = "Tops & Shirts"; change(cat);
@@ -350,7 +362,25 @@ async function main() {
 
     console.log("✓ strict edits cannot regress, essentials edits may leave gaps, and legacy garments upgrade from inches");
     console.log("✓ schema-driven intake renders only each sub-group's fields, units and angles");
+    /* --- Partner items: photos and the clip are advisory, not blockers --- */
+    $("#inInventorySource").value = "partner";
+    change($("#inInventorySource"));
+    const partnerSelect = $("#inConsignmentPartner");
+    partnerSelect.innerHTML = '<option value="PRT-TEST">Test Partner · 5.00%</option>';
+    partnerSelect.value = "PRT-TEST";
+    change(partnerSelect);
+    $("#inTitle").value = "Partner denim jacket";
+    $("#inSell").value = "60000";
+    await save();
+    assert.ok(savedProduct, "a partner garment saves with no photo and no video");
+    assert.strictEqual(savedProduct.consignment_partner_id, "PRT-TEST");
+    assert.strictEqual(savedProduct.details_required, false, "essentials mode never asks the server for the strict gate");
+    assert.match($("#toast").textContent, /partner photo\/video still recommended/);
+    $("#inInventorySource").value = "store";
+    change($("#inInventorySource"));
+
     console.log("✓ essentials mode saves on price + quantity; strict details, hidden values and server errors still pin to inputs");
+    console.log("✓ partner media, blank names/SKUs and mistyped optional details never refuse a save");
   } finally {
     window.close();
   }

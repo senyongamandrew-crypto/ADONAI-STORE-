@@ -1702,10 +1702,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!engine || !form || $("#mpSpecsSection").hidden) return null;
     const enforce = !!modalBox._schemaEnforce;
     const result = form.validate({ enforceRequired: enforce });
-    if (!result.ok) {
-      const messages = Object.values(result.errors);
+    const rejected = Object.values(result.errors);
+    if (!result.ok && enforce) {
       form.focusFirstError();
-      return { error: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}` };
+      return { error: rejected.length === 1 ? rejected[0] : `Fix ${rejected.length} category details: ${rejected.slice(0, 2).join("; ")}` };
     }
     // Suggested gaps are computed without painting errors on optional fields.
     const strict = enforce ? result : engine.validate(form.schema, form.read(), form.context, { enforceRequired: true });
@@ -1717,7 +1717,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     const measurements = Object.assign({}, (product && product.measurements) || {});
     modalBox._schemaMeasureKeys().forEach(key => { delete measurements[key]; });
     Object.assign(measurements, projections.measurements || {});
-    return { subcategory: $("#mpSubCat").value, attributes, projections, measurements, missing: Object.keys(strict.errors).length };
+    return {
+      subcategory: $("#mpSubCat").value, attributes, projections, measurements,
+      missing: Object.keys(strict.errors).length, skipped: rejected.length
+    };
   }
 
   function productModal(id) {
@@ -2269,6 +2272,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   let intakeSchemaJSON = "";
   let intakePhotoProtocol = null;
   let intakePhotoUrls = [];
+  let intakeVideoInfo = null;
   let intakeTagsEdited = false;
 
   /* Essentials-first intake: the selling price and the quantity are the only
@@ -2397,6 +2401,11 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     ];
     if (intakeSchemaForm) checks.push([`Category details ${specs.done}/${specs.total}`, specs.done === specs.total, strict]);
     if (intakePhotoProtocol) checks.push([`Photo angles ${angles.requiredMapped}/${angles.required}`, angles.requiredMapped === angles.required, false]);
+    if (intakeSource() === "partner") {
+      const clipSeconds = Number((intakeVideoInfo && intakeVideoInfo.duration) || 0);
+      const mediaReady = intakePhotoUrls.length > 0 && clipSeconds >= 15 && clipSeconds <= 20;
+      checks.push(["Partner photo & 15–20s clip", mediaReady, strict]);
+    }
     const name = ($("#inTitle").value || "").trim();
     const notes = [];
     if (!name) notes.push(`Saving as “${autoIntakeName()}” — you can rename it later.`);
@@ -2494,10 +2503,13 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     if (!engine || !intakeSchemaForm || $("#intakeSpecsSection").hidden) return null;
     const strict = intakeStrictDetails();
     const result = intakeSchemaForm.validate({ enforceRequired: strict });
-    if (!result.ok) {
-      const messages = Object.values(result.errors);
-      return { ok: false, message: messages.length === 1 ? messages[0] : `Fix ${messages.length} category details: ${messages.slice(0, 2).join("; ")}${messages.length > 2 ? "…" : ""}` };
+    const rejected = Object.values(result.errors);
+    if (!result.ok && strict) {
+      return { ok: false, message: rejected.length === 1 ? rejected[0] : `Fix ${rejected.length} category details: ${rejected.slice(0, 2).join("; ")}${rejected.length > 2 ? "…" : ""}` };
     }
+    // Essentials mode: a value the engine cannot store is simply left out of
+    // the payload (the inline message still tells staff what to correct), so
+    // a mistyped optional detail can never refuse the garment.
     const attributes = { schema_key: intakeSchemaKey, values: result.values };
     if (engine.inspectionApplies(intakeSchemaForm.schema, intakeSchemaForm.context)) attributes.inspection = result.inspection;
     attributes.photo_angles = intakePhotoProtocol ? intakePhotoProtocol.read() : {};
@@ -2511,6 +2523,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       attributes,
       projections: engine.project(intakeSchemaForm.schema, result.values),
       missing: gaps,
+      skipped: rejected,
       details_required: strict
     };
   }
@@ -2847,6 +2860,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       onChange: (urls, previous, video) => {
         syncFlawPhotoOptions($("#inFlawPhoto"), urls, previous);
         intakePhotoUrls = urls.slice();
+        intakeVideoInfo = video || null;
         if (intakePhotoProtocol) intakePhotoProtocol.setPhotos(urls);
         updateIntakeReadiness();
         $("#angleCount").textContent = `${urls.length} / 12 photos${video ? " + video" : ""}`;
@@ -2975,11 +2989,9 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       if (schemaPayload.projections.size && !isIntakeFieldVisible("inSize")) vals.size = schemaPayload.projections.size;
     }
     if (partnerSource) {
+      // Only the owning partner is intrinsic; photos and the clip are
+      // recommended and are enforced by a manager's Strict details check.
       if (!vals.consignment_partner_id) return toast("Choose the partner supplying this item", false);
-      if (!garmentMedia.images || !garmentMedia.images.length) return toast("Partner items need at least one photo", false);
-      if (!garmentMedia.video_id || Number(garmentMedia.video_duration) < 15 || Number(garmentMedia.video_duration) > 20) {
-        return toast("Partner items need an uploaded 15–20 second video", false);
-      }
       if (commissionInput !== "" && (!Number.isFinite(vals.commission_rate) || vals.commission_rate < 0 || vals.commission_rate > 100)) {
         return toast("Item commission must be from 0 to 100 percent", false);
       }
@@ -3001,9 +3013,16 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       lastTaggedProductId = p.id;
       $("#btnPrintLastTag").disabled = false;
       const optionalGaps = (schemaPayload && schemaPayload.missing) ? schemaPayload.missing.length : 0;
-      toast(`Tagged & saved — ${p.name} · ${p.sku}` + (optionalGaps
-        ? ` · ${optionalGaps} optional detail${optionalGaps === 1 ? "" : "s"} can be added later`
-        : ""));
+      const skippedDetails = (schemaPayload && schemaPayload.skipped) ? schemaPayload.skipped.length : 0;
+      const partnerMediaMissing = partnerSource && (
+        !garmentMedia.images || !garmentMedia.images.length ||
+        !garmentMedia.video_id || Number(garmentMedia.video_duration) < 15 || Number(garmentMedia.video_duration) > 20
+      );
+      const notes = [];
+      if (optionalGaps) notes.push(`${optionalGaps} optional detail${optionalGaps === 1 ? "" : "s"} can be added later`);
+      if (skippedDetails) notes.push(`${skippedDetails} detail${skippedDetails === 1 ? "" : "s"} skipped — correct it from the rack`);
+      if (partnerMediaMissing) notes.push("partner photo/video still recommended");
+      toast(`Tagged & saved — ${p.name} · ${p.sku}` + (notes.length ? ` · ${notes.join(" · ")}` : ""));
 
       if (again) {
         ["inTitle", "inBrand", "inColor", "inCost", "inSell", "inRrp", "inStory", "inNotes",
@@ -3015,6 +3034,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
         intakeTagsEdited = false;
         if ($("#inSearchTags")) $("#inSearchTags").value = "";
         intakeMedia.reset();
+        intakeVideoInfo = null;
         if (intakePhotoProtocol) intakePhotoProtocol.reset();
         refreshIntakeSearchTags(true);
         $("#inStockLot").value = "";
@@ -5694,7 +5714,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
       try {
         if (btnSaveProd.dataset.saveProd) {
           await DB.updateProduct(btnSaveProd.dataset.saveProd, vals);
-          toast(modalSchema && modalSchema.missing ? `Item updated — ${modalSchema.missing} optional category detail${modalSchema.missing === 1 ? "" : "s"} still to fill` : "Item updated — live everywhere");
+          const modalNotes = [];
+          if (modalSchema && modalSchema.missing) modalNotes.push(`${modalSchema.missing} optional category detail${modalSchema.missing === 1 ? "" : "s"} still to fill`);
+          if (modalSchema && modalSchema.skipped) modalNotes.push(`${modalSchema.skipped} detail${modalSchema.skipped === 1 ? "" : "s"} skipped`);
+          toast(`Item updated${modalNotes.length ? " — " + modalNotes.join(" · ") : " — live everywhere"}`);
         }
         else { const p = await DB.addProduct(vals); toast(`Added ${p.name} · ${p.sku}`); }
         editor.markSaved(); modalBox._mediaSaving = false;
