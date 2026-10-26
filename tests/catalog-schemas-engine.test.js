@@ -79,3 +79,20 @@ const fallback = CS.resolve("Rings & Earrings", "Tiaras");
 assert.strictEqual(fallback.subcategory, "Stud Earrings", "unknown sub-groups fall back to the first form in the browser");
 assert.strictEqual(CS.resolve("Not a category", ""), null);
 console.log("✓ taxonomy, hidden core fields, unit conversion and tag cleaning hold");
+
+/* 5. Measurements are optional everywhere, and the digit box stays visible.
+ * Dimensions used to block saving (required chest/length etc.) while the
+ * global `.field select { width:100% }` squeezed the number input to a
+ * sliver beside the unit dropdown. Pin both parts of the fix. */
+Object.entries(doc.schemas).forEach(([key, schema]) => schema.sections.forEach(section => {
+  assert.ok(!section.require_any, `${key}.${section.id} never demands a measurement`);
+  section.fields.forEach(field => {
+    if (field.type !== "measure") return;
+    assert.ok(!field.required && !field.required_when, `${key}.${field.key} is an optional measurement`);
+  });
+}));
+const schemaCss = fs.readFileSync(path.join(ROOT, "css/catalog-schemas.css"), "utf8");
+assert.match(schemaCss, /\.csf-measure \.sel-full \{[^}]*width: auto/, "digit input escapes the global width:100% and takes the flexible space");
+assert.match(schemaCss, /\.csf-measure \.csf-unit-select \{[^}]*width: auto/, "unit dropdown escapes width:100% so it cannot steal the row");
+assert.match(schemaCss, /\.csf-convert \{/, "live converted value is styled under the input");
+console.log("✓ measurements optional in every schema; digit input keeps the row, unit stays compact");

@@ -58,13 +58,24 @@
   color: #0F766E; background: #F0FDFA; border-radius: 6px; padding: 1px 6px;
 }
 .csf-measure { display: flex; gap: 6px; align-items: stretch; }
-.csf-measure .sel-full { flex: 1 1 auto; min-width: 0; }
-.csf-unit, .csf-unit-select {
-  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; min-width: 52px;
+/* styles.css gives every .field input/select width:100%. Inside this flex
+   row that width must be neutralised, otherwise the unit <select> (which
+   cannot shrink) claims the whole row and the digit input collapses to a
+   sliver where staff cannot see the number they are typing or editing.
+   Digits get the flexible space; the unit keeps a compact fixed size. */
+.csf-measure .sel-full { flex: 1 1 0%; width: auto; min-width: 0; }
+.csf-measure .csf-unit, .csf-measure .csf-unit-select {
+  flex: 0 0 auto; width: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 62px;
   border: 1px solid var(--line, #E5E7EB); border-radius: 10px; background: #F9FAFB;
   font: 700 12.5px var(--font-text, inherit); color: var(--ink, #111827); padding: 0 8px;
 }
 .csf-unit-select { cursor: pointer; }
+/* Live equivalent under a measurement ("= 50.8 cm") so the other unit is
+   always seen while typing or editing, with an amber range warning when
+   the digits cannot be right for the chosen unit. */
+.csf-convert { display: block; margin-top: 4px; font-size: 11.5px; font-weight: 600; color: #0F766E; }
+.csf-convert.warn { color: #B45309; }
+.csf-convert[hidden] { display: none; }
 .csf-other { margin-top: 6px; }
 .csf-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 6px; }
 .csf-chip { position: relative; display: inline-flex; cursor: pointer; }

@@ -124,6 +124,36 @@ class SchemaDocumentTests(unittest.TestCase):
             self.assertIn("size", doc["schemas"][key]["core"]["hide"])
         self.assertEqual(len(doc["schemas"]["footwear"]["inspection"]["points"]), 4)
 
+    def test_measurements_are_optional_and_never_block_saving(self):
+        """Dimensions & Sizing is opt-in detail: no measure field — in any
+        schema, for any condition — may keep staff from saving an item."""
+        doc = catalog_schemas.load_defaults()
+        for key, schema in doc["schemas"].items():
+            for section, field in catalog_schemas.iter_fields(schema):
+                if field.get("type") == "measure":
+                    self.assertFalse(field.get("required"), f"{key}.{field['key']} must stay optional")
+                    self.assertFalse(field.get("required_when"), f"{key}.{field['key']} must stay optional")
+                self.assertNotIn("require_any", section, f"{key}.{section['id']} must not demand a measurement")
+        # A pre-loved tee with composition but no dimensions normalises fine…
+        result = catalog_schemas.normalize_attributes(
+            {"schema_key": "tops", "values": {"material_composition": "100% Cotton"}},
+            "Tops & Shirts", "T-Shirts", "PRE_LOVED", enforce_required=True)
+        self.assertNotIn("chest", result["attributes"]["values"])
+        self.assertNotIn("length", result["attributes"]["values"])
+        # …and so does a bracelet with neither wrist measurement.
+        result = catalog_schemas.normalize_attributes(
+            {"schema_key": "rings_bracelets", "values": {
+                "core_metal": "Brass", "adjustability": "Fixed diameter"}},
+            "Bracelets & Bangles", "Bracelets", "BRAND_NEW", enforce_required=True)
+        self.assertNotIn("inner_diameter", result["attributes"]["values"])
+        # Entered measurements are still validated (wrong units stay wrong).
+        with self.assertRaises(catalog_schemas.SchemaValidationError):
+            catalog_schemas.normalize_attributes(
+                {"schema_key": "tops", "values": {
+                    "material_composition": "100% Cotton",
+                    "chest": {"value": 56, "unit": "in"}}},
+                "Tops & Shirts", "T-Shirts", "PRE_LOVED", enforce_required=True)
+
     def test_parity_fixture_matches_server_engine(self):
         """The same fixture is asserted by tests/catalog-schemas-engine.test.js."""
         fixture = json.loads((ROOT / "tests/fixtures/catalog-schema-parity.json").read_text())
