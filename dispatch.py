@@ -118,7 +118,7 @@ def gps_access(session, headers, staff, staff_required):
 
 def require_gps_access(session, headers, staff, staff_required):
     if not gps_access(session, headers, staff, staff_required):
-        fail("Before pairing/viewing GPS, protect Orders, dispatch & audit in Settings → Optional area passwords, or use an authenticated staff deployment. Checkout stays open.",403,"TRACKING_PRIVACY_SETUP")
+        fail("To enable native APK pairing/GPS: Admin Suite → Store Settings → scroll to Passwords & protected areas → protect Orders, dispatch & audit and save; then unlock that area in Dispatch. Checkout stays open. For rider accounts/jobs without GPS, use Delivery account code instead; no GPS protection is needed.",403,"TRACKING_PRIVACY_SETUP")
 
 
 def prune_points(session):
@@ -322,7 +322,7 @@ def board(session, headers, staff, staff_required):
         briefs.append(brief)
     return {"ok":True,"riders":records,"orders":briefs,
             "events":[event_dict(event) for event in events],"gps_access":private,"server_time":iso(now()),"fresh_seconds":FRESH_SECONDS,
-            "privacy_message":None if private else "Live GPS is private. Protect Orders, dispatch & audit in Settings to enable phone pairing and locations; the cashier register stays open."}
+            "privacy_message":None if private else "To enable native APK phone pairing/GPS: Admin Suite → Store Settings → scroll to Passwords & protected areas → protect Orders, dispatch & audit and save. Then unlock that area in Dispatch. Checkout stays open. If you only need rider accounts and job assignments (no GPS), use Delivery account code instead; no GPS protection is needed."}
 
 
 def route_request(method, path, body, headers, staff, staff_required=False):
