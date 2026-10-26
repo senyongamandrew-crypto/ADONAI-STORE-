@@ -117,20 +117,37 @@ class ConsignmentTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in choices["partners"]], [partner["id"]])
 
         clip_id = self.add_video("b")
-        status, missing_photo = self.request("POST", "/api/products", {
+        # Media is recommended, not mandatory: a partner garment saves first
+        # and can be photographed/filmed afterwards.
+        status, no_photo = self.request("POST", "/api/products", {
             "name": "No-photo item", "inventory_source": "partner",
             "consignment_partner_id": partner["id"], "base_price": 50000,
             "in_stock_count": 1, "video_id": clip_id,
+        })
+        self.assertEqual(status, 201, no_photo)
+        status, no_media = self.request("POST", "/api/products", {
+            "id": "CONS-NO-MEDIA", "name": "No-media item", "inventory_source": "partner",
+            "consignment_partner_id": partner["id"], "base_price": 50000,
+            "in_stock_count": 1,
+        })
+        self.assertEqual(status, 201, no_media)
+
+        # A manager's Strict details check enforces the managed media policy.
+        status, missing_photo = self.request("POST", "/api/products", {
+            "name": "Strict no-photo item", "inventory_source": "partner",
+            "consignment_partner_id": partner["id"], "base_price": 50000,
+            "in_stock_count": 1, "video_id": self.add_video("d"), "details_required": True,
         })
         self.assertEqual(status, 400)
         self.assertIn("photo", missing_photo["error"].lower())
 
         too_short = self.add_video("c", duration=14.99)
-        status, invalid_video = self.intake_consignment(partner["id"], product_id="CONS-BAD-VIDEO", video_id=too_short)
+        status, invalid_video = self.intake_consignment(
+            partner["id"], product_id="CONS-BAD-VIDEO", video_id=too_short, details_required=True)
         self.assertEqual(status, 400)
         self.assertIn("15 to 20", invalid_video["error"])
 
-        status, created = self.intake_consignment(partner["id"], video_id=clip_id)
+        status, created = self.intake_consignment(partner["id"])
         self.assertEqual(status, 201, created)
         product = created["product"]
         self.assertTrue(product["is_consignment"])

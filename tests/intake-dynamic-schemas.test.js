@@ -3,8 +3,10 @@
  * With js/catalog-schemas.js loaded, Category + Sub-group resolve ONE form:
  * earrings get millimetre / gram inputs and earring photo angles (never
  * inches, garment sizes or fabric), pre-loved shoes get inspection points,
- * required details block the save, hidden fields never leak into the saved
- * product, and server field errors are pinned to the exact inputs.
+ * essentials mode saves with only a price + quantity (blank names and SKUs
+ * are generated), the manager's "Strict details" switch restores the
+ * recommended-field gate, hidden fields never leak into the saved product,
+ * and server field errors are pinned to the exact inputs.
  * Run: node tests/intake-dynamic-schemas.test.js
  */
 "use strict";
@@ -118,17 +120,37 @@ async function main() {
     assert.ok(visible("stud_depth"), "studs ask for stud depth");
     assert.strictEqual(doc.querySelectorAll("#intakePhotoProtocol [data-cpp-angle]").length, 4, "four earring photo angles");
     assert.match($("#intakePhotoProtocol").textContent, /Backing & post closure/);
-    assert.match($("#intakePhotoProtocol").textContent, /0 \/ 3 required angles/);
+    assert.match($("#intakePhotoProtocol").textContent, /0 \/ 3 suggested angles/);
     assert.match($("#intakeReadiness").textContent, /Category details 0\/3/);
+    assert.match($("#intakeReadiness").textContent, /Selling price/);
+    assert.match($("#intakeReadiness").textContent, /Quantity/);
+    assert.ok(!$("#intakeReadiness").textContent.includes("Title"), "the title is never a blocker");
+    assert.strictEqual(field("primary_metal").querySelector("[data-csf-tag]").textContent, "Recommended");
+    assert.strictEqual(field("length").querySelector("[data-csf-tag]").textContent, "Optional");
 
-    /* --- Required details block the save and are pinned to their inputs --- */
+    /* --- Essentials mode: price + quantity save without a single detail --- */
     $("#inTitle").value = "Sterling Lever-Back Studs";
     $("#inSell").value = "45000";
     await save();
-    assert.strictEqual(savedProduct, null, "missing required earring details block intake");
+    assert.ok(savedProduct, "essentials mode saves an earring with no category details");
+    assert.ok(!("primary_metal" in savedProduct.attributes.values), "blank optional details are simply absent");
+    assert.match($("#toast").textContent, /optional details? can be added later/);
+    assert.strictEqual(field("primary_metal").querySelector("[data-csf-error]").hidden, true, "optional gaps are never painted as errors");
+
+    /* --- The manager's strict switch restores the completeness gate --- */
+    const strictBox = $("#inStrictDetails");
+    strictBox.checked = true;
+    change(strictBox);
+    assert.match($("#intakeSpecsProgress").textContent, /0 \/ 3 recommended details/);
+    assert.strictEqual(field("primary_metal").querySelector("[data-csf-tag]").hidden, true, "strict mode marks blockers with *");
+    assert.strictEqual(field("primary_metal").querySelector("[data-csf-req]").hidden, false);
+    await save();
+    assert.strictEqual(savedProduct, null, "strict details block intake until recommended fields are filled");
     assert.match($("#toast").textContent, /Fix 3 category details/);
     assert.ok(field("primary_metal").classList.contains("csf-invalid"), "primary metal is flagged");
     assert.strictEqual(field("primary_metal").querySelector("[data-csf-error]").hidden, false);
+    strictBox.checked = false;
+    change(strictBox);
 
     /* --- Stale-value guard: legacy inch inputs and hidden sub-group fields --- */
     const legacyInput = doc.querySelector("#measureFields [data-measure]");
@@ -145,7 +167,7 @@ async function main() {
     setValue("accent_material", "Cubic Zirconia");
     setValue("backing_type", "Lever-Back");
     setValue("nickel_free", "true");
-    assert.match($("#intakeSpecsProgress").textContent, /3 \/ 3 required/);
+    assert.match($("#intakeSpecsProgress").textContent, /3 \/ 3 optional details filled/);
     assert.match($("#inSearchTags").value, /nickel-free/, "search tags are generated from the attributes");
     assert.match($("#inSearchTags").value, /lever-back/);
     $("#inFulfillment").value = "Ships in a padded jewelry box";
@@ -195,6 +217,43 @@ async function main() {
     await save();
     assert.ok(savedProduct, "a pre-loved garment saves with NO measurements — dimensions never block saving");
     assert.ok(!("chest" in savedProduct.attributes.values) && !("length" in savedProduct.attributes.values), "blank measurements are simply absent");
+
+    /* --- Blank name / SKU / quantity: generated or defaulted, never refused --- */
+    doc.querySelector('[data-intake-condition="BRAND_NEW"]').click();
+    $("#inTitle").value = "";
+    $("#inSku").value = "tee 001";
+    $("#inSell").value = "30000";
+    $("#inQty").value = "4";
+    await save();
+    assert.ok(savedProduct, "a blank title never blocks the save");
+    assert.match(savedProduct.name, /T-Shirts/, "the name is generated from the category");
+    assert.strictEqual(savedProduct.sku, "tee-001", "spaces in a typed SKU are repaired instead of refused");
+    assert.strictEqual(savedProduct.barcode_id, "tee-001");
+    assert.strictEqual(savedProduct.in_stock_count, 4, "the quantity received is saved");
+
+    /* --- The only real blockers: selling price and available quantity --- */
+    $("#inSell").value = "0";
+    await save();
+    assert.strictEqual(savedProduct, null, "a selling price is always required");
+    assert.match($("#toast").textContent, /selling price/i);
+    $("#inSell").value = "30000";
+    $("#inQty").value = "0";
+    await save();
+    assert.strictEqual(savedProduct, null, "available stock needs at least one unit");
+    assert.match($("#toast").textContent, /quantity/i);
+    $("#inQty").value = "1";
+
+    /* --- A mistyped optional detail is skipped, never refused --- */
+    cat.value = "Rings & Earrings"; change(cat);
+    doc.querySelector('[data-intake-condition="BRAND_NEW"]').click();
+    $("#inTitle").value = "Oversized hoops";
+    $("#inSell").value = "45000";
+    setValue("length", "500"); // 500 mm is far outside the earring range
+    await save();
+    assert.ok(savedProduct, "an impossible optional measurement never refuses the garment");
+    assert.ok(!("length" in savedProduct.attributes.values), "the rejected value is left out of the payload");
+    assert.match($("#toast").textContent, /skipped/);
+    assert.ok(field("length").classList.contains("csf-invalid"), "the inline message still shows what to correct");
 
     /* Fresh measured tee: typed digits are never rewritten, and the other
        unit is visible on every keystroke and unit change. */
@@ -247,7 +306,7 @@ async function main() {
     sub.value = "Clutches & Evening Bags"; change(sub);
     assert.ok(!visible("strap_drop") && !visible("strap_padding") && !visible("capacity"), "clutches skip straps and litres");
 
-    /* --- Edit modal: complete records stay complete --- */
+    /* --- Edit modal: a strict manager cannot drop a required detail --- */
     const openEditor = async id => {
       const trigger = doc.createElement("button");
       trigger.dataset.editprod = id;
@@ -257,6 +316,8 @@ async function main() {
       trigger.remove();
     };
     const modalField = key => doc.querySelector(`#mpSpecs [data-csf-key="${key}"]`);
+    strictBox.checked = true;
+    change(strictBox);
     await openEditor("PRD-EAR-1");
     assert.strictEqual($("#mpSpecsSection").hidden, false, "the edit modal renders the earring form");
     assert.strictEqual($("#mpSubCat").value, "Stud Earrings");
@@ -281,25 +342,45 @@ async function main() {
     assert.strictEqual(updatedPatch.patch.fabric, "Titanium", "material projection follows the edited metal");
     assert.strictEqual(updatedPatch.patch.size, "-");
 
-    /* --- Edit modal: legacy garment prefilled from inches, gaps allowed --- */
+    /* --- Edit modal: essentials mode allows gaps on any record --- */
+    strictBox.checked = false;
+    change(strictBox);
     await openEditor("PRD-TEE-1");
     assert.strictEqual($("#mpSubCat").value, "T-Shirts", "a legacy record defaults to the first sub-group");
     const chest = modalField("chest");
     assert.strictEqual(chest.querySelector("[data-csf-input]").value, "22", "legacy inch flat-lay values prefill the form");
     assert.strictEqual(chest.querySelector("[data-csf-unit]").value, "in");
     assert.match(chest.querySelector("[data-csf-convert]").textContent, /= 55\.88 cm/, "when editing, the centimetre equivalent is seen immediately beside the digits");
-    assert.match($("#mpSpecsStatus").textContent, /gaps allowed/);
+    assert.match($("#mpSpecsStatus").textContent, /gaps can be filled later/);
     updatedPatch = null;
     doc.querySelector("[data-save-prod]").click();
     await pause(10);
-    assert.ok(updatedPatch, "older records save even with required details still missing");
+    assert.ok(updatedPatch, "records save even with optional category details still missing");
     assert.deepStrictEqual(plain(updatedPatch.patch.attributes.values.chest), { value: 22, unit: "in" });
     assert.deepStrictEqual(plain(updatedPatch.patch.measurements), { chest: 22, length: 28, notes: "Measured flat" }, "the inch card keeps its values and note");
-    assert.match($("#toast").textContent, /required category detail/, "staff are reminded about the gap");
+    assert.match($("#toast").textContent, /optional category detail/, "staff are reminded about the gap");
 
-    console.log("✓ edit modal keeps complete records complete and upgrades legacy garments from their inch measurements");
+    console.log("✓ strict edits cannot regress, essentials edits may leave gaps, and legacy garments upgrade from inches");
     console.log("✓ schema-driven intake renders only each sub-group's fields, units and angles");
-    console.log("✓ required details block intake; hidden and legacy values never leak; server errors pin to inputs");
+    /* --- Partner items: photos and the clip are advisory, not blockers --- */
+    $("#inInventorySource").value = "partner";
+    change($("#inInventorySource"));
+    const partnerSelect = $("#inConsignmentPartner");
+    partnerSelect.innerHTML = '<option value="PRT-TEST">Test Partner · 5.00%</option>';
+    partnerSelect.value = "PRT-TEST";
+    change(partnerSelect);
+    $("#inTitle").value = "Partner denim jacket";
+    $("#inSell").value = "60000";
+    await save();
+    assert.ok(savedProduct, "a partner garment saves with no photo and no video");
+    assert.strictEqual(savedProduct.consignment_partner_id, "PRT-TEST");
+    assert.strictEqual(savedProduct.details_required, false, "essentials mode never asks the server for the strict gate");
+    assert.match($("#toast").textContent, /partner photo\/video still recommended/);
+    $("#inInventorySource").value = "store";
+    change($("#inInventorySource"));
+
+    console.log("✓ essentials mode saves on price + quantity; strict details, hidden values and server errors still pin to inputs");
+    console.log("✓ partner media, blank names/SKUs and mistyped optional details never refuse a save");
   } finally {
     window.close();
   }

@@ -143,3 +143,30 @@
   .csf-grid { grid-template-columns: 1fr; }
   .csf-unit-select, .cpp-angle .sel-mini { font-size: 16px; } /* stop mobile focus auto-zoom */
 }
+
+/* ---- essentials-first save rules (intake policy bar) ---- */
+.intake-policy {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 260px); gap: 14px; align-items: start;
+  margin: 0 0 16px; padding: 12px 14px; border-radius: 12px;
+  border: 1px solid #BBF7D0; background: #F0FDF4;
+}
+.intake-policy-copy { display: flex; flex-direction: column; gap: 2px; }
+.intake-policy-eyebrow { font-size: 10px; font-weight: 800; letter-spacing: .08em; color: #15803D; }
+.intake-policy-copy strong { font-size: 14px; color: #14532D; }
+.intake-policy-copy p { margin: 2px 0 0; font-size: 12.5px; line-height: 1.45; color: #166534; }
+.intake-policy-toggle {
+  display: flex; gap: 9px; align-items: flex-start; padding: 9px 10px; border-radius: 10px;
+  border: 1px solid #D1FAE5; background: #fff; cursor: pointer;
+}
+.intake-policy-toggle input { width: 17px; height: 17px; margin: 1px 0 0; accent-color: #15803D; flex: none; }
+.intake-policy-toggle span { display: flex; flex-direction: column; gap: 1px; }
+.intake-policy-toggle strong { font-size: 12.5px; color: var(--ink, #111827); }
+.intake-policy-toggle em { font-style: normal; font-size: 11.5px; line-height: 1.4; color: var(--muted, #6B7280); }
+@media (max-width: 760px) { .intake-policy { grid-template-columns: 1fr; } }
+
+/* Optional / Recommended chips on schema field labels. */
+.csf-tag {
+  font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 6px; margin-left: 6px; border-radius: 999px; background: #F3F4F6; color: #6B7280;
+}
+.csf-tag.is-recommended { background: #FEF3C7; color: #92400E; }

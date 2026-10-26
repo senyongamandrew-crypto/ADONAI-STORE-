@@ -775,9 +775,11 @@ def update_catalog_schema(prod, body: dict) -> bool:
         subcategory = ""  # the stored sub-category belonged to the previous category
     condition = _condition_value(prod)
     if "attributes" in body:
+        # Essentials-first policy: an edit may leave optional category details
+        # blank. Only an explicit strict check (details_required) blocks it.
         result = catalog_schemas.normalize_attributes(
             body.get("attributes") or {}, prod.category, subcategory, condition,
-            enforce_required=bool(record.get("complete")),
+            enforce_required=bool(body.get("details_required")),
         )
         apply_catalog_schema_result(prod, result, body)
         return True
@@ -2231,10 +2233,17 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 # fields dropped and legacy columns projected server-side.
                 intake_category = clean_text(body.get("category", "Outerwear & Jackets"), 100) or "Outerwear & Jackets"
                 intake_subcategory = clean_text(body.get("subcategory", ""), 100)
+                # Essentials-first intake: the selling price and quantity are
+                # the only mandatory fields, so optional category details never
+                # block a new garment. A manager can send
+                # ``details_required`` to restore the strict completeness gate.
+                details_required = bool(
+                    body.get("details_required") or body.get("require_details") or body.get("strict_details")
+                )
                 if "attributes" in body:
                     schema_result = catalog_schemas.normalize_attributes(
                         body.get("attributes") or {}, intake_category, intake_subcategory, item_condition,
-                        enforce_required=True,
+                        enforce_required=details_required,
                     )
                 else:
                     _, _, resolved_sub = catalog_schemas.resolve(intake_category, intake_subcategory) if intake_subcategory else (None, None, "")
@@ -2263,22 +2272,29 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     photos = [safe_image_url(body.get("image_url", ""))]
                     if isinstance(body.get("images"), list):
                         photos.extend(safe_image_url(url) for url in body["images"])
-                    if not any(photos):
-                        return json_response({"ok": False, "error": "Partner intake requires at least one garment photo"}, status=400)
                     video_id = str(body.get("video_id") or "").strip().lower()
-                    if not media.MEDIA_ID.fullmatch(video_id):
+                    # Partner photos and the clip are recommended, not required:
+                    # only a manager's Strict details check (details_required)
+                    # enforces the managed 15–20 second listing policy. Any clip
+                    # that IS supplied is still checked for ownership/integrity.
+                    if details_required and not any(photos):
+                        return json_response({"ok": False, "error": "Partner intake requires at least one garment photo"}, status=400)
+                    if details_required and not video_id:
                         return json_response({"ok": False, "error": "Partner intake requires one garment video between 15 and 20 seconds"}, status=400)
-                    clip = session.query(ProductMedia).filter_by(id=video_id).with_for_update().first()
-                    if not clip or clip.kind != "video" or clip.product_id:
-                        return json_response({"ok": False, "error": "Upload the partner item's video again before saving"}, status=400)
-                    if clip.uploaded_by != str((staff_info or {}).get("id")) and str((staff_info or {}).get("role", "")).lower() not in FINANCE_MANAGER_ROLES:
-                        return json_response({"ok": False, "error": "This video upload belongs to another staff member"}, status=403)
-                    try:
-                        clip_duration = float(clip.duration or 0)
-                    except (TypeError, ValueError):
-                        clip_duration = 0
-                    if not 15 <= clip_duration <= 20:
-                        return json_response({"ok": False, "error": "Partner garment videos must be 15 to 20 seconds long"}, status=400)
+                    if video_id:
+                        if not media.MEDIA_ID.fullmatch(video_id):
+                            return json_response({"ok": False, "error": "Invalid garment video reference — upload the clip again"}, status=400)
+                        clip = session.query(ProductMedia).filter_by(id=video_id).with_for_update().first()
+                        if not clip or clip.kind != "video" or clip.product_id:
+                            return json_response({"ok": False, "error": "Upload the partner item's video again before saving"}, status=400)
+                        if clip.uploaded_by != str((staff_info or {}).get("id")) and str((staff_info or {}).get("role", "")).lower() not in FINANCE_MANAGER_ROLES:
+                            return json_response({"ok": False, "error": "This video upload belongs to another staff member"}, status=403)
+                        try:
+                            clip_duration = float(clip.duration or 0)
+                        except (TypeError, ValueError):
+                            clip_duration = 0
+                        if details_required and not 15 <= clip_duration <= 20:
+                            return json_response({"ok": False, "error": "Partner garment videos must be 15 to 20 seconds long"}, status=400)
                 grade_id = str(body.get("lot_grade_id") or "").strip() or None
                 if grade_id:
                     # The selected tier is the source of truth for its parent
