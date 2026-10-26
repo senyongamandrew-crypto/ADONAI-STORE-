@@ -139,12 +139,45 @@ are staff-only (`/api/dispatch/*`).
 | `POST /api/rider/demo/order` | **Local preview only**, gated behind `ADONAI_DELIVERY_DEMO=1`. |
 
 The native APK screen (`rider.html` → `js/rider-app.js`) is untouched. It still
-requires the Java bridge for background GPS. Adonai Delivery is the **web/PWA
-counterpart** that works in any modern browser and can be installed on a phone.
+requires the Java bridge for background GPS and ships inside the **POS APK**
+under *Menu → Rider delivery app*. Adonai Delivery works in any modern browser
+as an installable PWA **and** as its own Android APK (next section). The two
+APKs are different applications: never send a rider `adonai-pos-v2.apk` when
+they ask for Adonai Delivery.
 
 ---
 
 ## Installation (rider's phone)
+
+There are two ways to install Adonai Delivery, plus one file to avoid:
+
+| Download | What it actually is |
+| --- | --- |
+| **`adonai-delivery.apk`** | ✅ **This app.** Package `com.adonaithrift.delivery`, lime boda icon, opens straight into rider sign-in. No cashier register inside. |
+| Browser install from `/delivery` | ✅ This app as a PWA (same screens, same account). |
+| `adonai-pos-v2.apk` / `adonai-pos-v2.5.0-preview.apk` | ❌ **Adonai POS**, the cashier register (`com.adonaithrift.pos`). Branch builds are labelled *Adonai POS Preview*. If a download opens the shop register, it is this file — delete it from the rider's phone and download `adonai-delivery.apk` instead. |
+
+### Option A — Android APK (`adonai-delivery.apk`)
+
+1. Download `adonai-delivery.apk` from the latest
+   [GitHub Release](https://github.com/senyongamandrew-crypto/ADONAI-STORE-/releases),
+   the `adonai-delivery-apk` artifact of the APK workflow, the `apk-dist`
+   branch, or `https://<your-store>/download/delivery-apk` when the server has
+   the file in `dist/`. CI verifies the package id, label, signature and that
+   the bundle contains **no POS/Admin pages** (`scripts/verify-delivery-apk.py`).
+2. Open the file, allow *Install unknown apps* for your browser/Files if asked,
+   and tap **Install**. Branch preview builds install as *Adonai Delivery
+   Preview* (`com.adonaithrift.delivery.preview`) alongside the real app.
+3. Continue at step 3 below. Inside the APK the app talks to the live store
+   server by default; a different HTTPS address can be set under
+   *Advanced · store server*. The GPS duty switch uses the phone's Location
+   permission while the app is open (*screen-locked* background GPS remains the
+   native pairing path inside the POS APK's *Rider delivery app* screen).
+
+Build it locally with `npm run build:apk:delivery` (JDK 17 + Android SDK;
+outputs `dist/adonai-delivery.apk`).
+
+### Option B — Browser install (PWA)
 
 1. Open `https://<your-store>/delivery` in Chrome/Android (or Safari on iOS).
 2. Use the browser's **Install app / Add to Home screen** action. The app has

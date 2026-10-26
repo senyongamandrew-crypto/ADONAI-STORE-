@@ -1,6 +1,6 @@
 {
   "$comment": "Canonical Adonai catalog intake schemas. Edit here, then run `npm run build:schemas` to refresh the browser fallback (js/catalog-schemas.data.js). The server seeds these into the category_field_schemas table and validates every catalog write against them.",
-  "version": "2026.10.18",
+  "version": "2026.10.26",
   "units": {
     "mm": { "label": "Millimetres", "symbol": "mm", "dimension": "length", "per_mm": 1 },
     "cm": { "label": "Centimetres", "symbol": "cm", "dimension": "length", "per_mm": 10 },
@@ -64,7 +64,7 @@
         {
           "id": "dimensions", "title": "Dimensions & Units", "note": "Measured strictly in millimetres (mm). Weigh the full pair in grams (g).",
           "fields": [
-            { "key": "length", "label": "Length", "type": "measure", "units": ["mm"], "range": [0.5, 150], "step": 0.1, "required": true },
+            { "key": "length", "label": "Length", "type": "measure", "units": ["mm"], "range": [0.5, 150], "step": 0.1 },
             { "key": "width", "label": "Width", "type": "measure", "units": ["mm"], "range": [0.5, 100], "step": 0.1 },
             { "key": "diameter", "label": "Diameter", "type": "measure", "units": ["mm"], "range": [1, 120], "step": 0.1, "when": { "subcategory": ["Stud Earrings", "Hoop Earrings"] } },
             { "key": "stud_depth", "label": "Stud depth (post length)", "type": "measure", "units": ["mm"], "range": [0.5, 30], "step": 0.1, "when": { "subcategory": ["Stud Earrings"] } },
@@ -109,7 +109,6 @@
       "sections": [
         {
           "id": "dimensions", "title": "Dimensions & Units",
-          "require_any": { "keys": ["inner_diameter", "wrist_circumference"], "message": "Give the inner diameter (mm) or the wrist circumference (cm)", "when": { "subcategory": ["Bracelets", "Bangles", "Cuffs"] } },
           "fields": [
             { "key": "ring_size", "label": "Ring size", "type": "size", "scales": ["US", "EU", "UK"], "presets": { "US": ["4", "4.5", "5", "5.5", "6", "6.5", "7", "7.5", "8", "8.5", "9", "9.5", "10", "11", "12"], "EU": ["46", "48", "50", "52", "54", "56", "58", "60", "62", "64", "66", "68"], "UK": ["H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"] }, "required": true, "projects_to": "size", "when": { "subcategory": ["Rings"] } },
             { "key": "band_width", "label": "Band width", "type": "measure", "units": ["mm"], "range": [0.5, 40], "step": 0.1, "when": { "subcategory": ["Rings"] } },
@@ -150,7 +149,7 @@
         {
           "id": "dimensions", "title": "Dimensions & Units", "note": "Chain length in inches or centimetres (18 in ≈ 45 cm). Pendant and gauge in millimetres.",
           "fields": [
-            { "key": "chain_length", "label": "Chain length", "type": "measure", "units": ["in", "cm"], "range": [6, 40], "step": 0.5, "required": true, "projects_to": "size" },
+            { "key": "chain_length", "label": "Chain length", "type": "measure", "units": ["in", "cm"], "range": [6, 40], "step": 0.5, "projects_to": "size" },
             { "key": "pendant_height", "label": "Pendant height", "type": "measure", "units": ["mm"], "range": [2, 150], "step": 0.5, "when": { "subcategory": ["Pendant Necklaces"] } },
             { "key": "pendant_width", "label": "Pendant width", "type": "measure", "units": ["mm"], "range": [2, 150], "step": 0.5, "when": { "subcategory": ["Pendant Necklaces"] } },
             { "key": "chain_gauge", "label": "Chain gauge / thickness", "type": "measure", "units": ["mm"], "range": [0.3, 30], "step": 0.1 }
@@ -187,10 +186,10 @@
       "summary": "Garment intake: tagged size, flat-lay chest / length / sleeve / shoulder in inches or centimetres, fabric, fit and hand-feel.",
       "sections": [
         {
-          "id": "sizing", "title": "Dimensions & Sizing", "note": "Lay the garment flat, buttoned, without stretching.",
+          "id": "sizing", "title": "Dimensions & Sizing", "note": "Lay the garment flat, buttoned, without stretching. Optional — fill in any you measured; blanks never block saving.",
           "fields": [
-            { "key": "chest", "label": "Chest (pit-to-pit)", "type": "measure", "units": ["in", "cm"], "range": [8, 45], "step": 0.25, "flat_lay_key": "chest", "required_when": { "condition": ["PRE_LOVED"] } },
-            { "key": "length", "label": "Full length (shoulder to hem)", "type": "measure", "units": ["in", "cm"], "range": [10, 70], "step": 0.25, "flat_lay_key": "length", "required_when": { "condition": ["PRE_LOVED"] } },
+            { "key": "chest", "label": "Chest (pit-to-pit)", "type": "measure", "units": ["in", "cm"], "range": [8, 45], "step": 0.25, "flat_lay_key": "chest" },
+            { "key": "length", "label": "Full length (shoulder to hem)", "type": "measure", "units": ["in", "cm"], "range": [10, 70], "step": 0.25, "flat_lay_key": "length" },
             { "key": "sleeve", "label": "Sleeve length", "type": "measure", "units": ["in", "cm"], "range": [1, 40], "step": 0.25, "flat_lay_key": "sleeve" },
             { "key": "shoulder", "label": "Shoulder width", "type": "measure", "units": ["in", "cm"], "range": [8, 30], "step": 0.25, "flat_lay_key": "shoulder" }
           ]
@@ -233,12 +232,12 @@
       "summary": "Bottoms intake: tagged size, flat-lay waist / hip / inseam / rise in inches or centimetres, fabric and fit.",
       "sections": [
         {
-          "id": "sizing", "title": "Dimensions & Sizing", "note": "Lay flat, buttoned and zipped. Waist is measured straight across.",
+          "id": "sizing", "title": "Dimensions & Sizing", "note": "Lay flat, buttoned and zipped. Waist is measured straight across. Optional — fill in any you measured; blanks never block saving.",
           "fields": [
-            { "key": "waist", "label": "Waist (flat)", "type": "measure", "units": ["in", "cm"], "range": [8, 40], "step": 0.25, "flat_lay_key": "waist", "required_when": { "condition": ["PRE_LOVED"] } },
+            { "key": "waist", "label": "Waist (flat)", "type": "measure", "units": ["in", "cm"], "range": [8, 40], "step": 0.25, "flat_lay_key": "waist" },
             { "key": "hip", "label": "Hip width", "type": "measure", "units": ["in", "cm"], "range": [8, 45], "step": 0.25, "flat_lay_key": "hip" },
-            { "key": "inseam", "label": "Inseam length", "type": "measure", "units": ["in", "cm"], "range": [1, 45], "step": 0.25, "flat_lay_key": "inseam", "required_when": { "condition": ["PRE_LOVED"] }, "when": { "not_subcategory": ["Skirts"] } },
-            { "key": "skirt_length", "label": "Skirt length (waist to hem)", "type": "measure", "units": ["in", "cm"], "range": [8, 50], "step": 0.25, "flat_lay_key": "length", "required_when": { "condition": ["PRE_LOVED"] }, "when": { "subcategory": ["Skirts"] } },
+            { "key": "inseam", "label": "Inseam length", "type": "measure", "units": ["in", "cm"], "range": [1, 45], "step": 0.25, "flat_lay_key": "inseam", "when": { "not_subcategory": ["Skirts"] } },
+            { "key": "skirt_length", "label": "Skirt length (waist to hem)", "type": "measure", "units": ["in", "cm"], "range": [8, 50], "step": 0.25, "flat_lay_key": "length", "when": { "subcategory": ["Skirts"] } },
             { "key": "rise", "label": "Rise", "type": "measure", "units": ["in", "cm"], "range": [4, 20], "step": 0.25, "flat_lay_key": "rise", "when": { "not_subcategory": ["Skirts"] } },
             { "key": "thigh", "label": "Thigh width", "type": "measure", "units": ["in", "cm"], "range": [4, 25], "step": 0.25, "flat_lay_key": "thigh", "when": { "not_subcategory": ["Skirts"] } },
             { "key": "leg_opening", "label": "Leg opening", "type": "measure", "units": ["in", "cm"], "range": [3, 20], "step": 0.25, "flat_lay_key": "leg_opening", "when": { "not_subcategory": ["Skirts"] } }
@@ -276,12 +275,12 @@
       "summary": "Dress intake: tagged size, flat-lay bust / waist / hip / length in inches or centimetres, fabric, silhouette and sleeve style.",
       "sections": [
         {
-          "id": "sizing", "title": "Dimensions & Sizing", "note": "Lay flat and zipped; bust is measured pit to pit.",
+          "id": "sizing", "title": "Dimensions & Sizing", "note": "Lay flat and zipped; bust is measured pit to pit. Optional — fill in any you measured; blanks never block saving.",
           "fields": [
-            { "key": "bust", "label": "Bust (pit-to-pit)", "type": "measure", "units": ["in", "cm"], "range": [8, 45], "step": 0.25, "flat_lay_key": "chest", "required_when": { "condition": ["PRE_LOVED"] } },
+            { "key": "bust", "label": "Bust (pit-to-pit)", "type": "measure", "units": ["in", "cm"], "range": [8, 45], "step": 0.25, "flat_lay_key": "chest" },
             { "key": "waist", "label": "Waist (flat)", "type": "measure", "units": ["in", "cm"], "range": [8, 40], "step": 0.25, "flat_lay_key": "waist" },
             { "key": "hip", "label": "Hip width", "type": "measure", "units": ["in", "cm"], "range": [8, 45], "step": 0.25, "flat_lay_key": "hip" },
-            { "key": "length", "label": "Full length (shoulder to hem)", "type": "measure", "units": ["in", "cm"], "range": [15, 75], "step": 0.25, "flat_lay_key": "length", "required_when": { "condition": ["PRE_LOVED"] } },
+            { "key": "length", "label": "Full length (shoulder to hem)", "type": "measure", "units": ["in", "cm"], "range": [15, 75], "step": 0.25, "flat_lay_key": "length" },
             { "key": "sleeve", "label": "Sleeve length", "type": "measure", "units": ["in", "cm"], "range": [1, 40], "step": 0.25, "flat_lay_key": "sleeve" }
           ]
         },
@@ -321,8 +320,8 @@
         {
           "id": "dimensions", "title": "Dimensions & Units",
           "fields": [
-            { "key": "total_length", "label": "Total length", "type": "measure", "units": ["cm", "in"], "range": [20, 400], "step": 0.5, "required": true },
-            { "key": "width", "label": "Width", "type": "measure", "units": ["cm", "in"], "range": [5, 200], "step": 0.5, "required": true }
+            { "key": "total_length", "label": "Total length", "type": "measure", "units": ["cm", "in"], "range": [20, 400], "step": 0.5 },
+            { "key": "width", "label": "Width", "type": "measure", "units": ["cm", "in"], "range": [5, 200], "step": 0.5 }
           ]
         },
         {
@@ -355,10 +354,10 @@
       "core": { "hide": ["size"] },
       "sections": [
         {
-          "id": "sizing", "title": "Dimensions & Sizing",
+          "id": "sizing", "title": "Dimensions & Sizing", "note": "Measurements are optional — fill in any you took; blanks never block saving.",
           "fields": [
             { "key": "tagged_size", "label": "Tagged size", "type": "size", "scales": ["EU", "US", "UK", "CM"], "presets": { "EU": ["35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47"], "US": ["5", "6", "7", "7.5", "8", "8.5", "9", "9.5", "10", "10.5", "11", "12", "13"], "UK": ["3", "4", "5", "6", "6.5", "7", "7.5", "8", "8.5", "9", "10", "11", "12"], "CM": ["22", "23", "24", "25", "26", "27", "28", "29", "30"] }, "required": true, "projects_to": "size" },
-            { "key": "insole_length", "label": "Insole length", "type": "measure", "units": ["cm"], "range": [8, 36], "step": 0.1, "flat_lay_key": "insole", "required_when": { "condition": ["PRE_LOVED"] } },
+            { "key": "insole_length", "label": "Insole length", "type": "measure", "units": ["cm"], "range": [8, 36], "step": 0.1, "flat_lay_key": "insole" },
             { "key": "shaft_height", "label": "Shaft height", "type": "measure", "units": ["cm"], "range": [3, 70], "step": 0.5, "when": { "subcategory": ["Ankle Boots", "Chelsea Boots", "Work & Combat Boots", "Knee-High Boots"] } },
             { "key": "ankle_opening", "label": "Ankle opening (circumference)", "type": "measure", "units": ["cm"], "range": [15, 60], "step": 0.5, "when": { "subcategory": ["Ankle Boots", "Chelsea Boots", "Work & Combat Boots", "Knee-High Boots"] } },
             { "key": "heel_height", "label": "Heel height", "type": "measure", "units": ["cm"], "range": [0.5, 20], "step": 0.1, "flat_lay_key": "heel", "when": { "subcategory": ["Heels & Pumps", "Ankle Boots", "Chelsea Boots", "Knee-High Boots"] } }
@@ -408,9 +407,9 @@
         {
           "id": "dimensions", "title": "Dimensions & Capacity", "note": "External dimensions in centimetres, bag empty.",
           "fields": [
-            { "key": "height", "label": "Height", "type": "measure", "units": ["cm"], "range": [3, 120], "step": 0.5, "required": true },
-            { "key": "width", "label": "Width", "type": "measure", "units": ["cm"], "range": [3, 120], "step": 0.5, "required": true },
-            { "key": "depth", "label": "Depth", "type": "measure", "units": ["cm"], "range": [0.5, 80], "step": 0.5, "required": true },
+            { "key": "height", "label": "Height", "type": "measure", "units": ["cm"], "range": [3, 120], "step": 0.5 },
+            { "key": "width", "label": "Width", "type": "measure", "units": ["cm"], "range": [3, 120], "step": 0.5 },
+            { "key": "depth", "label": "Depth", "type": "measure", "units": ["cm"], "range": [0.5, 80], "step": 0.5 },
             { "key": "capacity", "label": "Carrying capacity", "type": "measure", "units": ["L"], "range": [0.5, 150], "step": 0.5, "when": { "subcategory": ["Backpacks", "Tote Bags", "Travel & Duffel Bags"] } },
             { "key": "strap_drop", "label": "Shoulder strap drop length", "type": "measure", "units": ["cm"], "range": [3, 150], "step": 0.5, "when": { "not_subcategory": ["Clutches & Evening Bags"] } }
           ]
@@ -450,7 +449,7 @@
         {
           "id": "dimensions", "title": "Dimensions & Units",
           "fields": [
-            { "key": "case_diameter", "label": "Case diameter (excl. crown)", "type": "measure", "units": ["mm"], "range": [15, 60], "step": 0.5, "required": true, "projects_to": "size" },
+            { "key": "case_diameter", "label": "Case diameter (excl. crown)", "type": "measure", "units": ["mm"], "range": [15, 60], "step": 0.5, "projects_to": "size" },
             { "key": "case_thickness", "label": "Case thickness", "type": "measure", "units": ["mm"], "range": [3, 25], "step": 0.1 },
             { "key": "lug_width", "label": "Lug / strap width", "type": "measure", "units": ["mm"], "range": [6, 30], "step": 1 },
             { "key": "wrist_fit", "label": "Fits wrist up to", "type": "measure", "units": ["cm"], "range": [10, 25], "step": 0.5 }
@@ -485,7 +484,7 @@
         {
           "id": "dimensions", "title": "Frame Measurements", "note": "Copy the three numbers printed inside the temple arm (e.g. 52□18 145).",
           "fields": [
-            { "key": "lens_width", "label": "Lens width", "type": "measure", "units": ["mm"], "range": [30, 75], "step": 1, "required": true },
+            { "key": "lens_width", "label": "Lens width", "type": "measure", "units": ["mm"], "range": [30, 75], "step": 1 },
             { "key": "bridge_width", "label": "Bridge width", "type": "measure", "units": ["mm"], "range": [10, 30], "step": 1 },
             { "key": "temple_length", "label": "Temple arm length", "type": "measure", "units": ["mm"], "range": [100, 165], "step": 1 }
           ]
@@ -548,7 +547,7 @@
         {
           "id": "dimensions", "title": "Dimensions & Fit",
           "fields": [
-            { "key": "total_length", "label": "Total length (buckle to tip)", "type": "measure", "units": ["cm", "in"], "range": [40, 180], "step": 0.5, "required": true },
+            { "key": "total_length", "label": "Total length (buckle to tip)", "type": "measure", "units": ["cm", "in"], "range": [40, 180], "step": 0.5 },
             { "key": "waist_fit", "label": "Fits waist (middle hole)", "type": "measure", "units": ["in", "cm"], "range": [16, 70], "step": 0.5, "projects_to": "size" },
             { "key": "strap_width", "label": "Strap width", "type": "measure", "units": ["mm"], "range": [5, 80], "step": 1 }
           ]

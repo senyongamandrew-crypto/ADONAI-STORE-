@@ -83,6 +83,20 @@ def main():
         draw_icon(size, maskable).save(path, "PNG", optimize=True)
         print("wrote", os.path.relpath(path, ROOT), size, "px")
 
+    # Android launcher mipmaps for the Adonai Delivery APK
+    # (ADONAI_APP_TARGET=delivery). The full-bleed maskable artwork is the
+    # source so launchers can mask it to any silhouette; the POS build keeps
+    # its own ic_launcher set and never uses these.
+    res_dir = os.path.join(ROOT, "android", "app", "src", "main", "res")
+    for density, size in [("mdpi", 48), ("hdpi", 72), ("xhdpi", 96),
+                          ("xxhdpi", 144), ("xxxhdpi", 192)]:
+        folder = os.path.join(res_dir, f"mipmap-{density}")
+        os.makedirs(folder, exist_ok=True)
+        for name in ("ic_launcher_delivery.png", "ic_launcher_delivery_round.png"):
+            path = os.path.join(folder, name)
+            draw_icon(size, maskable=True).save(path, "PNG", optimize=True)
+            print("wrote", os.path.relpath(path, ROOT), size, "px")
+
 
 if __name__ == "__main__":
     main()

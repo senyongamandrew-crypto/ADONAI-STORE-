@@ -21,6 +21,9 @@ ASSETS = [
     "js/rider-app.js", "js/dispatch-center.js", "css/rider.css", "css/dispatch.css",
     "js/receipt-printing.js", "js/audit-exports.js", "js/file-downloads.js",
     "js/vendor/leaflet/leaflet.js", "css/vendor/leaflet/leaflet.css",
+    # The POS navigation links to the rider-partner app; it must be packaged
+    # too or that menu item is a dead page inside the installed POS APK.
+    "delivery.html", "js/delivery-app.js", "css/delivery.css",
 ]
 CLASSES = [b"Lcom/adonaithrift/pos/MainActivity;", b"Lcom/adonaithrift/pos/RiderApi;",
            b"Lcom/adonaithrift/pos/RiderTrackingService;"]
@@ -59,7 +62,10 @@ def main() -> int:
     expected = "com.adonaithrift.pos.preview" if preview else "com.adonaithrift.pos"
     if package != expected or int(code) != 20500 or version != ("2.5.0-preview" if preview else "2.5.0"):
         raise ValueError(f"Wrong APK identity/version: {package} {version} ({code})")
-    expected_label = "Adonai Delivery" if preview else "Adonai POS"
+    # A POS preview is still the cashier app. It must never carry the
+    # "Adonai Delivery" label: that mislabelling sent riders the POS APK
+    # when they asked for the delivery app. Delivery has its own build.
+    expected_label = "Adonai POS Preview" if preview else "Adonai POS"
     if f"application-label:'{expected_label}'" not in badging:
         raise ValueError(f"Wrong APK app label, expected: {expected_label}")
     if "sdkVersion:'22'" not in badging or "targetSdkVersion:'34'" not in badging:
@@ -82,7 +88,7 @@ def main() -> int:
         raise ValueError("No verified signing certificate")
     digest = hashlib.sha256(apk.read_bytes()).hexdigest()
     metadata = {
-        "app_name": "Adonai Delivery" if preview else "Adonai POS",
+        "app_name": "Adonai POS Preview" if preview else "Adonai POS",
         "package": package, "version": version, "version_code": int(code),
         "preview_installs_alongside_existing_app": preview,
         "source_commit": os.environ.get("GITHUB_SHA", "local"),
@@ -90,7 +96,7 @@ def main() -> int:
         "workflow_run": os.environ.get("GITHUB_RUN_ID"),
         "apk_sha256": digest, "signing_certificate_sha256": cert[1].lower(),
         "verified": ["Gradle compiled Android bytecode/resources", "APK signature", "compiled foreground-location manifest",
-                     "native rider bridge/service bytecode", "14 source-identical packaged screens/scripts/styles"],
+                     "native rider bridge/service bytecode", f"{len(ASSETS)} source-identical packaged screens/scripts/styles"],
         "backend_deployed_by_this_build": False,
         "real_phone_screen_lock_gps_verified": False,
     }

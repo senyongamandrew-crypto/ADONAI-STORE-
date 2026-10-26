@@ -119,14 +119,14 @@ async function main() {
     assert.strictEqual(doc.querySelectorAll("#intakePhotoProtocol [data-cpp-angle]").length, 4, "four earring photo angles");
     assert.match($("#intakePhotoProtocol").textContent, /Backing & post closure/);
     assert.match($("#intakePhotoProtocol").textContent, /0 \/ 3 required angles/);
-    assert.match($("#intakeReadiness").textContent, /Category details 0\/4/);
+    assert.match($("#intakeReadiness").textContent, /Category details 0\/3/);
 
     /* --- Required details block the save and are pinned to their inputs --- */
     $("#inTitle").value = "Sterling Lever-Back Studs";
     $("#inSell").value = "45000";
     await save();
     assert.strictEqual(savedProduct, null, "missing required earring details block intake");
-    assert.match($("#toast").textContent, /Fix 4 category details/);
+    assert.match($("#toast").textContent, /Fix 3 category details/);
     assert.ok(field("primary_metal").classList.contains("csf-invalid"), "primary metal is flagged");
     assert.strictEqual(field("primary_metal").querySelector("[data-csf-error]").hidden, false);
 
@@ -145,7 +145,7 @@ async function main() {
     setValue("accent_material", "Cubic Zirconia");
     setValue("backing_type", "Lever-Back");
     setValue("nickel_free", "true");
-    assert.match($("#intakeSpecsProgress").textContent, /4 \/ 4 required/);
+    assert.match($("#intakeSpecsProgress").textContent, /3 \/ 3 required/);
     assert.match($("#inSearchTags").value, /nickel-free/, "search tags are generated from the attributes");
     assert.match($("#inSearchTags").value, /lever-back/);
     $("#inFulfillment").value = "Ships in a padded jewelry box";
@@ -178,19 +178,43 @@ async function main() {
     assert.ok(field("length").classList.contains("csf-invalid"), "server field errors flag the exact input");
     assert.match(field("length").textContent, /between 0.5 and 150 mm/);
 
-    /* --- Tops: in/cm units, pit-to-pit required for pre-loved only --- */
+    /* --- Tops: in/cm units; measurements optional, both units always seen --- */
     cat.value = "Tops & Shirts"; change(cat);
     assert.ok(visible("chest") && visible("knit_weave") && visible("hand_feel"));
     const chestUnits = Array.from(field("chest").querySelectorAll("[data-csf-unit] option")).map(o => o.value);
     assert.deepStrictEqual(chestUnits, ["in", "cm"], "garment measurements offer inches and centimetres");
     assert.strictEqual(field("chest").querySelector("[data-csf-req]").hidden, true, "brand-new tops do not require pit-to-pit");
     doc.querySelector('[data-intake-condition="PRE_LOVED"]').click();
-    assert.strictEqual(field("chest").querySelector("[data-csf-req]").hidden, false, "pre-loved tops require pit-to-pit");
+    assert.strictEqual(field("chest").querySelector("[data-csf-req]").hidden, true, "pre-loved tops no longer require pit-to-pit — dimensions are optional");
     assert.strictEqual($("#inSize").closest(".field").hidden, false, "tops keep the tagged size box");
     assert.strictEqual($("#inFabric").closest(".field").hidden, true, "material composition replaces the free fabric box");
     $("#inTitle").value = "Heavyweight Boxy Tee";
     $("#inSize").value = "L";
-    setValue("chest", "56", "cm");
+    $("#inSell").value = "45000";
+    setValue("material_composition", "100% Heavyweight Cotton");
+    await save();
+    assert.ok(savedProduct, "a pre-loved garment saves with NO measurements — dimensions never block saving");
+    assert.ok(!("chest" in savedProduct.attributes.values) && !("length" in savedProduct.attributes.values), "blank measurements are simply absent");
+
+    /* Fresh measured tee: typed digits are never rewritten, and the other
+       unit is visible on every keystroke and unit change. */
+    cat.value = "Tops & Shirts"; change(cat);
+    doc.querySelector('[data-intake-condition="PRE_LOVED"]').click();
+    $("#inTitle").value = "Heavyweight Boxy Tee";
+    $("#inSize").value = "L";
+    $("#inSell").value = "45000";
+    const chestInput = field("chest").querySelector("[data-csf-input]");
+    const chestHint = field("chest").querySelector("[data-csf-convert]");
+    chestInput.value = "56"; input(chestInput);
+    assert.strictEqual(chestHint.hidden, false, "the converted value is seen while typing");
+    assert.match(chestHint.textContent, /= 142\.24 cm/, "digits typed under inches immediately show their cm equivalent");
+    assert.ok(chestHint.classList.contains("warn"), "56 cannot be inches here — the warning is seen before saving, not at saving");
+    const chestUnit = field("chest").querySelector("[data-csf-unit]");
+    chestUnit.value = "cm"; change(chestUnit);
+    assert.strictEqual(chestInput.value, "56", "switching the unit never rewrites the typed digits");
+    assert.match(chestHint.textContent, /= 22\.05 in/, "the inch equivalent is now seen");
+    assert.ok(!chestHint.classList.contains("warn"), "56 cm is a plausible pit-to-pit");
+    assert.match(chestInput.placeholder, /20\.32–114\.3/, "the range placeholder follows the chosen unit");
     setValue("length", "70", "cm");
     setValue("material_composition", "100% Heavyweight Cotton");
     await save();
@@ -207,7 +231,7 @@ async function main() {
     assert.strictEqual(doc.querySelectorAll("#intakePhotoProtocol [data-cpp-angle]").length, 5, "five footwear angles");
     doc.querySelector('[data-intake-condition="BRAND_NEW"]').click();
     assert.strictEqual($("#intakeSpecs [data-csf-inspection]").hidden, true, "brand-new shoes skip wear inspection");
-    assert.ok(!visible("insole_length") || field("insole_length").querySelector("[data-csf-req]").hidden, "insole only required for pre-loved");
+    assert.ok(!visible("insole_length") || field("insole_length").querySelector("[data-csf-req]").hidden, "insole is a measurement — never required");
 
     /* --- Children Wear › Kids Shoes takes the footwear base profile --- */
     cat.value = "Children Wear"; change(cat);
@@ -263,6 +287,7 @@ async function main() {
     const chest = modalField("chest");
     assert.strictEqual(chest.querySelector("[data-csf-input]").value, "22", "legacy inch flat-lay values prefill the form");
     assert.strictEqual(chest.querySelector("[data-csf-unit]").value, "in");
+    assert.match(chest.querySelector("[data-csf-convert]").textContent, /= 55\.88 cm/, "when editing, the centimetre equivalent is seen immediately beside the digits");
     assert.match($("#mpSpecsStatus").textContent, /gaps allowed/);
     updatedPatch = null;
     doc.querySelector("[data-save-prod]").click();

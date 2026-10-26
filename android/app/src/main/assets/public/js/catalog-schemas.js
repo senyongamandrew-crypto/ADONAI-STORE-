@@ -357,10 +357,21 @@
         const unit = (v && v.unit) || units[0];
         const number = v && v.value != null ? v.value : "";
         const range = field.range || [];
+        // The range placeholder is shown in the SELECTED unit (the range is
+        // stored in the first unit), so a cm tape never faces inch numbers.
+        let placeholder = "0.0";
+        if (range.length) {
+          try { placeholder = `${fmt(convert(range[0], units[0], unit))}–${fmt(convert(range[1], units[0], unit))}`; }
+          catch (e) { placeholder = `${fmt(range[0])}–${fmt(range[1])}`; }
+        }
         const unitControl = units.length > 1
           ? `<select class="csf-unit-select" data-csf-unit aria-label="${esc(field.label)} unit">${units.map(u => opt(u, u, u === unit)).join("")}</select>`
           : `<span class="csf-unit" data-csf-fixed-unit="${esc(units[0])}">${esc(units[0])}</span>`;
-        return `<div class="csf-measure"><input class="sel-full" id="${id}" type="number" inputmode="decimal" min="0" step="${esc(field.step || 0.1)}" data-csf-input value="${esc(number)}" placeholder="${range.length ? `${fmt(range[0])}–${fmt(range[1])}` : "0.0"}" />${unitControl}</div>`;
+        // Digits stay exactly as typed (staff type the tape reading, then pick
+        // its unit). The span underneath continuously shows the equivalent in
+        // the other unit, so both inches and centimetres are always seen
+        // while typing or editing — see paintMeasure().
+        return `<div class="csf-measure"><input class="sel-full" id="${id}" type="number" inputmode="decimal" min="0" step="${esc(field.step || 0.1)}" data-csf-input value="${esc(number)}" placeholder="${esc(placeholder)}" />${unitControl}</div><span class="csf-convert" data-csf-convert aria-live="polite" hidden></span>`;
       }
       case "number":
         return `<input class="sel-full" id="${id}" type="number" inputmode="numeric" min="${esc((field.range || [0])[0])}" step="${field.integer ? 1 : esc(field.step || 0.1)}" data-csf-input value="${esc(v == null ? "" : v)}" />`;
@@ -447,6 +458,60 @@
 
     root.innerHTML = `<div class="csf" data-schema="${esc(schema.key)}">${sectionsHTML}${inspectionHTML}</div>`;
     const fieldEl = key => root.querySelector(`[data-csf-key="${key}"]`);
+    const fieldsByKey = {};
+    eachField(schema, f => { fieldsByKey[f.key] = f; });
+
+    /**
+     * Keep both units on screen for a measurement: refresh the range
+     * placeholder for the selected unit and show the live equivalent in the
+     * other unit under the input. Digits are never rewritten — staff type
+     * the tape reading and then pick its unit, so converting the digits on
+     * a unit change would silently corrupt the measurement. Instead, a
+     * value that cannot be right for the chosen unit warns immediately.
+     */
+    function paintMeasure(wrap) {
+      if (!wrap) return;
+      const field = fieldsByKey[wrap.dataset.csfKey];
+      if (!field || field.type !== "measure") return;
+      const input = wrap.querySelector("[data-csf-input]");
+      const unitEl = wrap.querySelector("[data-csf-unit]");
+      const hint = wrap.querySelector("[data-csf-convert]");
+      const units = field.units || [];
+      const unit = unitEl ? unitEl.value : units[0];
+      const range = field.range || [];
+      if (input && range.length && units.length > 1) {
+        try { input.placeholder = `${fmt(convert(range[0], units[0], unit))}–${fmt(convert(range[1], units[0], unit))}`; } catch (e) { /* keep prior placeholder */ }
+      }
+      if (!hint || !input) return;
+      const raw = input.value.trim();
+      const num = raw === "" ? NaN : Number(raw);
+      const other = units.find(u => u !== unit);
+      let converted = null;
+      if (other && Number.isFinite(num) && num > 0) {
+        try { converted = convert(num, unit, other); } catch (e) { converted = null; }
+      }
+      if (converted == null) {
+        hint.hidden = true;
+        hint.textContent = "";
+        hint.classList.remove("warn");
+        return;
+      }
+      let text = `= ${fmt(converted)} ${other}`;
+      let warn = false;
+      if (range.length) {
+        try {
+          const inDefault = convert(num, unit, units[0]);
+          if (inDefault < range[0] - 1e-9 || inDefault > range[1] + 1e-9) {
+            warn = true;
+            text += ` · outside typical ${fmt(convert(range[0], units[0], unit))}–${fmt(convert(range[1], units[0], unit))} ${unit} — check the unit`;
+          }
+        } catch (e) { /* non-length unit: no range warning */ }
+      }
+      hint.textContent = text;
+      hint.classList.toggle("warn", warn);
+      hint.hidden = false;
+    }
+    const paintMeasures = () => root.querySelectorAll('[data-csf-type="measure"]').forEach(paintMeasure);
 
     function readField(field) {
       const wrap = fieldEl(field.key);
@@ -539,6 +604,7 @@
         wrap.classList.remove("csf-invalid");
         const box = wrap.querySelector("[data-csf-error]"); if (box) box.hidden = true;
       }
+      if (wrap) paintMeasure(wrap);
       changed();
     };
     const onChangeEvent = event => {
@@ -559,6 +625,7 @@
     root.addEventListener("input", onInput);
     root.addEventListener("change", onChangeEvent);
     applyVisibility();
+    paintMeasures();
 
     return {
       schema,
@@ -581,6 +648,7 @@
         root.querySelectorAll("[data-csf-check]").forEach(el => { el.checked = false; });
         root.querySelectorAll("[data-csf-other]").forEach(el => { el.hidden = true; });
         showErrors({});
+        paintMeasures();
         changed();
       },
       destroy() { root.removeEventListener("input", onInput); root.removeEventListener("change", onChangeEvent); root.innerHTML = ""; }

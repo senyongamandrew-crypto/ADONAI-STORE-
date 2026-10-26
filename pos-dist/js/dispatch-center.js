@@ -26,6 +26,10 @@
   function status(message,error=false) {
     const node=$("#dispatchStatus"); if (node) {node.textContent=message;node.classList.toggle("is-error",error);node.hidden=!message;}
   }
+  function pairCopy(kicker,help) {
+    const k=$("#dispatchPairKicker"),h=$("#dispatchPairHelp");
+    if(k)k.textContent=kicker;if(h)h.textContent=help;
+  }
   function createMap() {
     if (map || !$("#dispatchMap") || !global.L) return;
     map=L.map("dispatchMap",{scrollWheelZoom:false,attributionControl:true}).setView([0.3136,32.5811],12);
@@ -58,7 +62,7 @@
         <div class="dc-rider-zone">${esc(rider.zone || "Service zone not set")}${phone?`<a href="tel:${esc(phone)}">Call rider ↗</a>`:""}</div>
         <div class="dc-state-row"><span class="dc-gps dc-gps-${esc(state)}">${esc(stateLabels[state] || state)}</span><span class="dc-availability">${esc(rider.status)}</span></div>
         <div class="dc-location"><strong>${p?`${p.latitude.toFixed(5)}, ${p.longitude.toFixed(5)}`:"Location not shared"}</strong><span>${age(p)}${p?` · accuracy ±${Math.round(p.accuracy_m)} m`:""}</span><small>${esc(rider.tracking?.device_label || "No device label")}</small></div>
-        <div class="dc-rider-actions"><button class="btn sm" type="button" data-locate-rider="${esc(rider.id)}" ${p?"":"disabled"}>Locate</button><button class="btn sm" type="button" data-edit-rider="${esc(rider.id)}">Edit</button><button class="btn sm" type="button" data-pair-rider="${esc(rider.id)}" ${data.gps_access && !busy?"":"disabled"}>Pair phone</button></div>
+        <div class="dc-rider-actions"><button class="btn sm" type="button" data-locate-rider="${esc(rider.id)}" ${p?"":"disabled"}>Locate</button><button class="btn sm" type="button" data-edit-rider="${esc(rider.id)}">Edit</button><button class="btn sm" type="button" data-app-code-rider="${esc(rider.id)}" ${busy?"disabled":""}>App code</button><button class="btn sm" type="button" data-pair-rider="${esc(rider.id)}" ${data.gps_access && !busy?"":"disabled"}>Pair phone</button></div>
         <div class="dc-rider-footer"><select aria-label="Availability for ${esc(rider.name)}" data-rider-availability="${esc(rider.id)}">${["Available","On delivery","Offline"].map(value=>`<option ${value===rider.status?"selected":""}>${value}</option>`).join("")}</select>${data.gps_access && !["unpaired","protected"].includes(state)?`<button type="button" class="dc-text-button" data-revoke-rider="${esc(rider.id)}">Revoke phone</button>`:""}<button type="button" class="dc-text-button" data-archive-rider="${esc(rider.id)}">Archive</button></div>
       </article>`;
     }).join("") || `<div class="dc-empty"><strong>Your rider roster starts here</strong><p>Add an authorized delivery partner, then pair their Android phone. No demonstration locations or riders are inserted into your store.</p><button class="btn primary" type="button" data-add-rider>Add delivery partner</button></div>`;
@@ -146,7 +150,15 @@
       const card=$("#dispatchPairCard");if(!card)return;card.hidden=false;
       $("#dispatchPairName").textContent=result.rider.name;$("#dispatchPairCode").textContent=result.code;
       $("#dispatchPairExpiry").textContent=`Single-use code · expires ${new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Kampala",hour:"2-digit",minute:"2-digit"}).format(new Date(result.expires_at))} EAT. Pairing alone does not start GPS.`;
+      pairCopy("PAIR AN AUTHORIZED ANDROID PHONE","On the rider's updated Android app: Menu → Rider delivery app → enter this code. The rider then chooses Start sharing and permits Location + the visible tracking notification. A phone serial/IMEI is not required.");
     },"Phone code created. Ask the rider to enter it in the updated Android app and explicitly start duty.");
+    if(target.hasAttribute("data-app-code-rider"))return void mutate(async request=>{
+      const result=await DB.deliveryAppCode(target.dataset.appCodeRider);if(!active || request!==generation)return;
+      const card=$("#dispatchPairCard");if(!card)return;card.hidden=false;
+      $("#dispatchPairName").textContent=result.rider.name;$("#dispatchPairCode").textContent=result.code;
+      $("#dispatchPairExpiry").textContent=`Single-use code · expires ${new Intl.DateTimeFormat("en-GB",{timeZone:"Africa/Kampala",hour:"2-digit",minute:"2-digit"}).format(new Date(result.expires_at))} EAT. This code does not start GPS.`;
+      pairCopy("ADONAI DELIVERY · CONNECTION CODE","The rider signs in to Adonai Delivery (/delivery), checks in for the day with a selfie and signature, then enters this code on the Link step. The code links their account to this roster profile, works once and expires in 10 minutes. The rider sees only jobs assigned to them. Location sharing stays off until they start a duty separately, and this code never enables GPS.");
+    },"Connection code ready. It links the rider's Adonai Delivery account only, and GPS stays off.");
     if(target.matches("#btnCloseDispatchPair")) {$("#dispatchPairCard").hidden=true;return;}
     if(target.hasAttribute("data-revoke-rider")) {
       if(global.confirm("Revoke this phone's pairing? New GPS uploads and access to its assigned deliveries will stop."))return void mutate(()=>DB.revokeRiderPhone(target.dataset.revokeRider),"Phone pairing revoked. The rider must pair again.");return;

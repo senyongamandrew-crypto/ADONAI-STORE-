@@ -13,20 +13,47 @@ def keystorePassword = System.getenv('ADONAI_KEYSTORE_PASSWORD') ?: project.find
 def keyAliasName = System.getenv('ADONAI_KEY_ALIAS') ?: project.findProperty('ADONAI_KEY_ALIAS')
 def keyPasswordValue = System.getenv('ADONAI_KEY_PASSWORD') ?: project.findProperty('ADONAI_KEY_PASSWORD')
 def hasReleaseKeystore = keystoreFilePath != null && file(keystoreFilePath).exists()
-// Safe installation candidate: no signing-key conflict or overwrite of an existing POS.
+// Safe installation candidate: no signing-key conflict or overwrite of an existing app.
 def previewBuild = System.getenv('ADONAI_PREVIEW_BUILD') == '1'
+// ---------------------------------------------------------------------------
+// App target: ONE native shell, TWO separately installable applications.
+//   ADONAI_APP_TARGET=pos      (default) -> Adonai POS      com.adonaithrift.pos
+//   ADONAI_APP_TARGET=delivery           -> Adonai Delivery com.adonaithrift.delivery
+// The delivery build bundles the rider-partner web app (delivery.html) and
+// opens straight into it (see BuildConfig.DELIVERY_APP in MainActivity); it is
+// NOT the POS register with a different label. Preview builds of either app
+// get a ".preview" applicationId and a "Preview" label so they install
+// alongside the real app. A POS preview must never be labelled "Adonai
+// Delivery" — that mislabelling is what sent riders the cashier app.
+// ---------------------------------------------------------------------------
+def appTarget = (System.getenv('ADONAI_APP_TARGET') ?: 'pos').toLowerCase()
+def deliveryBuild = appTarget == 'delivery'
+def targetApplicationId = deliveryBuild
+        ? (previewBuild ? "com.adonaithrift.delivery.preview" : "com.adonaithrift.delivery")
+        : (previewBuild ? "com.adonaithrift.pos.preview" : "com.adonaithrift.pos")
+def targetAppLabel = deliveryBuild
+        ? (previewBuild ? "Adonai Delivery Preview" : "Adonai Delivery")
+        : (previewBuild ? "Adonai POS Preview" : "@string/app_name")
+def targetAppIcon = deliveryBuild ? "@mipmap/ic_launcher_delivery" : "@mipmap/ic_launcher"
+def targetAppRoundIcon = deliveryBuild ? "@mipmap/ic_launcher_delivery_round" : "@mipmap/ic_launcher_round"
 
 android {
     namespace "com.adonaithrift.pos"
     compileSdk 34
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
-        applicationId previewBuild ? "com.adonaithrift.pos.preview" : "com.adonaithrift.pos"
+        applicationId targetApplicationId
         minSdk 22
         targetSdk 34
         versionCode 20500
         versionName previewBuild ? "2.5.0-preview" : "2.5.0"
-        manifestPlaceholders = [adonaiAppLabel: previewBuild ? "Adonai Delivery" : "@string/app_name"]
+        buildConfigField "boolean", "DELIVERY_APP", deliveryBuild ? "true" : "false"
+        buildConfigField "String", "APP_TARGET", "\"${deliveryBuild ? 'delivery' : 'pos'}\""
+        manifestPlaceholders = [adonaiAppLabel: targetAppLabel, adonaiAppIcon: targetAppIcon, adonaiAppRoundIcon: targetAppRoundIcon]
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

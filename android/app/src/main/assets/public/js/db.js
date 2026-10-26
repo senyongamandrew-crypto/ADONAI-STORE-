@@ -1382,6 +1382,7 @@
     },
     getDispatchBoard(signal) {return apiRequest("/api/dispatch/board", {signal}, true);},
     pairRiderPhone(id) {return apiRequest("/api/dispatch/riders/"+encodeURIComponent(id)+"/pair", {method:"POST",body:"{}"}, true);},
+    deliveryAppCode(id) {return apiRequest("/api/dispatch/riders/"+encodeURIComponent(id)+"/app-code", {method:"POST",body:"{}"}, true);},
     revokeRiderPhone(id) {return apiRequest("/api/dispatch/riders/"+encodeURIComponent(id)+"/revoke", {method:"POST",body:"{}"}, true);},
 
     /* ----- authoritative, scoped report downloads ----- */

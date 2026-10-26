@@ -157,6 +157,11 @@ release). A local build writes:
 - `dist/adonai-pos-v2.apk`
 - `android/app/build/outputs/apk/release/adonai-pos-release.apk`
 
+**Riders need the other file:** `adonai-delivery.apk` is the separate
+**Adonai Delivery** rider-partner app (`com.adonaithrift.delivery`), built by
+the same workflow (`npm run build:apk:delivery`) and verified to contain no
+POS register/Admin pages. See [DELIVERY_APP.md](DELIVERY_APP.md#installation-riders-phone).
+
 Transfer the verified APK to any Android phone or tablet register, enable
 **Install Unknown Apps**, and install. The repository no longer includes the
 old invalid ZIP-with-an-`.apk`-extension artifact.
@@ -708,7 +713,7 @@ SDK compilation and physical phone/printer verification are not claimed.
 The Android workflow compiles the updated native GPS/printing/export code and
 packages current POS/rider screens. The phone user **downloads and installs the
 APK**, not the source ZIP, and needs no build tools. Branch installation
-candidates are labelled **Adonai Store Preview** (v2.5.0-preview, separate package
+candidates are labelled **Adonai POS Preview** (v2.5.0-preview, separate package
 `com.adonaithrift.pos.preview`) so an existing POS and its unsynced local data are
 not overwritten. Never uninstall the old app or clear its data to force an update.
 Normal production builds retain `com.adonaithrift.pos` and need a stable original
