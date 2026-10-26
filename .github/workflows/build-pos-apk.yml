@@ -1,4 +1,4 @@
-name: Adonai POS Android APK Build & CI Pipeline
+name: Adonai Android APK Builds (POS + Delivery) & CI Pipeline
 
 on:
   push:
@@ -67,6 +67,7 @@ jobs:
           python -m unittest discover -s tests -p test_audit_exports.py -v
           python -m unittest discover -s tests -p test_dispatch.py -v
           python -m unittest discover -s tests -p test_apk_packaging.py -v
+          python -m unittest discover -s tests -p test_delivery_apk_packaging.py -v
           python tests/test_multi_tier_grading.py
           python tests/test_consignment.py
 
@@ -83,7 +84,7 @@ jobs:
       - run: npm test
 
   build-pos-apk:
-    name: 📱 Build & Package Android POS APK
+    name: 📱 Build & Package Android APKs (POS + Delivery)
     runs-on: ubuntu-latest
     needs: [backend-tests, frontend-tests]
     steps:
@@ -164,11 +165,33 @@ jobs:
       - name: Compile Debug APK
         run: npm run build:apk:debug
 
+      # Adonai Delivery is a SEPARATE app (own package/label/icon/bundle).
+      # Building it after the POS also proves the target switch cannot leak
+      # the cashier register into the rider download (the builder cleans and
+      # re-bundles per target, and verify-delivery-apk.py rejects POS assets).
+      - name: Compile Signed Adonai Delivery Release APK
+        id: delivery_release_build
+        run: |
+          set -o pipefail
+          npm run build:apk:delivery 2>&1 | tee /tmp/delivery-release-build.log
+
+      - name: Report Delivery Build Failure
+        if: failure()
+        run: |
+          echo "::group::Delivery build log tail"
+          tail -120 /tmp/delivery-release-build.log || true
+          echo "::endgroup::"
+          MSG=$(grep -A 20 -m1 -E "What went wrong|error:" /tmp/delivery-release-build.log | head -40 | tr '\n' '~' || true)
+          echo "::error title=Delivery Gradle build failed::${MSG}"
+
+      - name: Compile Adonai Delivery Debug APK
+        run: npm run build:apk:delivery:debug
+
       - name: Verify APKs are installable (signature + structure)
         run: |
           set -e
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
-          for f in dist/adonai-pos-v2.apk dist/adonai-pos-v2-debug.apk; do
+          for f in dist/adonai-pos-v2.apk dist/adonai-pos-v2-debug.apk dist/adonai-delivery.apk dist/adonai-delivery-debug.apk; do
             echo "=== $f"
             test -s "$f"
             unzip -l "$f" | grep -q classes.dex
@@ -180,6 +203,7 @@ jobs:
       - name: Verify packaged rider service and create installation metadata
         run: |
           python scripts/verify-pos-apk.py dist/adonai-pos-v2.apk
+          python scripts/verify-delivery-apk.py dist/adonai-delivery.apk
 
       # Install files also go to a force-updated `apk-dist` branch so the APK is
       # reachable over plain git/source control transport (no release-CDN needed).
@@ -191,7 +215,7 @@ jobs:
           set -e
           WORK=$(mktemp -d)
           git init -q -b apk-dist "$WORK"
-          cp dist/adonai-pos-v2.apk dist/SHA256SUMS.txt dist/BUILD-INFO.json "$WORK/"
+          cp dist/adonai-pos-v2.apk dist/adonai-delivery.apk dist/SHA256SUMS.txt dist/BUILD-INFO.json dist/BUILD-INFO-delivery.json "$WORK/"
           if [ -f dist/adonai-pos-v2.5.0-preview.apk ]; then cp dist/adonai-pos-v2.5.0-preview.apk "$WORK/"; fi
           cd "$WORK"
           git config user.name "github-actions[bot]"
@@ -221,6 +245,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload Adonai Delivery APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adonai-delivery-apk
+          path: |
+            dist/adonai-delivery.apk
+            dist/SHA256SUMS.txt
+            dist/BUILD-INFO-delivery.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Adonai Delivery Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adonai-delivery-debug-apk
+          path: dist/adonai-delivery-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Name installation release
         id: install_release
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true') || (github.event_name == 'push' && startsWith(github.ref, 'refs/heads/arena/'))
@@ -241,25 +284,35 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.install_release.outputs.tag }}
-          name: "Adonai POS ${{ steps.install_release.outputs.tag }}"
+          name: "Adonai Android ${{ steps.install_release.outputs.tag }} (POS + Delivery)"
           target_commitish: ${{ github.sha }}
           draft: false
           prerelease: ${{ env.ADONAI_PREVIEW_BUILD == '1' }}
           files: |
             dist/adonai-pos-v2.apk
             dist/adonai-pos-v2.5.0-preview.apk
+            dist/adonai-delivery.apk
             dist/SHA256SUMS.txt
             dist/BUILD-INFO.json
+            dist/BUILD-INFO-delivery.json
           body: |
-            ## Adonai Store — installation-ready Android build
+            ## Adonai Store — installation-ready Android builds (two separate apps)
 
-            Download the signed **adonai-pos-v2.5.0-preview.apk** for a branch
-            installation candidate, or **adonai-pos-v2.apk** for a normal build.
+            **Riders: download `adonai-delivery.apk`** — Adonai Delivery
+            (`com.adonaithrift.delivery`). It opens straight into rider
+            sign-in / check-in / jobs and contains no cashier register.
+            **Cashiers: download `adonai-pos-v2.apk`** — the Adonai POS
+            register (`com.adonaithrift.pos`;
+            `adonai-pos-v2.5.0-preview.apk` is the same POS build under its
+            branch-preview name). If the file you downloaded opens the shop
+            register, you have the POS file, not the delivery app.
+
             Allow "Install unknown apps" for your browser/Files and open the APK.
             You do not need Android Studio or any build tools on your phone.
 
-            Branch builds are labelled **Adonai Delivery** and install
-            alongside the existing POS, not over it. Do not uninstall your
+            Branch builds carry a **Preview** label (Adonai POS Preview /
+            Adonai Delivery Preview) with a `.preview` package and install
+            alongside your existing apps, not over them. Do not uninstall your
             existing app or clear its data. No unsynced phone data is copied.
             Use a device already assigned to you or pair an authorized rider.
 

@@ -16,11 +16,20 @@ Downloading an old release or the repository's source ZIP does not install the
 new service. **You do not need Android Studio, Java, Gradle or build commands on
 your phone.** Download the freshly built APK and open it to install.
 
-Builds from `arena/**` branches use **Adonai Store Preview**
+Builds from `arena/**` branches use **Adonai POS Preview**
 (`com.adonaithrift.pos.preview`, version `2.5.0-preview`). This installs alongside
 your existing POS, avoiding unknown signing-key conflicts and preserving its
 local data. Do not uninstall the old app or clear its data. The preview is a
 separate app sandbox; unsynced old-phone data is not copied into it automatically.
+
+> **Looking for the rider app?** This file (`adonai-pos-v2.apk`) is the cashier
+> register. **Adonai Delivery** is a separate application with its own download,
+> `adonai-delivery.apk` (`com.adonaithrift.delivery`) — see
+> [DELIVERY_APP.md](DELIVERY_APP.md#installation-riders-phone). CI builds,
+> verifies and publishes both APKs side by side, and the delivery verifier
+> rejects any build that contains POS/Admin pages, so the two downloads can no
+> longer be mixed up. (Older branch previews of this POS APK were mislabelled
+> "Adonai Delivery"; they were always the register underneath.)
 
 The builder verifies Android bytecode/resources, signature, foreground-location
 service/permissions and source-identical rider assets. `BUILD-INFO.json` and
@@ -178,9 +187,17 @@ The repository includes a GitHub Actions workflow in `.github/workflows/build-po
 ### Commands
 ```bash
 npm run bundle:pos        # copy POS web assets into android/app/src/main/assets/public
-npm run build:apk         # signed release APK  -> dist/adonai-pos-v2.apk
-npm run build:apk:debug   # debug APK           -> dist/adonai-pos-v2-debug.apk
+npm run build:apk         # signed POS release APK       -> dist/adonai-pos-v2.apk
+npm run build:apk:debug   # POS debug APK                -> dist/adonai-pos-v2-debug.apk
+npm run bundle:delivery   # copy ONLY the rider app into the Android assets
+npm run build:apk:delivery        # signed Delivery release APK -> dist/adonai-delivery.apk
+npm run build:apk:delivery:debug  # Delivery debug APK            -> dist/adonai-delivery-debug.apk
 ```
+The app target travels to Gradle as `ADONAI_APP_TARGET` (`pos` default,
+`delivery` for the rider app) and selects the applicationId, launcher
+label/icon, bundled web app and start page (`BuildConfig.DELIVERY_APP`).
+Each build runs `clean` first because the env-selected identity is not a
+Gradle task input.
 The builder verifies the output with `apksigner verify` and fails the build if
 the APK is unsigned or missing `classes.dex` / `resources.arsc`.
 

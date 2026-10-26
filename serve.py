@@ -72,6 +72,11 @@ ROUTES = {
     "/download/pos-apk": "dist/adonai-pos-v2.apk",
     "/dist/adonai-pos-v2.apk": "dist/adonai-pos-v2.apk",
     "/adonai-pos.apk": "dist/adonai-pos-v2.apk",
+    # Adonai Delivery is a SEPARATE app (com.adonaithrift.delivery). Its
+    # download must never resolve to the POS file above.
+    "/download/delivery-apk": "dist/adonai-delivery.apk",
+    "/dist/adonai-delivery.apk": "dist/adonai-delivery.apk",
+    "/adonai-delivery.apk": "dist/adonai-delivery.apk",
 }
 
 COMPRESSIBLE_TYPES = {
@@ -763,7 +768,9 @@ def wsgi_app(environ, start_response):
             ("Content-Type", f"{mime_type}; charset=utf-8" if "text" in mime_type or "svg" in mime_type or "javascript" in mime_type or "json" in mime_type else mime_type),
         ]
         if target_file.endswith(".apk"):
-            headers.append(("Content-Disposition", 'attachment; filename="adonai-pos-v2.apk"'))
+            # Name the download after the file actually served. Hardcoding the
+            # POS filename here would rename the delivery APK on its way down.
+            headers.append(("Content-Disposition", f'attachment; filename="{os.path.basename(target_file)}"'))
         headers.extend(SECURITY_HEADERS)
         headers.extend(get_cache_headers(target_file))
 
@@ -972,7 +979,7 @@ class ProductionHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", f"{mime_type}; charset=utf-8" if "text" in mime_type or "svg" in mime_type or "javascript" in mime_type or "json" in mime_type else mime_type)
             self.send_header("Content-Length", str(len(content)))
             if target_file.endswith(".apk"):
-                self.send_header("Content-Disposition", 'attachment; filename="adonai-pos-v2.apk"')
+                self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(target_file)}"')
             if should_gzip:
                 self.send_header("Content-Encoding", "gzip")
                 self.send_header("Vary", "Accept-Encoding")

@@ -35,21 +35,31 @@ function copyDirRecursive(src, dest) {
 }
 
 function bundleTo(targetDir) {
+  // Clean first: the Android assets folder is shared with the delivery
+  // bundle, and stale files from either app must never leak into the other.
+  fs.rmSync(targetDir, { recursive: true, force: true });
   fs.mkdirSync(targetDir, { recursive: true });
 
   // 1. Copy root-level application files. The operations console keeps its
   // script and stylesheet at the repository root, while POS/login styles live
   // in css/. Omitting styles.css makes every console destination render as
   // unstyled browser HTML inside the Android app.
+  // delivery.html is included because the POS navigation links to the rider
+  // app ("Adonai Delivery (rider app)"); without it that menu item is a dead
+  // page inside the installed POS APK. The standalone Adonai Delivery APK is
+  // bundled separately by scripts/bundle-delivery.js and contains no POS.
   const rootFiles = [
     'pos.html',
     'admin.html',
     'rider.html',
+    'delivery.html',
     'login.html',
     'app.js',
     'styles.css',
     'manifest-pos.json',
-    'manifest.json'
+    'manifest.json',
+    'manifest-delivery.json',
+    'sw-delivery.js'
   ];
   for (const f of rootFiles) {
     const src = path.join(ROOT, f);

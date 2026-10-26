@@ -1,0 +1,57 @@
+{
+  "id": "/delivery",
+  "name": "Adonai Delivery — Rider Partner App",
+  "short_name": "Adonai Delivery",
+  "description": "The delivery partner app for Adonai Store. Receive assigned orders, accept them, and deliver to customers in Kampala.",
+  "start_url": "/delivery#jobs",
+  "scope": "/delivery",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0B1F16",
+  "theme_color": "#0B1F16",
+  "lang": "en-UG",
+  "categories": ["business", "productivity", "navigation"],
+  "icons": [
+    {
+      "src": "assets/delivery-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/delivery-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/delivery-icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "My assigned jobs",
+      "short_name": "Jobs",
+      "description": "See deliveries waiting for you",
+      "url": "/delivery#jobs",
+      "icons": [{ "src": "assets/delivery-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Active delivery",
+      "short_name": "Active",
+      "description": "Continue the delivery you are working on",
+      "url": "/delivery#active",
+      "icons": [{ "src": "assets/delivery-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Completed deliveries",
+      "short_name": "History",
+      "description": "Your finished deliveries and fees",
+      "url": "/delivery#history",
+      "icons": [{ "src": "assets/delivery-icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

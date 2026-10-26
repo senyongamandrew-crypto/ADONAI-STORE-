@@ -1,11 +1,18 @@
 #!/usr/bin/env node
 /**
- * Adonai Store POS — Android APK Builder
+ * Adonai Store — Android APK Builder (POS + Delivery)
  *
  * This invokes a REAL Android/Gradle build. The previous version of this script
  * simply zipped the manifest + assets, which produced a file named *.apk that
  * Android can never install (no classes.dex, no compiled resources.arsc, no
  * signature). The output of this script is a compiled, signed, installable APK.
+ *
+ * Two separately installable apps share one native shell:
+ *   --app=pos      (default) Adonai POS       com.adonaithrift.pos      dist/adonai-pos-v2.apk
+ *   --app=delivery           Adonai Delivery  com.adonaithrift.delivery dist/adonai-delivery.apk
+ * The target travels to Gradle as ADONAI_APP_TARGET and selects the
+ * applicationId, launcher label/icon, bundled web app and start page. The
+ * delivery APK contains the rider-partner app only — never the POS register.
  *
  * Requirements:
  *   - JDK 17 (JAVA_HOME)
@@ -13,21 +20,42 @@
  *   - Gradle (uses ./gradlew when present, otherwise the `gradle` on PATH)
  *
  * Usage:
- *   node scripts/build-pos-apk.js            # release build (signed)
- *   node scripts/build-pos-apk.js --debug    # debug build (debug-signed)
+ *   node scripts/build-pos-apk.js                     # POS release (signed)
+ *   node scripts/build-pos-apk.js --debug             # POS debug (debug-signed)
+ *   node scripts/build-delivery-apk.js                # Delivery release (signed)
+ *   node scripts/build-delivery-apk.js --debug        # Delivery debug
  */
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { execFileSync, execSync } = require('child_process');
 const { bundle } = require('./bundle-pos');
+const { bundleDelivery } = require('./bundle-delivery');
 
 const ROOT = path.resolve(__dirname, '..');
 const ANDROID_DIR = path.join(ROOT, 'android');
 const DIST_DIR = path.join(ROOT, 'dist');
 
-const isDebug = process.argv.includes('--debug');
-const variant = isDebug ? 'debug' : 'release';
+const APPS = {
+  pos: {
+    label: 'Adonai POS',
+    packageId: 'com.adonaithrift.pos',
+    outputBase: 'adonai-pos-v2',
+    bundleAssets: bundle
+  },
+  delivery: {
+    label: 'Adonai Delivery',
+    packageId: 'com.adonaithrift.delivery',
+    outputBase: 'adonai-delivery',
+    bundleAssets: bundleDelivery
+  }
+};
+
+function parseTarget(argv) {
+  const flag = argv.find(arg => arg.startsWith('--app='));
+  if (flag) return flag.slice('--app='.length).toLowerCase();
+  if (argv.includes('--delivery')) return 'delivery';
+  return (process.env.ADONAI_APP_TARGET || 'pos').toLowerCase();
+}
 
 function fail(msg) {
   console.error('\n[APK Builder] ERROR: ' + msg + '\n');
@@ -134,24 +162,37 @@ function verifyApk(apkPath) {
   console.log('[APK Builder] APK structure + signature OK.');
 }
 
-function buildApk() {
+function buildApk(options = {}) {
+  const target = (options.target || parseTarget(process.argv)).toLowerCase();
+  const app = APPS[target];
+  if (!app) fail(`Unknown app target "${target}". Use --app=pos or --app=delivery.`);
+  const isDebug = options.debug !== undefined ? options.debug : process.argv.includes('--debug');
+  const variant = isDebug ? 'debug' : 'release';
+  const preview = process.env.ADONAI_PREVIEW_BUILD === '1';
+
   console.log('====================================================');
-  console.log('Adonai POS — Android APK Build (' + variant + ')');
+  console.log(`${app.label} — Android APK Build (${variant})`);
   console.log('====================================================\n');
 
   checkToolchain();
 
-  // Step 1: bundle web assets into android/app/src/main/assets/public
-  bundle();
+  // The Gradle build reads the target from the environment. Set it before
+  // bundling so the assets on disk and the compiled identity always agree.
+  process.env.ADONAI_APP_TARGET = target;
+
+  // Step 1: bundle this app's web assets into android/app/src/main/assets/public
+  app.bundleAssets();
 
   // Step 2: signing material for release builds
   if (!isDebug) ensureKeystore();
 
-  // Step 3: compile with Gradle
+  // Step 3: compile with Gradle. `clean` matters: the applicationId/label/icon
+  // come from an env var, which Gradle cannot see as a task input — without a
+  // clean, switching targets could silently reuse the other app's APK.
   const gradle = gradleCommand();
   const task = isDebug ? 'assembleDebug' : 'assembleRelease';
-  console.log(`\n[APK Builder] Running ${path.basename(gradle)} ${task} ...\n`);
-  execFileSync(gradle, [task, '--no-daemon', '--stacktrace'], {
+  console.log(`\n[APK Builder] Running ${path.basename(gradle)} clean ${task} (ADONAI_APP_TARGET=${target}) ...\n`);
+  execFileSync(gradle, ['clean', task, '--no-daemon', '--stacktrace'], {
     cwd: ANDROID_DIR,
     stdio: 'inherit',
     env: process.env
@@ -168,16 +209,17 @@ function buildApk() {
   verifyApk(builtApk);
 
   fs.mkdirSync(DIST_DIR, { recursive: true });
-  const target = path.join(DIST_DIR, isDebug ? 'adonai-pos-v2-debug.apk' : 'adonai-pos-v2.apk');
-  fs.copyFileSync(builtApk, target);
+  const targetFile = path.join(DIST_DIR, isDebug ? `${app.outputBase}-debug.apk` : `${app.outputBase}.apk`);
+  fs.copyFileSync(builtApk, targetFile);
 
-  const sizeMb = (fs.statSync(target).size / (1024 * 1024)).toFixed(2);
+  const sizeMb = (fs.statSync(targetFile).size / (1024 * 1024)).toFixed(2);
   console.log('\n====================================================');
   console.log('✅ Installable Android APK built successfully');
-  console.log('   ' + path.relative(ROOT, target) + ` (${sizeMb} MB)`);
-  console.log('   Build type: ' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? 'Adonai Delivery (separate installation)' : 'Adonai POS'));
-  console.log('   Version: 2.5.0' + (process.env.ADONAI_PREVIEW_BUILD === '1' ? '-preview' : ''));
-  console.log('   Install: adb install -r ' + path.relative(ROOT, target));
+  console.log('   ' + path.relative(ROOT, targetFile) + ` (${sizeMb} MB)`);
+  console.log('   App: ' + app.label + (preview ? ' Preview (separate installation)' : ''));
+  console.log('   Package: ' + app.packageId + (preview ? '.preview' : ''));
+  console.log('   Version: 2.5.0' + (preview ? '-preview' : ''));
+  console.log('   Install: adb install -r ' + path.relative(ROOT, targetFile));
   console.log('====================================================\n');
 }
 
@@ -185,4 +227,4 @@ if (require.main === module) {
   buildApk();
 }
 
-module.exports = { buildApk };
+module.exports = { buildApk, APPS };

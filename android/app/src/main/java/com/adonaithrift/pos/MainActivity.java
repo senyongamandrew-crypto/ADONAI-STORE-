@@ -22,6 +22,7 @@ import android.print.PrintAttributes;
 import android.print.PrintJob;
 import android.print.PrintJobInfo;
 import android.print.PrintManager;
+import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -49,11 +50,17 @@ import java.io.OutputStream;
 import java.util.UUID;
 
 /**
- * Adonai Store POS — native Android WebView shell.
+ * Adonai Store — native Android WebView shell (two apps, one shell).
  *
- * The POS files are served through WebViewAssetLoader instead of file://. This
+ * The web files are served through WebViewAssetLoader instead of file://. This
  * gives the app a normal HTTPS origin, keeps local assets available on-device,
- * and allows the POS to make its authenticated requests to the live API.
+ * and allows the app to make its authenticated requests to the live API.
+ *
+ * BuildConfig.DELIVERY_APP (ADONAI_APP_TARGET=delivery) makes this the
+ * standalone Adonai Delivery rider app: it opens delivery.html, never the POS
+ * register, and the POS-only bridge features (store alerts, exports, receipt
+ * printing) stay off. The default build is the Adonai POS cashier terminal,
+ * which also hosts the native rider GPS screen (rider.html).
  */
 public class MainActivity extends AppCompatActivity {
 
@@ -64,10 +71,13 @@ public class MainActivity extends AppCompatActivity {
     private static final int EXPORT_SAVE_REQUEST_CODE = 1003;
     private static final int RIDER_PERMISSION_REQUEST_CODE = 1004;
     private static final int STORE_ALERT_PERMISSION_REQUEST_CODE = 1005;
+    private static final int GEOLOCATION_PERMISSION_REQUEST_CODE = 1006;
     // Heads-up store alerts: new orders, customer messages and store changes.
     private static final String STORE_ALERT_CHANNEL = "store-alerts";
     private static final String STORE_ALERT_VIEW = "store_alert_view";
     private static final String RIDER_URL = "https://" + APP_ASSET_HOST + "/assets/public/rider.html";
+    // The Adonai Delivery rider-partner app (delivery build's home screen).
+    private static final String DELIVERY_URL = "https://" + APP_ASSET_HOST + "/assets/public/delivery.html";
     private static final long MAX_EXPORT_BYTES = 32L * 1024 * 1024;
     private static final String XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -82,6 +92,9 @@ public class MainActivity extends AppCompatActivity {
     private boolean receiptPrintPending = false;
     private volatile boolean trustedAppPage = false;
     private volatile boolean riderPageActive = false;
+    private volatile boolean deliveryPageActive = false;
+    private String pendingGeolocationOrigin;
+    private GeolocationPermissions.Callback pendingGeolocationCallback;
     private final Object fileExportLock = new Object();
     private FileExport fileExport;
     private final ExecutorService riderWorker = Executors.newSingleThreadExecutor();
@@ -118,6 +131,13 @@ public class MainActivity extends AppCompatActivity {
                 .build();
 
         setupWebView();
+        if (BuildConfig.DELIVERY_APP) {
+            // Adonai Delivery is a standalone rider app: it always opens the
+            // rider-partner screen and has no cashier register, store-alert
+            // channel or admin deep links.
+            webView.loadUrl(DELIVERY_URL);
+            return;
+        }
         createStoreAlertChannel();
         boolean riderMode = getIntent().getBooleanExtra("rider_mode", false) || RiderApi.prefs(this).getBoolean("rider_mode", false);
         String alertUrl = storeAlertUrl(getIntent());
@@ -151,7 +171,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void notifyStoreAlertPermission() {
         runOnUiThread(() -> {
-            if (webView == null || !trustedAppPage || riderPageActive || isFinishing()) return;
+            if (webView == null || !trustedAppPage || riderPageActive || deliveryPageActive || isFinishing()) return;
             webView.evaluateJavascript("window.__adonaiStoreAlertPermission && window.__adonaiStoreAlertPermission("
                     + JSONObject.quote(storeAlertPermissionState()) + ");", null);
         });
@@ -233,6 +253,7 @@ public class MainActivity extends AppCompatActivity {
     private void setupWebView() {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
+        settings.setGeolocationEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
         settings.setAllowFileAccess(false);
@@ -254,6 +275,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 trustedAppPage = isTrustedAppUri(Uri.parse(url));
                 riderPageActive = trustedAppPage && RIDER_URL.equals(url);
+                deliveryPageActive = trustedAppPage && isDeliveryPageUrl(url);
                 if (!riderPageActive) riderStartPending = false;
                 if (!trustedAppPage) { cancelCurrentFileExport(); cancelReceiptDocument(); }
             }
@@ -282,6 +304,36 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                // The Adonai Delivery page's GPS duty switch uses the web
+                // Geolocation API (watchPosition). Without this prompt the
+                // WebView silently denies every fix, so a delivery APK would
+                // start a duty that never reports a position. Only the bundled
+                // app origin may ask, and only after the rider grants the
+                // Android Location runtime permission. Not retained: the duty
+                // consent in the page gates every duty, not this prompt.
+                runOnUiThread(() -> {
+                    Uri originUri = origin == null ? null : Uri.parse(origin);
+                    if (!isTrustedAppUri(originUri) || isFinishing()) {
+                        callback.invoke(origin, false, false);
+                        return;
+                    }
+                    if (hasLocationPermission()) {
+                        callback.invoke(origin, true, false);
+                        return;
+                    }
+                    if (pendingGeolocationCallback != null) {
+                        pendingGeolocationCallback.invoke(pendingGeolocationOrigin, false, false);
+                    }
+                    pendingGeolocationOrigin = origin;
+                    pendingGeolocationCallback = callback;
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION},
+                            GEOLOCATION_PERMISSION_REQUEST_CODE);
+                });
+            }
+
             @Override
             public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> {
@@ -336,6 +388,17 @@ public class MainActivity extends AppCompatActivity {
                 && APP_ASSET_HOST.equalsIgnoreCase(uri.getHost());
     }
 
+    /** The rider-partner page, with or without its #jobs/#active tab hash. */
+    private boolean isDeliveryPageUrl(String url) {
+        return url != null && (url.equals(DELIVERY_URL) || url.startsWith(DELIVERY_URL + "#")
+                || url.startsWith(DELIVERY_URL + "?"));
+    }
+
+    private boolean hasLocationPermission() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
     private void grantPendingCamera() {
         PermissionRequest request = pendingCameraRequest;
         pendingCameraRequest = null;
@@ -363,6 +426,13 @@ public class MainActivity extends AppCompatActivity {
                 pendingCameraRequest.deny();
                 pendingCameraRequest = null;
             }
+        }
+        if (requestCode == GEOLOCATION_PERMISSION_REQUEST_CODE && pendingGeolocationCallback != null) {
+            GeolocationPermissions.Callback callback = pendingGeolocationCallback;
+            String origin = pendingGeolocationOrigin;
+            pendingGeolocationCallback = null;
+            pendingGeolocationOrigin = null;
+            callback.invoke(origin, hasLocationPermission(), false);
         }
     }
 
@@ -404,6 +474,11 @@ public class MainActivity extends AppCompatActivity {
     @Override protected void onPause() { activityResumed=false; super.onPause(); }
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent); setIntent(intent);
+        if (BuildConfig.DELIVERY_APP) {
+            // The delivery bundle has no rider.html/POS pages to deep-link to.
+            if (webView!=null && !deliveryPageActive) webView.loadUrl(DELIVERY_URL);
+            return;
+        }
         if (intent.getBooleanExtra("rider_mode",false) && webView!=null) webView.loadUrl(RIDER_URL);
         else if (webView!=null && !RiderApi.prefs(this).getBoolean("rider_mode",false)) {
             String alertUrl = storeAlertUrl(intent);
@@ -670,7 +745,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public boolean printReceipts(String html, String title, String paper) {
-            if (!trustedAppPage || html == null || html.length() > 1024 * 1024
+            if (!trustedAppPage || deliveryPageActive || html == null || html.length() > 1024 * 1024
                     || title == null || title.length() > 180
                     || (!"a4".equals(paper) && !"receipt".equals(paper))) return false;
             runOnUiThread(() -> printReceiptDocument(html, title, paper));
@@ -684,7 +759,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public String beginFileExport(String filename, String mime, long expectedBytes) {
-            if (!trustedAppPage || filename == null || mime == null || expectedBytes < 1 || expectedBytes > MAX_EXPORT_BYTES) return "";
+            if (!trustedAppPage || deliveryPageActive || filename == null || mime == null || expectedBytes < 1 || expectedBytes > MAX_EXPORT_BYTES) return "";
             String cleanName = filename.replaceAll("[^A-Za-z0-9 ._-]", "_");
             if (cleanName.length() > 180) cleanName = cleanName.substring(0, 180);
             if (!("text/csv".equals(mime) && cleanName.endsWith(".csv"))
@@ -737,7 +812,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printTags(String html, String paper) {
-            if (html == null || html.length() > 1024 * 1024) return;
+            if (deliveryPageActive || html == null || html.length() > 1024 * 1024) return;
             if (!"a4".equals(paper) && !"label".equals(paper) && !"compact".equals(paper)) return;
             runOnUiThread(() -> {
                 if (webView == null || webView.getUrl() == null || !isTrustedAppUri(Uri.parse(webView.getUrl()))) return;
@@ -778,16 +853,16 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
-        /* Store alerts for the POS / Admin pages (never the rider page). */
+        /* Store alerts for the POS / Admin pages (never the rider or delivery pages). */
         @JavascriptInterface
         public String storeAlertPermission() {
-            if (!trustedAppPage || riderPageActive) return "denied";
+            if (!trustedAppPage || riderPageActive || deliveryPageActive) return "denied";
             return storeAlertPermissionState();
         }
 
         @JavascriptInterface
         public void requestStoreAlertPermission() {
-            if (!trustedAppPage || riderPageActive) return;
+            if (!trustedAppPage || riderPageActive || deliveryPageActive) return;
             runOnUiThread(() -> {
                 if (isFinishing()) return;
                 if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -802,7 +877,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void openStoreAlertSettings() {
-            if (!trustedAppPage || riderPageActive) return;
+            if (!trustedAppPage || riderPageActive || deliveryPageActive) return;
             runOnUiThread(MainActivity.this::openStoreAlertSettingsScreen);
         }
 
@@ -813,7 +888,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public boolean showStoreAlert(String json) {
-            if (!trustedAppPage || riderPageActive || json == null || json.length() > 4096) return false;
+            if (!trustedAppPage || riderPageActive || deliveryPageActive || json == null || json.length() > 4096) return false;
             return postStoreAlert(json);
         }
 

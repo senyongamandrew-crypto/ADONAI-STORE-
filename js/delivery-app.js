@@ -40,6 +40,25 @@
   var DECLINE_REASONS = ["Too far for this trip", "Vehicle problem", "Customer unreachable", "Finishing another job", "Other"];
   var ISSUE_HINTS = ["Customer not answering", "Address is unclear", "Heavy traffic delay", "Parcel needs checking"];
   var NO_SESSION_PATHS = ["/api/rider-account/login", "/api/rider-account/signup"];
+  var LIVE_STORE_ORIGIN = "https://www.adonaithrift-store.online";
+
+  /* The API base. On the web/PWA this page is served by the store server, so
+   * the API is same-origin. Inside the Adonai Delivery Android APK the page
+   * is served from the app-assets host instead, which is not a server at
+   * all: default to the live store origin there. The rider can still point
+   * the app elsewhere under "Advanced · store server", and a saved choice
+   * always wins over the default. */
+  function defaultBase() {
+    return global.location.hostname === "appassets.androidplatform.net"
+      ? LIVE_STORE_ORIGIN
+      : global.location.origin;
+  }
+  function sanitizeBase(base) {
+    // An app-assets origin saved by an older build can never reach the API.
+    return typeof base === "string" && base.indexOf("appassets.androidplatform.net") !== -1
+      ? defaultBase()
+      : base;
+  }
 
   function readJSON(key, fallback) {
     try { return JSON.parse(global.localStorage.getItem(key) || "null") || fallback; }
@@ -54,7 +73,7 @@
 
   var state = {
     accountToken: "", account: null, attendance: null, day: "", authMode: "signin",
-    token: "", deviceAccountId: "", label: "", connectedAt: null, base: global.location.origin,
+    token: "", deviceAccountId: "", label: "", connectedAt: null, base: defaultBase(),
     rider: null, orders: [], tracking: null, history: null, gate: { required: false, checkedIn: true },
     gpsPolicy: false, demo: false, online: global.navigator.onLine !== false,
     tab: "jobs", known: new Set(), fresh: new Set(), pending: readJSON(PENDING_KEY, []),
@@ -277,7 +296,7 @@
   }
   function readServer() {
     var raw = ($("serverUrl").value || "").trim().replace(/\/+$/, "");
-    return raw || global.location.origin;
+    return sanitizeBase(raw) || defaultBase();
   }
   function showAuthError(text) {
     var box = $("authError");
@@ -1273,7 +1292,7 @@
       box.hidden = !open;
       this.setAttribute("aria-expanded", String(open));
       this.textContent = open ? "Advanced · store server ▴" : "Advanced · store server ▾";
-      if (open && !$("serverUrl").value) $("serverUrl").value = global.location.origin;
+      if (open && !$("serverUrl").value) $("serverUrl").value = state.base || defaultBase();
     });
     $("demoFill").addEventListener("click", fillDemoSignIn);
     $("checkinForm").addEventListener("submit", submitCheckin);
@@ -1388,12 +1407,12 @@
       state.account = acc.account || null;
       state.attendance = acc.attendance || null;
       state.day = acc.day || "";
-      if (acc.base) state.base = acc.base;
+      if (acc.base) state.base = sanitizeBase(acc.base);
     }
     var saved = readJSON(SESSION_KEY, null);
     if (saved && saved.token && state.accountToken) {
       state.token = saved.token;
-      state.base = saved.base || state.base;
+      state.base = sanitizeBase(saved.base) || state.base;
       state.label = saved.label || "";
       state.connectedAt = saved.connectedAt || null;
       state.rider = saved.rider || null;
