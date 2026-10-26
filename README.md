@@ -749,28 +749,37 @@ is not physical-phone screen-lock/GPS/printer verification. See
 
 ### Setup (Android screen-lock mode selected)
 
-1. Keep checkout open. For GPS only, deliberately protect **Orders, dispatch &
-   audit** using the existing optional owner-created passwords in Settings, or
-   use an authenticated staff deployment (`ADONAI_REQUIRE_STAFF_AUTH=1`). GPS
-   pairing/viewing is **not public** in the default PIN-free configuration. Staff
-   still use their existing scoped unlock. No global register password is added.
-2. Add an authorized delivery partner and tap **Pair phone**. Give its single-use
-   10-minute code privately to that rider. A new pairing replaces/revokes the
-   old device session. **No phone serial, IMEI, SIM identifier or contacts are
-   required or read.** Device identity is an authorized install/session, not an
-   assertion of tamper-proof hardware identity.
-3. Build/install the updated Android APK. Open **Menu → Rider delivery app**
+If the rider only needs an account and assigned jobs (no native APK GPS), use
+**Delivery account code** in Delivery Partners & Dispatch. The rider opens
+`/delivery`, signs in or creates an account, completes today's check-in, and
+enters the code at Link. This job-inbox path does not require GPS protection.
+
+For native APK GPS, first enable the protected area: in Admin Suite, open the
+left-menu **Store Settings** item, scroll down to **Passwords & protected areas**,
+then check **Orders, dispatch & audit** and click **Save area protection**. If
+there is no admin password yet, create one in that section first; if management
+is locked, click **Unlock password management** and enter the admin password.
+For dispatch access on another device/session, create an area password scoped
+to **Orders, dispatch & audit** below, then unlock that area in Dispatch. The
+cashier register stays open. GPS pairing/viewing is not public by default.
+
+1. Add an authorized delivery partner and tap **APK GPS code**. Give its
+   single-use 10-minute code privately to that rider. A new pairing
+   replaces/revokes the old device session. **No phone serial, IMEI, SIM
+   identifier or contacts are required or read.** Device identity is an
+   authorized install/session, not an assertion of tamper-proof hardware identity.
+2. Build/install the updated Android APK. Open **Menu → Rider delivery app**
    (`rider.html`), enter the store HTTPS origin, a friendly phone label and code.
    Native app-private storage keeps the random 30-day session; the server stores
    only its hash. Tokens are not returned to JavaScript, URLs or staff sync.
    Pairing alone never starts GPS. A paired rider install reopens the rider page.
-4. Rider taps **Start sharing**, approves the explicit native consent dialog,
+3. Rider taps **Start sharing**, approves the explicit native consent dialog,
    and permits Location + notifications. The native **location foreground
    service** is independent of the WebView and designed to continue on screen
    lock. An ongoing notification visibly says GPS sharing is active and has a
    **Stop sharing** action. Android's approximate permission is supported, with
    its actual accuracy shown. An inactive/blocked notification prevents starting.
-5. Each explicit duty lasts at most **12 hours**. Stop in the rider app or its
+4. Each explicit duty lasts at most **12 hours**. Stop in the rider app or its
    notification, or revoke the paired phone from dispatch. No boot receiver,
    automatic restart, silent tracking or `ACCESS_BACKGROUND_LOCATION` permission
    is used: the visible foreground service is started from an active rider screen.

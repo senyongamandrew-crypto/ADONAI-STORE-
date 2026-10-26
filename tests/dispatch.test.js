@@ -27,10 +27,13 @@ function fixture(){
   assert.match(f.doc.querySelector("#dispatchPairExpiry").textContent,/does not start GPS/);
   const appCodeBtn=f.doc.querySelector('[data-app-code-rider="R1"]');
   assert.ok(appCodeBtn,"dispatch can issue a job-inbox-only Adonai Delivery code");
+  assert.match(appCodeBtn.textContent,/Delivery account code/);
+  assert.match(f.doc.querySelector('[data-pair-rider="R1"]').textContent,/APK GPS code/);
   appCodeBtn.click();await settle();await settle();await settle();
   assert.equal(f.doc.querySelector("#dispatchPairCode").textContent,"APPCO-DEMO1");
   assert.match(f.doc.querySelector("#dispatchPairKicker").textContent,/ADONAI DELIVERY/);
   assert.match(f.doc.querySelector("#dispatchPairHelp").textContent,/never enables GPS/);
+  assert.match(f.doc.querySelector("#dispatchPairHelp").textContent,/same store HTTPS server/);
   assert.match(f.doc.querySelector("#dispatchPairExpiry").textContent,/does not start GPS/);
   f.state.error="Server offline";await f.win.DispatchCenter.refresh();assert.equal(f.doc.querySelector("#dcCount-live").textContent,"0");assert.equal(f.win.DispatchCenter.locationState(f.data.riders[0]),"stale");
   assert.equal(f.doc.querySelectorAll(".dc-rider").length,2,"offline retains marked last-known information");
