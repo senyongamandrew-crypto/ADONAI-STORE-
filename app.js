@@ -1110,11 +1110,11 @@
         </div>
         <div class="rc-dashed"></div>
         <div class="rc-grand-row">
-          <strong>TOTAL PAID (UGX)</strong>
+          <strong>${isSalePaid(s) ? "TOTAL PAID" : "ORDER TOTAL"} (UGX)</strong>
           <strong class="rc-grand-total">${ugx(s.total)}</strong>
         </div>
         <div class="rc-pay-method">
-          PAYMENT METHOD: ${(s.tender && s.tender.paid && s.tender.type === "cash") ? "CASH · COMPLETED" : (s.tender && s.tender.paid && s.tender.type === "mtn") ? "MTN MOMO · VERIFIED" : (s.tender && s.tender.paid && s.tender.type === "airtel") ? "AIRTEL MONEY · VERIFIED" : (s.tender && s.tender.paid) ? `${s.tender.type.toUpperCase()} · PAID` : "UNPAID · UNPAID"}
+          PAYMENT: ${isSalePaid(s) ? `${esc(ReceiptPrinter.paymentName(s))} · PAID` : "UNPAID"}
         </div>
         <div class="rc-dashed"></div>
         <div class="rc-notice">
@@ -1131,21 +1131,38 @@
   function printReceiptModal(id) {
     const s = DB.getSale(id);
     if (!s) return toast("Sale record not found", false);
+    const thermal = typeof window.Android?.printThermalReceipt === "function";
+    const posted = AuditExports.posted(s);
     const rcSheet = $("#receiptSheet");
-    if (rcSheet) rcSheet.innerHTML = receiptHTML(s);
+    if (!posted && rcSheet) rcSheet.innerHTML = receiptHTML(s);
     openModal(`
       <button class="modal-x" data-close>×</button>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 class="serif" style="margin:0">80mm Receipt Printout</h3>
-        <button class="btn primary sm" id="btnTriggerPrint">${Icons.svg("printer", "ico-14")} Print 80mm</button>
+        <button class="btn primary sm" id="btnTriggerPrint">${Icons.svg("printer", "ico-14")} ${thermal ? "Print via Bluetooth" : "Print 80mm"}</button>
       </div>
+      ${thermal ? `<label>Thermal roll <select id="thermalRoll"><option value="576">80 mm (576 dots)</option><option value="384">58 mm (384 dots)</option></select></label><p class="muted small">Pair your Bluetooth Classic ESC/POS printer in phone settings first. Tap Print to choose it.</p>` : `<p class="muted small">Direct Bluetooth printing requires the updated Adonai POS Android app. This version uses system printing.</p>`}
       ${receiptHTML(s)}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn ghost" data-close>Close</button>
         <button class="btn primary" id="btnTriggerPrint2">${Icons.svg("printer", "ico-14")} Print Receipt</button>
       </div>
     `);
-    const doPrint = () => {
+    let preparing = false;
+    const doPrint = async () => {
+      if (thermal) {
+        if (preparing || !PosAccess.canUse("orders")) return;
+        preparing = true;
+        try { await sendThermalReceipt(receiptHTML(s), Number($("#thermalRoll").value)); }
+        catch (error) { toast(error.message, false); }
+        finally { preparing = false; }
+        return;
+      }
+      if (posted) {
+        try { ReceiptPrinter.printReceipt(s, DB.getSettings(), "receipt"); }
+        catch (error) { toast(error.message, false); }
+        return;
+      }
       const sheet = $("#receiptSheet");
       if (sheet) sheet.innerHTML = receiptHTML(s);
       window.print();
@@ -3593,7 +3610,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return ReceiptPrinter.printInvoices(auditSales(), selection, DB.getSettings(), $("#auditPrintPaper")?.value || "a4");
   }));
   window.addEventListener("adonai-receipt-print-result", event => {
-    if (currentView !== "customers" || !viewReady) return;
+    if (currentView !== "customers" || !viewReady) {
+      if (event.detail?.status === "error") toast(event.detail.message || "Printing could not open.", false);
+      return;
+    }
     auditPrintStatus(event.detail?.message || "Choose a printer in system print.", event.detail?.status === "error");
   });
   if (auditSearchEl) auditSearchEl.addEventListener("input", e => { auditTerm = e.target.value.trim().toLowerCase(); clearAuditDownload(); renderAuditLogs(); });

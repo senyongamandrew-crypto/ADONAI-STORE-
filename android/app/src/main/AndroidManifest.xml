@@ -3,6 +3,9 @@
 
     <!-- Permissions required for POS Hardware, Scanner, Network Sync, and Camera -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Rider-initiated, visible duty tracking only. No serial/IMEI permissions. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
