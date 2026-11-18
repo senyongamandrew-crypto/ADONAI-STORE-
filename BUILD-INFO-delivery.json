@@ -1,0 +1,21 @@
+{
+  "app_name": "Adonai Delivery",
+  "package": "com.adonaithrift.delivery",
+  "version": "2.5.0",
+  "version_code": 20500,
+  "preview_installs_alongside_existing_app": false,
+  "source_commit": "158ff9c268a49e70a1e3b6c94ba8c8cd05f2b9bc",
+  "repository": "senyongamandrew-crypto/ADONAI-STORE-",
+  "workflow_run": "44376190122",
+  "apk_sha256": "18989022d31fbe1374f305e25bbb754a6bdd268c399f3fd09cd6cd4e4d46550f",
+  "signing_certificate_sha256": "383bdbf7dde5b8ad15624c94f334ae17b1d2ce424fd93c164dd50431f105d2de",
+  "verified": [
+    "Gradle compiled Android bytecode/resources",
+    "APK signature",
+    "8 source-identical packaged rider screens/scripts/styles",
+    "no POS register or Admin Suite assets in the delivery bundle",
+    "entry page opens delivery.html (rider sign-in), not pos.html"
+  ],
+  "backend_deployed_by_this_build": false,
+  "real_phone_screen_lock_gps_verified": false
+}
