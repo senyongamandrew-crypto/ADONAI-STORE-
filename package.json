@@ -47,7 +47,8 @@
     "@capacitor/core": "^6.0.0",
     "@capacitor/keyboard": "^6.0.0",
     "@capacitor/status-bar": "^6.0.0",
-    "@zxing/browser": "0.1.5"
+    "@zxing/browser": "0.1.5",
+    "html2canvas": "1.4.1"
   },
   "devDependencies": {
     "css-tree": "^3.2.1",

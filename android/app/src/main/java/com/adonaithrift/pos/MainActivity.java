@@ -81,6 +81,8 @@ public class MainActivity extends AppCompatActivity {
     private static final long MAX_EXPORT_BYTES = 32L * 1024 * 1024;
     private static final String XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
+    private final ThermalPrinter thermal = new ThermalPrinter(this);
+    private volatile boolean thermalDashboard;
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
     private WebViewAssetLoader assetLoader;
@@ -273,6 +275,9 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                thermal.cancel();
+                Uri page = Uri.parse(url);
+                thermalDashboard = !BuildConfig.DELIVERY_APP && isTrustedAppUri(page) && "/assets/public/admin.html".equals(page.getPath());
                 trustedAppPage = isTrustedAppUri(Uri.parse(url));
                 riderPageActive = trustedAppPage && RIDER_URL.equals(url);
                 deliveryPageActive = trustedAppPage && isDeliveryPageUrl(url);
@@ -412,6 +417,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == ThermalPrinter.REQUEST) {
+            if (thermalDashboard) thermal.permission(grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED);
+            else thermal.cancel();
+            return;
+        }
         if (requestCode == RIDER_PERMISSION_REQUEST_CODE) {
             if (!hasRiderPermissions()) {
                 riderStartPending = false;
@@ -744,6 +754,13 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public boolean printThermalReceipt(String raster, int dots, int rows) {
+            if (!thermalDashboard || !activityResumed || !thermal.reserve(raster,dots,rows)) return false;
+            runOnUiThread(() -> { if (thermalDashboard && activityResumed && !isFinishing()) thermal.start(); else thermal.cancel(); });
+            return true;
+        }
+
+        @JavascriptInterface
         public boolean printReceipts(String html, String title, String paper) {
             if (!trustedAppPage || deliveryPageActive || html == null || html.length() > 1024 * 1024
                     || title == null || title.length() > 180
@@ -754,7 +771,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void cancelReceiptPrint() {
-            if (trustedAppPage) cancelReceiptDocument();
+            if (trustedAppPage) { runOnUiThread(thermal::cancel); cancelReceiptDocument(); }
         }
 
         @JavascriptInterface
@@ -926,6 +943,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        thermalDashboard = false; thermal.cancel();
         trustedAppPage = false;
         synchronized (fileExportLock) {
             if (fileExport != null) { fileExport.cancelled = true; cleanupFileExport(fileExport); }

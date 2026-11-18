@@ -85,3 +85,30 @@ try {
   assert.match(java,/public boolean printReceipts/); assert.match(java,/PrintAttributes.MediaSize.ISO_A4/);
   console.log("✓ trusted self-contained native system print, cancellation on lock, honest older-APK fallback and no file/network/JS access in print documents");
 } finally { native.close(); }
+
+// The Android thermal bridge receives packed raster rows at roll width, not HTML/PDF.
+(async () => {
+  const f = fixture(), w = f.win;
+  try {
+    w.eval(source('js/thermal-receipt.js'));
+    const markup = '<div><table><tr><th>Item</th><th>Qty</th></tr></table></div>';
+    for (const width of [384,576]) {
+      const rgba = new Uint8ClampedArray(width*4).fill(255);
+      rgba.fill(0,0,3); rgba.fill(0,28,31);
+      w.html2canvas = async () => ({width,height:1,getContext:()=>({getImageData:()=>({data:rgba})})});
+      let calls=0;
+      w.Android = {printThermalReceipt:(base64,dots,rows)=>{
+        calls++; const data=Buffer.from(base64,'base64');
+        assert.equal(data.length,width/8); assert.equal(data[0],129);
+        assert.equal(dots,width); assert.equal(rows,1); return true;
+      }};
+      await w.sendThermalReceipt(markup,width);
+      assert.equal(calls,1); assert.equal(f.state.prints,0);
+      f.state.locked=true;
+      await assert.rejects(w.sendThermalReceipt(markup,width),/Unlock Orders/);
+      assert.equal(calls,1); f.state.locked=false;
+    }
+    await assert.rejects(w.sendThermalReceipt(markup,400),/width/);
+    console.log('✓ 58/80 mm monochrome raster packing, access lock and no spooler fallback');
+  } finally { f.close(); }
+})().catch(err => { console.error(err); process.exitCode=1; });

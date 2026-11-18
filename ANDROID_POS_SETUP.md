@@ -274,3 +274,7 @@ locked-screen duty, Stop from notification, offline/reconnect, pairing revocatio
 12-hour expiry and battery restrictions. Current automated browser bridge mocks
 and Java syntax checks are not physical-device verification. See the README's
 Delivery Partners & Dispatch section for endpoint/privacy/retention details.
+
+### Print a completed order on a Bluetooth receipt roll
+
+In the updated POS **Android APK**, pair the powered-on printer in the phone’s Bluetooth settings. In Orders & Fulfillment → Completed, open **Receipt**, choose the roll (58 mm / 384 print dots or 80 mm / 576 print dots), and tap **Print via Bluetooth**. Allow Nearby devices if Android asks, then select the printer by name/address. The list contains paired Classic devices, not a scan of nearby printers; choose only your printer. This sends the branded receipt as an ESC/POS raster directly, without a PDF or Android print service. It requires a Bluetooth Classic SPP printer supporting GS v 0 raster graphics. BLE-only, USB and vendor-proprietary printers are not supported by this route. If transmission fails or times out, check the paper before retrying to avoid duplicate copies. Browser printing and audit report printing still use their existing print dialogs.
