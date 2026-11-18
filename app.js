@@ -1131,14 +1131,16 @@
   function printReceiptModal(id) {
     const s = DB.getSale(id);
     if (!s) return toast("Sale record not found", false);
+    const posted = AuditExports.posted(s);
     const rcSheet = $("#receiptSheet");
-    if (rcSheet) rcSheet.innerHTML = receiptHTML(s);
+    if (!posted && rcSheet) rcSheet.innerHTML = receiptHTML(s);
     openModal(`
       <button class="modal-x" data-close>×</button>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3 class="serif" style="margin:0">80mm Receipt Printout</h3>
         <button class="btn primary sm" id="btnTriggerPrint">${Icons.svg("printer", "ico-14")} Print 80mm</button>
       </div>
+      <p class="muted small">Bluetooth printer missing? Pair it in device settings first. On Android, enable a print service that supports your printer under Settings → Printing, then choose the printer in the print dialog. Pairing alone does not add a print destination.</p>
       ${receiptHTML(s)}
       <div class="modal-actions" style="margin-top:14px">
         <button class="btn ghost" data-close>Close</button>
@@ -1146,6 +1148,11 @@
       </div>
     `);
     const doPrint = () => {
+      if (posted) {
+        try { ReceiptPrinter.printReceipt(s, DB.getSettings(), "receipt"); }
+        catch (error) { toast(error.message, false); }
+        return;
+      }
       const sheet = $("#receiptSheet");
       if (sheet) sheet.innerHTML = receiptHTML(s);
       window.print();
@@ -3593,7 +3600,10 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     return ReceiptPrinter.printInvoices(auditSales(), selection, DB.getSettings(), $("#auditPrintPaper")?.value || "a4");
   }));
   window.addEventListener("adonai-receipt-print-result", event => {
-    if (currentView !== "customers" || !viewReady) return;
+    if (currentView !== "customers" || !viewReady) {
+      if (event.detail?.status === "error") toast(event.detail.message || "Printing could not open.", false);
+      return;
+    }
     auditPrintStatus(event.detail?.message || "Choose a printer in system print.", event.detail?.status === "error");
   });
   if (auditSearchEl) auditSearchEl.addEventListener("input", e => { auditTerm = e.target.value.trim().toLowerCase(); clearAuditDownload(); renderAuditLogs(); });
