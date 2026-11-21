@@ -979,7 +979,6 @@
     dropoff: "",
     notes: "",
     detectedLocation: null,
-    locationPricingReviewed: false,
     locationStatus: "Location will be detected when you confirm the order."
   };
 
@@ -1089,13 +1088,18 @@
     }).filter(Boolean);
   }
 
-  // Shoppers pay one flat delivery charge. The internal base-price/transport
-  // allocation that produces it is never surfaced on the storefront.
+  // Shoppers pay ONE delivery charge per order — one trip, one fee. The
+  // highest single-piece transport share sets the charge and every other
+  // piece rides along on the same trip: the fee never multiplies by piece
+  // count or quantity. The internal base-price/transport allocation that
+  // produces it is never surfaced on the storefront. Mirrors the server's
+  // per-order fee rule in api.py (POST /api/orders).
   function cartDeliveryFee(lines) {
-    return lines.reduce((sum, x) => {
+    const highest = lines.reduce((maxFee, x) => {
       const fee = x.p.delivery_fee != null ? x.p.delivery_fee : x.p.checkout_transport_portion;
-      return sum + (Number(fee) || 0) * x.line.qty;
+      return Math.max(maxFee, Number(fee) || 0);
     }, 0);
+    return Math.round(highest);
   }
 
   function renderCart() {
@@ -1242,7 +1246,7 @@
     $("#cartFoot").innerHTML = `
       <div class="claim-summary-box">
         <div class="sum-line"><span>Items (${itemCount}):</span><span>${DB.ugx(subtotal)}</span></div>
-        <div class="sum-line"><span>Delivery fee:</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
+        <div class="sum-line"><span>Delivery fee (one per order):</span><span>${currentDeliveryFee > 0 ? DB.ugx(currentDeliveryFee) : "Free"}</span></div>
         <div class="sum-line total"><strong>Total:</strong><strong class="rust">${DB.ugx(grandTotal)}</strong></div>
       </div>
       <button class="claim-confirm-btn" id="confirmOrder">${
@@ -1270,8 +1274,7 @@
     if (elArea) elArea.addEventListener("change", e => {
       selectedAreaIndex = Number(e.target.value);
       formState.detectedLocation = null;
-      formState.locationPricingReviewed = false;
-      formState.locationStatus = "Selected destination saved. Your current location will be allocated when you confirm.";
+      formState.locationStatus = "Selected destination saved.";
       renderCart();
     });
 
@@ -1342,22 +1345,27 @@
     if (cart.length === 0) return;
 
     btn.disabled = true;
-    btn.textContent = deliveryType === "boda" ? "Detecting your location…" : "Confirming your order…";
+    btn.textContent = "Confirming your order…";
 
     try {
-      // Geolocation is requested only after the customer actively confirms.
-      // Permission denial never blocks checkout; the selected area remains the fallback.
-      const previousAreaIndex = selectedAreaIndex;
-      const previousArea = DELIVERY_AREAS[previousAreaIndex] || DELIVERY_AREAS[0];
-      await detectCurrentLocation();
-      const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
-      if (formState.detectedLocation && !formState.locationPricingReviewed &&
-          (previousAreaIndex !== selectedAreaIndex || previousArea.fee !== areaObj.fee)) {
-        formState.locationPricingReviewed = true;
-        renderCart();
-        toast("Location allocated. Please review the updated delivery total and confirm again.");
-        return;
+      // ONE confirmation places the order — for every payment method, and
+      // especially pay-on-delivery, where the customer's single confirmation
+      // IS the whole checkout. Nothing after this press may ask them to
+      // confirm again or complete another step before the order exists: the
+      // order is created on this press and reaches the POS Fulfillment &
+      // Orders queue within seconds.
+      // Geolocation is requested only after the customer actively confirms,
+      // and only for online-payment deliveries at all: it merely enriches the
+      // delivery audit trail, never blocks or re-prices the order, and is
+      // capped at a few seconds so it can never stall checkout.
+      if (paymentMethod !== "cod" && deliveryType === "boda") {
+        btn.textContent = "Detecting your location…";
+        await Promise.race([
+          detectCurrentLocation(),
+          new Promise(resolve => setTimeout(resolve, 3000))
+        ]);
       }
+      const areaObj = DELIVERY_AREAS[selectedAreaIndex] || DELIVERY_AREAS[0];
       const deliveryFee = deliveryType === "pickup" ? 0 : cartDeliveryFee(cartLines());
       const pickupAddress = S.address || "Kampala, Uganda";
       const areaName = deliveryType === "pickup" ? `Store Pickup (${pickupAddress})` : areaObj.name;
