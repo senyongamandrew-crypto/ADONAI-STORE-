@@ -804,7 +804,12 @@
 
     on(table, cb) { const s = { table, cb }; subs.push(s); return () => { const i = subs.indexOf(s); if (i >= 0) subs.splice(i, 1); }; },
     reloadNow() { state = null; reload(); },
-    refreshOperationalData() { return pullOperationalData(); },
+    // `options.force` re-downloads the store even when the cached revision
+    // matches — what a manual Refresh button wants. Without it the call is a
+    // cheap freshness check (the 2-second poll's mode). The returned boolean
+    // means "changes were applied", NOT "the sync succeeded": use
+    // operationalSyncStatus().online to tell success from failure.
+    refreshOperationalData(options) { return pullOperationalData(options); },
     applyAccessPolicy() { reload(); save(); return pullOperationalData(); },
     operationalSyncStatus() {
       return {
