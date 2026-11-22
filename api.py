@@ -1083,6 +1083,33 @@ def reverse_consignment_order_journals(session, order, staff=None, reason="Consi
 # ============================================================================
 # Online payments (Flutterwave) — lifecycle helpers
 # ============================================================================
+def restore_product_stock(product, quantity):
+    """Return sold units to the rack without ever breaking inventory policy.
+
+    The database enforces one-of-one PRE_LOVED stock — a trigger and a CHECK
+    constraint both raise unless a pre-loved row holds 0 or 1 units. Cancelling
+    an order or expiring an unpaid one used to add the sold quantity straight
+    back, so any pre-loved row whose count came back above 1 (legacy rows with
+    duplicated stock, duplicate item lines, retried restores) raised a database
+    error and failed the whole request with a bare 500 — staff literally could
+    not cancel the order. Clamp to the policy instead: the piece is back on the
+    rack either way, and BRAND_NEW rows restore in full.
+
+    Returns the units actually added to the row.
+    """
+    quantity = max(0, int(quantity or 0))
+    current = max(0, int(product.in_stock_count or 0))
+    condition = product.item_condition.value if isinstance(product.item_condition, ItemCondition) else str(product.item_condition or "")
+    if condition == ItemCondition.PRE_LOVED.value:
+        target = min(1, current + quantity)
+    else:
+        target = current + quantity
+    product.in_stock_count = target
+    if product.inventory_status == "OUT_OF_STOCK" and target > 0:
+        product.inventory_status = "AVAILABLE"
+    return target - current
+
+
 def expire_stale_flutterwave_orders(session, now=None):
     """
     Release stock on web orders whose payment window lapsed without a verified
@@ -1109,9 +1136,7 @@ def expire_stale_flutterwave_orders(session, now=None):
         for item in order.items:
             product = session.query(Product).filter_by(id=item.product_id).with_for_update().first()
             if product:
-                product.in_stock_count = int(product.in_stock_count or 0) + int(item.qty or 0)
-                if product.inventory_status == "OUT_OF_STOCK" and product.in_stock_count > 0:
-                    product.inventory_status = "AVAILABLE"
+                restore_product_stock(product, item.qty)
         order.payment_status = "failed"
         order.status = "cancelled"
         order.dispatch_status = "Cancelled"
@@ -2979,11 +3004,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         for item in order.items:
                             product = session.query(Product).filter_by(id=item.product_id).with_for_update().first()
                             if product:
-                                quantity = max(0, int(item.qty or 0))
-                                product.in_stock_count = int(product.in_stock_count or 0) + quantity
-                                restored_units += quantity
-                                if product.inventory_status == "OUT_OF_STOCK" and product.in_stock_count > 0:
-                                    product.inventory_status = "AVAILABLE"
+                                restored_units += restore_product_stock(product, item.qty)
                         reverse_consignment_order_journals(
                             session, order, staff=staff_info,
                             reason="Consignment order cancelled", occurred_at=datetime.utcnow(),

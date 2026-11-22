@@ -948,6 +948,7 @@
     if (status === 404) return "This order is no longer on the server. Refresh the queue to load the latest list.";
     if (status === 409) return `${err.message || "This order has changed."} The queue has been refreshed; review its latest status before continuing.`;
     if (status === 0) return "Could not confirm the update because the server could not be reached. Refresh the queue before retrying; the action may have reached the server.";
+    if (status >= 500) return "The server hit a problem saving this change. Nothing was changed — please try again.";
     return (err && err.message) || "The order could not be updated. Please refresh and try again.";
   }
 
@@ -968,7 +969,7 @@
       return updated;
     } catch (err) {
       if ((Number(err && err.status) === 0 || Number(err && err.status) === 404 || Number(err && err.status) === 409) && DB.refreshOperationalData) {
-        try { await DB.refreshOperationalData(); } catch (refreshError) {}
+        try { await DB.refreshOperationalData({ force: true }); } catch (refreshError) {}
       }
       toast(orderActionError(err), false);
       renderSales();
@@ -1000,10 +1001,15 @@
     button.innerHTML = `${Icons.svg("refresh-cw", "ico-14 order-action-spinner")}<span>Refreshing…</span>`;
     renderOrderSyncState();
     try {
-      const refreshed = await DB.refreshOperationalData();
-      if (refreshed) toast("Orders refreshed from the live store");
-      else {
-        const sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+      const refreshed = await DB.refreshOperationalData({ force: true });
+      const sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+      const online = sync ? sync.online === true : !!refreshed;
+      if (online) {
+        // "Nothing new" is a healthy answer, not a failure: auto-sync keeps
+        // this queue current every 2 seconds, so a manual refresh often just
+        // confirms there is nothing more to download.
+        toast(refreshed ? "Orders refreshed from the live store" : "Everything is already up to date");
+      } else {
         toast(sync && (sync.status === 401 || sync.status === 403)
           ? "Staff session needs attention. Sign in again to sync orders."
           : "Could not refresh orders. Showing the last saved list.", false);
@@ -3529,10 +3535,14 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
     renderAuditLogs(); let timer;
     try {
       const refreshed = await Promise.race([
-        DB.refreshOperationalData(),
+        DB.refreshOperationalData({ force: true }),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("The server took too long. Showing the saved copy — tap Refresh receipts to try again.")), 30000); })
       ]);
-      if (!refreshed) throw new Error("Could not refresh receipts. Showing the saved copy — check your connection and try again.");
+      // Only an unreachable server is a failure. A refresh that simply found
+      // nothing new is healthy — auto-sync already keeps postings current.
+      const sync = DB.operationalSyncStatus ? DB.operationalSyncStatus() : null;
+      const online = sync ? sync.online === true : !!refreshed;
+      if (!online) throw new Error("Could not refresh receipts. Showing the saved copy — check your connection and try again.");
     } catch (error) { auditRefreshError = error.message || "Could not refresh saved records."; }
     finally {
       clearTimeout(timer); auditRefreshing = false;

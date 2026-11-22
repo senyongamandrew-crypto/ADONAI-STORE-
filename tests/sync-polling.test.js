@@ -51,5 +51,30 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 30));
   notifications = 0;
   await DB.refreshOperationalData();
   assert(notifications === 0, "next poll after an update is quiet");
+
+  // 4. A refresh that finds nothing new is HEALTHY, not a failure: the call
+  //    reports "nothing applied" while the sync state stays online. Refresh
+  //    buttons must key their error messages on online, never on this boolean.
+  const appliedAgain = await DB.refreshOperationalData();
+  assert(appliedAgain === false, "no-change refresh reports nothing applied");
+  const freshState = DB.operationalSyncStatus();
+  assert(freshState.online === true, "no-change refresh still reports the sync as online");
+  assert(!!freshState.last_synced_at, "no-change refresh still stamps when the server was reached");
+
+  // 5. A forced refresh bypasses the revision short-circuit and re-downloads
+  //    even though the revision matches — what a manual Refresh button wants.
+  requests.length = 0;
+  serverProductName = "Green skirt";
+  const forced = await DB.refreshOperationalData({ force: true });
+  assert(requests.length === 1 && requests[0] === "", "forced refresh re-downloads instead of asking 'unchanged?' (" + JSON.stringify(requests) + ")");
+  assert(forced === true, "forced refresh reports the applied changes");
+  assert(DB.listProducts().some(p => p.name === "Green skirt"), "forced refresh replaces the local store");
+
+  // 6. Only a request that never reached the server reports offline — the
+  //    real signal behind every "Could not refresh" message.
+  window.fetch = async () => ({ ok: false, status: 502, json: async () => ({}) });
+  const failed = await DB.refreshOperationalData({ force: true });
+  assert(failed === false, "a failed refresh also reports nothing applied");
+  assert(DB.operationalSyncStatus().online === false, "a failed refresh reports the sync as offline — the real error signal");
   window.close();
 })().catch(error => { console.error(error); process.exitCode = 1; });
