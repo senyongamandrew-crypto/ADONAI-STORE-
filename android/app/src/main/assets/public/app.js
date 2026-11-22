@@ -948,6 +948,7 @@
     if (status === 404) return "This order is no longer on the server. Refresh the queue to load the latest list.";
     if (status === 409) return `${err.message || "This order has changed."} The queue has been refreshed; review its latest status before continuing.`;
     if (status === 0) return "Could not confirm the update because the server could not be reached. Refresh the queue before retrying; the action may have reached the server.";
+    if (status >= 500) return "The server hit a problem saving this change. Nothing was changed — please try again.";
     return (err && err.message) || "The order could not be updated. Please refresh and try again.";
   }
 
