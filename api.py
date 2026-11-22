@@ -3048,8 +3048,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         raise ValueError("Every order item requires a product ID")
                     qty = parse_positive_int(item.get("qty", 1), f"Quantity for {pid}")
                     requested[pid] = requested.get(pid, 0) + qty
-                # Ignore client-supplied flat fees. They are recalculated from
-                # the catalog's explicit checkout transport portions below.
+                # Ignore client-supplied flat fees. The single per-order
+                # delivery fee is recalculated below from the catalog's
+                # checkout transport portions.
             except ValueError as exc:
                 return json_response({"ok": False, "error": str(exc)}, status=400)
 
@@ -3101,10 +3102,20 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                     products[pid] = prod
                     active_locks[pid] = own_lock
 
-                delivery_fee = 0 if body.get("delivery_type", "boda") == "pickup" else sum(
-                    whole_money((products[pid].checkout_transport_portion if products[pid].checkout_transport_portion is not None else (products[pid].total_transport_cost or 0) * 0.5) * requested[pid])
-                    for pid in requested
-                )
+                # ONE delivery fee per order. A single boda/courier trip
+                # carries the whole cart, so the shopper pays the highest
+                # single-piece transport share exactly once — never once per
+                # piece and never multiplied by quantity. Store pickup is
+                # free. (The storefront cart preview mirrors this rule.)
+                if body.get("delivery_type", "boda") == "pickup":
+                    delivery_fee = 0
+                else:
+                    per_piece_checkout_portion = [
+                        (prod.checkout_transport_portion if prod.checkout_transport_portion is not None
+                         else (prod.total_transport_cost or 0) * 0.5)
+                        for prod in products.values()
+                    ]
+                    delivery_fee = whole_money(max(per_piece_checkout_portion)) if per_piece_checkout_portion else 0
                 # SECURITY: only accept well-formed client order IDs
                 # (alphanumeric/dash/underscore); anything else is replaced
                 # with a server-generated identifier.
@@ -3175,14 +3186,19 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                             own_lock.expires_at = now + timedelta(minutes=5)
 
                 grand_total = subtotal + delivery_fee
-                # Internally classify the complete catalog transport cost as one
-                # transport-fee revenue line. Customers only see the checkout
-                # half as their delivery fee; the embedded half stays hidden in
-                # the product price but is included in this ledger total.
+                # Internally classify transport as its own revenue line so the
+                # books show what delivery actually earned on this sale: the
+                # embedded half baked into each piece's price, plus the ONE
+                # delivery fee collected at checkout. This split mirrors the
+                # charge exactly — sales revenue stays the base-price portion
+                # and the journal balances (debit total = credit total).
                 transport_total = sum(
-                    whole_money((products[pid].total_transport_cost or 0) * requested[pid])
+                    whole_money((products[pid].embedded_transport_portion if products[pid].embedded_transport_portion is not None else (products[pid].total_transport_cost or 0) * 0.5) * requested[pid])
                     for pid in requested
-                )
+                ) + delivery_fee
+                # Whole-UGX rounding must never push the transport split above
+                # the sale itself; that would unbalance the journal below.
+                transport_total = min(transport_total, grand_total)
                 tender = body.get("tender") or {}
                 cashier = body.get("cashier") or staff_info or {}
                 tender_type = tender.get("type", "cash" if channel == "pos" else "mobile_money")

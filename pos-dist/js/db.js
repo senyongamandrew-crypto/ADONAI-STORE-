@@ -433,11 +433,17 @@
     if (operationalSyncInFlight || typeof fetch === "undefined") return operationalSyncInFlight || Promise.resolve(false);
     const ready = typeof Auth !== "undefined" && Auth.ready ? Auth.ready() : Promise.resolve();
     const forceFull = !!(options && options.force) || Date.now() - operationalSyncFullAt > FULL_SYNC_EVERY_MS;
+    // A hung connection must never wedge the poll loop: abort the request
+    // after 20 seconds so the next tick retries and the Orders panel recovers
+    // on its own instead of freezing on a stale list.
+    const syncAbort = typeof AbortController === "function" ? new AbortController() : null;
+    const syncAbortTimer = syncAbort ? setTimeout(() => syncAbort.abort(), 20000) : null;
     operationalSyncInFlight = ready.then(() => fetch(apiUrl("/api/sync/pull"), {
       method: "POST",
       headers: apiHeaders(),
       body: JSON.stringify({ if_revision: forceFull ? "" : currentSyncRevision() }),
-      cache: "no-store"
+      cache: "no-store",
+      signal: syncAbort ? syncAbort.signal : undefined
     })).then(async response => {
       let data = null;
       try { data = await response.json(); } catch (e) {}
@@ -476,7 +482,10 @@
       operationalSyncStatusCode = 0;
       broadcast("sync");
       return false;
-    }).finally(() => { operationalSyncInFlight = null; });
+    }).finally(() => {
+      if (syncAbortTimer) clearTimeout(syncAbortTimer);
+      operationalSyncInFlight = null;
+    });
     return operationalSyncInFlight;
   }
 
@@ -508,13 +517,20 @@
       // storefronts current when an Android terminal saves System Parameters.
       pullStoreSettings();
       if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
-      // Freshness is checked every few seconds with a tiny revision request; the full store is only
-      // downloaded when it actually changed. Store settings are polled less often.
+      // Freshness is checked with a tiny revision request; the full store is
+      // only downloaded when it actually changed. Staff consoles poll every
+      // 2 seconds — the cadence the Orders panel promises — so a web order
+      // reaches Fulfillment & Orders within seconds of the customer's
+      // confirmation. The operational poll must NOT pause while the tab is
+      // backgrounded: a POS tablet with another app on top still has to
+      // receive orders (the browser's own background throttling is the only
+      // limit we accept). Storefront stock stays a 4-second, visibility-gated
+      // poll; store settings are polled less often.
       window.setInterval(() => {
-        if (!document.hidden) {
-          if (window.__ADONAI_STOREFRONT__ === true) pullProducts(true);
-          else pullOperationalData();
-        }
+        if (window.__ADONAI_STOREFRONT__ !== true) pullOperationalData();
+      }, 2000);
+      window.setInterval(() => {
+        if (window.__ADONAI_STOREFRONT__ === true && !document.hidden) pullProducts(true);
       }, 4000);
       window.setInterval(() => { if (!document.hidden) pullStoreSettings(); }, 10000);
 
