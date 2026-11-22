@@ -68,6 +68,7 @@ jobs:
           python -m unittest discover -s tests -p test_dispatch.py -v
           python -m unittest discover -s tests -p test_checkout_orders.py -v
           python -m unittest discover -s tests -p test_order_cancellation.py -v
+          python -m unittest discover -s tests -p test_tag_codes.py -v
           python -m unittest discover -s tests -p test_apk_packaging.py -v
           python -m unittest discover -s tests -p test_delivery_apk_packaging.py -v
           python tests/test_multi_tier_grading.py

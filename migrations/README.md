@@ -1,5 +1,13 @@
 # Render PostgreSQL migrations
 
+## Stock-tag codes for small thermal labels — 2026-11-21
+
+Run `20261121_stock_tag_codes.sql` after the direct-upload migration. It adds `products.tag_code VARCHAR(20)` with a unique index and backfills one short sequential code per piece (1001, 1002, …). Catalog Intake prints that code as Code 128 on **32 × 16 mm** tags — 2 per row, 5 rows per 80 mm roll, with dashed cut guides — straight to a Bluetooth ESC/POS printer, so the label never becomes a PDF. `db_init.py` installs the column, the index and the backfill at startup; `POST /api/products/tag-codes` allocates codes for pieces created by direct Supabase inserts.
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/20261121_stock_tag_codes.sql
+```
+
 ## Direct-upload supplier catalog intake — 2026-10-25
 
 Run `20261025_direct_supplier_upload.sql` after the dynamic category schemas migration. It adds `supplier_name`, `fixed_unit_cost NUMERIC(12,2) CHECK (>= 0)` and `base_retail_price NUMERIC(12,2) CHECK (>= 0)` to `products` (the physical relation behind the `catalog_items` view — deployments that carry `catalog_items` as a real table get the literal `ALTER TABLE catalog_items` statements), exposes the three columns on the `catalog_items` view alongside intake-vocabulary aliases (`item_name`, `catalog_group`, `size_availability`, `condition_notes`), and installs an `INSTEAD OF INSERT` trigger so the Python ingestion service (`supplier_ingestion.py`) can insert piece-by-piece supplier uploads straight into `catalog_items` via Supabase/PostgREST. `db_init.py` also adds the columns automatically at startup. Full guide: [DIRECT_SUPPLIER_UPLOAD.md](../DIRECT_SUPPLIER_UPLOAD.md).

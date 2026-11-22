@@ -9,6 +9,7 @@ import os
 import uuid
 from sqlalchemy import inspect, or_, text
 
+import tag_codes
 from database import IS_POSTGRES, Base, engine, get_db, verify_database_connection
 from security import hash_pin as pbkdf2_hash_pin, canonical_image_url
 from models import (
@@ -212,6 +213,9 @@ def apply_additive_schema_migrations():
             ("supplier_name", "VARCHAR(255)"),
             ("fixed_unit_cost", "NUMERIC(12,2)"),
             ("base_retail_price", "NUMERIC(12,2)"),
+            # Small thermal stock tags (32 × 16 mm Code 128). Assigned by the
+            # allocator in tag_codes.py; see migrations/20261121_stock_tag_codes.sql.
+            ("tag_code", "VARCHAR(20)"),
         ],
         "order_items": [
             ("item_condition", "VARCHAR(20) NOT NULL DEFAULT 'PRE_LOVED'"),
@@ -378,6 +382,10 @@ def apply_additive_schema_migrations():
             "CREATE INDEX IF NOT EXISTS ix_products_consignment_partner_id ON products(consignment_partner_id)",
             "CREATE INDEX IF NOT EXISTS ix_products_subcategory ON products(subcategory)",
             "CREATE INDEX IF NOT EXISTS ix_products_supplier_name ON products(supplier_name)",
+            # One permanent label per piece: the tag code is the print-time
+            # identity, so the database refuses a duplicate even under two
+            # phones registering stock at the same moment.
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_products_tag_code ON products(tag_code)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_category ON order_items(category)",
             "CREATE INDEX IF NOT EXISTS ix_order_items_consignment_partner_id ON order_items(consignment_partner_id)",
             # Payment-columns indexes for databases whose orders table predates
@@ -398,6 +406,13 @@ def apply_additive_schema_migrations():
             )
 
     backfill_product_slugs()
+    backfill_product_tag_codes()
+
+
+def backfill_product_tag_codes():
+    """Stamp legacy rows and direct Supabase inserts with a stock-tag code."""
+    with get_db() as session:
+        tag_codes.backfill_tag_codes(session)
 
 
 def backfill_product_slugs():

@@ -1518,7 +1518,7 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
           <div class="stock-title-row">
             <div class="grow">
               <div class="stock-name"><span class="inventory-badge-inline ${p.item_condition === "BRAND_NEW" ? "new" : "vintage"}">${p.item_condition === "BRAND_NEW" ? "NEW" : "PRE-LOVED"}</span> ${esc(p.name)}</div>
-              <div class="stock-sku">${esc(p.sku || p.barcode_id || "")}</div>
+              <div class="stock-sku">${esc(p.sku || p.barcode_id || "")}${p.tag_code ? ` · tag ${esc(p.tag_code)}` : ""}</div>
             </div>
             ${inStock ? `<span class="stat-chip ok">AVAILABLE</span>` : `<span class="stat-chip bad">OUT OF STOCK</span>`}
           </div>

@@ -668,6 +668,45 @@
     return t.type;
   }
 
+  /* ---------- stock-tag codes printed on the small thermal labels -------- */
+  /* A 32 × 16 mm label only holds ~99 Code 128 modules, so the full SKU can
+     never be printed there. Each piece gets a short numeric code instead —
+     allocated once by the server and never reused (see tag_codes.py). */
+  function normalizeTagCode(value) {
+    // Staff type the code as it is spoken ("T-1042"). Only that prefix is
+    // forgiven: an interior separator is a different string and must never
+    // fold onto another piece's label.
+    const text = String(value == null ? "" : value).trim().toUpperCase()
+      .replace(/^T[\s-]*/, "").trim();
+    return /^[0-9]{4,6}$/.test(text) ? text : "";
+  }
+
+  /* Allocate (or re-read) the permanent tag code for each saved piece.
+     Idempotent on the server: a reprinted label keeps the same code, so a
+     tag already attached to a garment never changes identity. */
+  async function productTagCodes(ids) {
+    const list = Array.from(new Set((ids || []).map(id => String(id || "").trim()).filter(Boolean)));
+    if (!list.length) return {};
+    const data = await apiRequest("/api/products/tag-codes", {
+      method: "POST", body: JSON.stringify({ product_ids: list })
+    }, true);
+    const codes = Object.assign({}, (data && data.codes) || {});
+    const missing = (data && Array.isArray(data.missing)) ? data.missing : [];
+    if (!Object.keys(codes).length) {
+      throw new Error((data && data.error) || (missing.length
+        ? "These pieces are no longer in the catalog. Refresh the panel and try again."
+        : "The server did not issue a stock-tag code. Try again."));
+    }
+    tx("products", st => {
+      Object.entries(codes).forEach(([id, code]) => {
+        const product = byId(st.products, id);
+        if (product) product.tag_code = code;
+      });
+    });
+    if (missing.length) codes.__missing = missing.join(",");
+    return codes;
+  }
+
   /* ---------- standards-compliant Code 128 barcode generator ---------- */
   const CODE128_PATTERNS = [
     "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212", "221213",
@@ -683,9 +722,13 @@
     "114131", "311141", "411131", "211412", "211214", "211232", "2331112"
   ];
 
-  function generateBarcodeSVG(text, height = 48) {
+  /* Bar geometry in Code 128 *modules*, not pixels. The thermal label
+     renderer needs whole printer dots per module, so it asks for the module
+     map and multiplies by an integer scale — a rasterised SVG would blur the
+     bar edges and turn a scannable label into a grey smear. */
+  function code128Modules(text) {
     const clean = String(text || "").trim();
-    if (!clean) return "";
+    if (!clean) return null;
     const START_B = 104, STOP = 106;
     const codes = [START_B];
     let checkSum = START_B;
@@ -698,28 +741,32 @@
       checkSum += val * (i + 1);
     }
 
-    const checkVal = checkSum % 103;
-    codes.push(checkVal);
+    codes.push(checkSum % 103);
     codes.push(STOP);
 
     const quiet = 10;
-    const rects = [];
+    const bars = [];
     let x = quiet;
-
     codes.forEach(c => {
       const p = CODE128_PATTERNS[c];
       let isBar = true;
       for (let j = 0; j < p.length; j++) {
         const w = parseInt(p[j], 10);
-        if (isBar) {
-          rects.push(`<rect x="${x}" y="0" width="${w}" height="${height}" fill="#1A1410"/>`);
-        }
+        if (isBar) bars.push({ x, w });
         x += w;
         isBar = !isBar;
       }
     });
+    return { bars, quiet, width: x, total: x + quiet };
+  }
 
-    const totalWidth = x + quiet;
+  function generateBarcodeSVG(text, height = 48) {
+    const clean = String(text || "").trim();
+    if (!clean) return "";
+    const geometry = code128Modules(clean);
+    if (!geometry) return "";
+    const rects = geometry.bars.map(bar => `<rect x="${bar.x}" y="0" width="${bar.w}" height="${height}" fill="#1A1410"/>`);
+    const totalWidth = geometry.total;
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" class="real-barcode-svg" style="width:100%;max-width:240px;height:${height}px;display:block;margin:0 auto;" shape-rendering="crispEdges">
       <rect width="${totalWidth}" height="${height}" fill="#ffffff"/>
       ${rects.join("")}
@@ -950,7 +997,14 @@
       reload();
       const c = String(code || "").trim().toUpperCase();
       const p = state.products.find(x => x.barcode_id.toUpperCase() === c || x.sku.toUpperCase() === c);
-      return p ? Object.assign({}, p) : null;
+      if (p) return Object.assign({}, p);
+      // Small thermal tags carry only a short numeric stock-tag code; staff
+      // may type it as "1042" or "T-1042". Nothing else is allowed to match a
+      // bare code: two labels resolving to one garment is a stock error.
+      const tag = normalizeTagCode(code);
+      if (!tag) return null;
+      const matches = state.products.filter(x => normalizeTagCode(x.tag_code) === tag);
+      return matches.length === 1 ? Object.assign({}, matches[0]) : null;
     },
     async addProduct(input) {
       const payload = Object.assign({}, input || {});
@@ -1553,6 +1607,9 @@
     ugx(n) { return "UGX " + money(n).toLocaleString("en-US"); },
     laneOf: orderLanes,
     barcodeSVG: generateBarcodeSVG,
+    code128Modules: code128Modules,
+    normalizeTagCode: normalizeTagCode,
+    tagCodes: productTagCodes,
     apiUrl: apiUrl,
     canonicalMediaRef: canonicalMediaRef
   };
