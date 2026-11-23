@@ -13,10 +13,35 @@
     // the only format that never passes through Android's PDF print dialog.
     mini: { name: "Thermal · 32 × 16 mm stock tags (80 mm roll)", width: 32, height: 16, thermal: true }
   };
+  const PAPER_KEY = "adonai.tag-paper.v1";
   // Layout sample for the thermal preview — never a real catalog piece.
   const SAMPLE_TAG = { id: "LAYOUT-ONLY", name: "Cotton Shirt", size: "M", category: "Tops & Shirts", tag_code: "1001" };
   let tagDialog = null;
   let printing = false;
+
+  /* The installed Android app can hand a finished 1-bit raster to a paired
+     Bluetooth ESC/POS printer. That printer only understands raster/receipt
+     commands: every other paper choice below is a PDF print job, and a receipt
+     printer renders those bytes as garbage characters in its alternate
+     character set. So when the bridge exists the thermal strip is the safe
+     default and the PDF sizes are labelled and confirmed before use. */
+  function thermalBridge() {
+    return !!(global.Android && typeof global.Android.printThermalReceipt === "function" && global.ThermalTags);
+  }
+  function paperKeys(bridge) {
+    const keys = Object.keys(FORMATS);
+    return bridge && FORMATS.mini ? ["mini"].concat(keys.filter(key => key !== "mini")) : keys;
+  }
+  function paperName(format, bridge) {
+    if (!bridge || format.thermal) return format.name;
+    return format.name + " — phone print dialog (PDF)";
+  }
+  function defaultPaper(bridge) {
+    let stored = "";
+    try { stored = localStorage.getItem(PAPER_KEY) || ""; } catch (e) {}
+    if (FORMATS[stored] && (FORMATS[stored].thermal ? bridge : true)) return stored;
+    return bridge ? "mini" : "label";
+  }
 
   function dialog(id, html, onClose) {
     const previous = doc.activeElement;
@@ -167,23 +192,32 @@
     let model;
     try { model = tagModel(sample ? sampleProduct : productById(id), sample); }
     catch (error) { notify(error.message); return; }
-    let preferred = "label";
-    try { preferred = localStorage.getItem("adonai.tag-paper.v1") || "label"; } catch (e) {}
-    if (!FORMATS[preferred]) preferred = "label";
+    const bridge = thermalBridge();
+    const preferred = defaultPaper(bridge);
     const current = dialog("garmentTagDialog", `
       <div class="gt-heading"><div><p class="gt-eyebrow">${sample ? "CLEAN GARMENT TAG · LAYOUT PREVIEW" : "SAVED GARMENT · READY TO ATTACH"}</p><h2 id="garmentTagDialogTitle">${sample ? "Garment tag preview" : "Print garment tag"}</h2></div><button class="gt-icon-button" type="button" data-gt-close aria-label="Close tag preview">×</button></div>
       <p class="gt-description">${sample ? "This layout is an example, not a saved catalog item. Print a saved garment for a working checkout barcode." : "The barcode identifies this saved garment. Checkout retrieves its current catalog price."}</p>
       <div class="gt-tag-stage" id="garmentTagPreview"></div>
-      <div class="gt-print-options"><label for="gtPaper">Paper / tag size<select id="gtPaper">${Object.entries(FORMATS).map(([key, format]) => `<option value="${key}"${key === preferred ? " selected" : ""}>${format.name}</option>`).join("")}</select></label><label for="gtCopies">Copies<input id="gtCopies" type="number" inputmode="numeric" min="1" max="100" value="1" /></label></div>
+      <div class="gt-print-options"><label for="gtPaper">Paper / tag size<select id="gtPaper">${paperKeys(bridge).map(key => `<option value="${key}"${key === preferred ? " selected" : ""}>${paperName(FORMATS[key], bridge)}</option>`).join("")}</select></label><label for="gtCopies">Copies<input id="gtCopies" type="number" inputmode="numeric" min="1" max="100" value="1" /></label></div>
+      <p class="gt-pdf-warning" id="gtPdfWarning" role="alert" hidden></p>
       <p class="gt-message" id="gtPrintMessage" role="status" aria-live="polite"></p>
       <p class="gt-print-help">Print at <strong>100% / Actual size</strong>, with browser headers and footers off. Attach the label to a hangtag, not directly to fabric. A4 tags include cut lines.</p>
       <div class="gt-actions"><button class="btn" type="button" data-gt-close>Close</button><button class="btn primary" type="button" id="gtPrintButton">Print ${sample ? "layout" : "tag"}</button></div>`, () => { if (tagDialog === current) tagDialog = null; });
     tagDialog = current;
-    const paper = current.root.querySelector("#gtPaper"), copies = current.root.querySelector("#gtCopies"), message = current.root.querySelector("#gtPrintMessage"), button = current.root.querySelector("#gtPrintButton"), help = current.root.querySelector(".gt-print-help");
+    const paper = current.root.querySelector("#gtPaper"), copies = current.root.querySelector("#gtCopies"), message = current.root.querySelector("#gtPrintMessage"), button = current.root.querySelector("#gtPrintButton"), help = current.root.querySelector(".gt-print-help"), pdfWarning = current.root.querySelector("#gtPdfWarning");
+    const buttonLabel = `Print ${sample ? "layout" : "tag"}`;
+    // A PDF size needs one deliberate second press on a bridge phone.
+    let confirmedPdf = null;
     function liveProduct() { return sample ? Object.assign({}, SAMPLE_TAG) : productById(id); }
+    function pdfWarningText(format) {
+      return `This phone prints to a <strong>Bluetooth receipt printer</strong>. That printer cannot print a PDF, so “${esc(format.name)}” comes out as garbage characters. Use <strong>Thermal · 32 × 16 mm stock tags</strong> instead — or send this PDF to a real label printer.`;
+    }
     function paint() {
       const format = FORMATS[paper.value];
       const stage = current.root.querySelector("#garmentTagPreview");
+      button.textContent = buttonLabel;
+      pdfWarning.hidden = !bridge || !!format.thermal;
+      if (!pdfWarning.hidden) pdfWarning.innerHTML = pdfWarningText(format);
       if (format.thermal) {
         const product = liveProduct();
         const check = thermalFits(product);
@@ -207,9 +241,11 @@
       button.disabled = !fits;
       message.classList.toggle("gt-error", !fits);
       message.textContent = fits ? `${format.name} · Code 128 · ${model.sample ? "layout example" : "saved garment code"}` : "This code is too long for a reliably scannable tag at this size. Choose a larger label or A4 wide tags.";
-      help.innerHTML = "Print at <strong>100% / Actual size</strong>, with browser headers and footers off. Attach the label to a hangtag, not directly to fabric. A4 tags include cut lines.";
+      help.innerHTML = bridge
+        ? "This size is a <strong>PDF print job</strong> through Android's print dialog. On a Bluetooth receipt printer it prints as garbage — use the thermal stock-tag strip."
+        : "Print at <strong>100% / Actual size</strong>, with browser headers and footers off. Attach the label to a hangtag, not directly to fabric. A4 tags include cut lines.";
     }
-    paper.addEventListener("change", () => { try { localStorage.setItem("adonai.tag-paper.v1", paper.value); } catch (e) {} paint(); });
+    paper.addEventListener("change", () => { confirmedPdf = null; try { localStorage.setItem(PAPER_KEY, paper.value); } catch (e) {} paint(); });
     button.addEventListener("click", async () => {
       if (!stockAllowed()) { current.close(); return; }
       const count = Number(copies.value);
@@ -218,11 +254,21 @@
         // Re-read the saved garment and storefront at print time; no draft data.
         if (!sample) model = tagModel(productById(id), false);
         paint();
-        if (FORMATS[paper.value].thermal) {
-          await printThermalTags(liveProduct(), count, message, button);
+        if (FORMATS[paper.value].thermal) { confirmedPdf = null; await printThermalTags(liveProduct(), count, message, button); return; }
+        if (!codeFits(model, FORMATS[paper.value])) return;
+        // Never hand a PDF to the ESC/POS printer by accident: the first press
+        // explains the consequence, the second one opts in deliberately.
+        if (bridge && confirmedPdf !== paper.value) {
+          confirmedPdf = paper.value;
+          button.textContent = "Print PDF anyway";
+          pdfWarning.hidden = false;
+          pdfWarning.innerHTML = pdfWarningText(FORMATS[paper.value]);
+          message.textContent = "PDF job, not a thermal tag — press “Print PDF anyway” only to send it to a real label printer.";
+          message.classList.add("gt-error");
           return;
         }
-        if (!codeFits(model, FORMATS[paper.value])) return;
+        confirmedPdf = null;
+        button.textContent = buttonLabel;
         printTags(model, FORMATS[paper.value], count);
       } catch (error) { message.textContent = error.message; message.classList.add("gt-error"); }
     });
@@ -259,5 +305,5 @@
   global.addEventListener("afterprint", cleanupPrint);
   global.addEventListener("pagehide", () => { if (tagDialog) tagDialog.close(); cleanupPrint(); });
   global.addEventListener("pos-access-change", () => { if (!stockAllowed()) { if (tagDialog) tagDialog.close(); cleanupPrint(); } });
-  global.GarmentTools = { dialog, openTag, websiteLabel, thermalFits };
+  global.GarmentTools = { dialog, openTag, websiteLabel, thermalFits, thermalBridge, defaultPaper };
 })(window);

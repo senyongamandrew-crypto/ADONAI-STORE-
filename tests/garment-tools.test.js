@@ -312,8 +312,73 @@ async function main() {
     assert.doesNotMatch(args[0], /1OF1|UGX|pre.loved|one.of.one|sample|not for sale|printer test|no catalog item/i);
     assert(!/<script|javascript:/i.test(args[0]));
     assert.equal(native.doc.querySelector("#garmentPrintSheet"), null);
+    assert.doesNotMatch(native.doc.querySelector("#gtPaper").options[0].textContent, /PDF/,
+      "without the raster bridge the plain paper names stay");
     console.log("✓ native print bridge receives a self-contained, script-free tag document");
   } finally { native.close(); }
+
+  // A phone whose app can print straight to a Bluetooth ESC/POS printer: only
+  // the 32 × 16 mm raster strip can come out of that printer. The label/A4
+  // sizes are PDF jobs there — default away from them, label them, and require
+  // a deliberate second press instead of feeding the printer binary soup.
+  const paired = fixture("admin.html", [Object.assign({}, PRODUCT, { tag_code: "1042", in_stock_count: 1 })]);
+  try {
+    const pdfJobs = [], rasters = [];
+    paired.win.Android = {
+      printThermalReceipt: (base64, dots, rows) => { rasters.push({ base64, dots, rows }); return true; },
+      printTags: (html, size) => { pdfJobs.push(size); }
+    };
+    const rgba = new Uint8ClampedArray(576 * 8 * 4).fill(255);
+    paired.win.html2canvas = async () => ({ width: 576, height: 8, getContext: () => ({ getImageData: () => ({ data: rgba }) }) });
+    assert.equal(paired.win.GarmentTools.thermalBridge(), true);
+
+    await paired.win.GarmentTools.openTag(PRODUCT.id);
+    const dialog = paired.doc.querySelector("#garmentTagDialog");
+    const paper = dialog.querySelector("#gtPaper");
+    assert.equal(paper.value, "mini", "a Bluetooth-printer phone opens on the thermal strip, never the 80 × 50 PDF");
+    assert.equal(paper.options[0].value, "mini", "the strip that actually prints is listed first");
+    assert.match(paper.options[1].textContent, /phone print dialog \(PDF\)/, "PDF sizes say what they really are");
+    assert.equal(dialog.querySelector("#gtPdfWarning").hidden, true, "no warning on the safe size");
+
+    // The default press is a raster strip — never a PDF job.
+    dialog.querySelector("#gtPrintButton").click(); await settle();
+    assert.deepEqual(pdfJobs, [], "the default tag job is never a PDF");
+    assert.equal(rasters.length, 1, "the default tag job goes down the raster bridge");
+    assert.equal(rasters[0].dots, 576, "an 80 mm roll, not a page");
+    assert.equal(paired.stats.prints, 0);
+    assert.match(dialog.querySelector("#gtPrintMessage").textContent, /sent to the printer/);
+
+    // A PDF size explains the risk and refuses the first press.
+    paper.value = "label"; paper.dispatchEvent(new paired.win.Event("change"));
+    const warning = dialog.querySelector("#gtPdfWarning");
+    assert.equal(warning.hidden, false, "choosing a PDF size warns before printing");
+    assert.match(warning.textContent, /garbage characters/);
+    assert.match(warning.textContent, /Thermal · 32 × 16 mm stock tags/, "the warning names the size that works");
+    assert.match(dialog.querySelector(".gt-print-help").textContent, /PDF print job/);
+    dialog.querySelector("#gtPrintButton").click(); await settle();
+    assert.deepEqual(pdfJobs, [], "one press cannot feed a PDF to the receipt printer");
+    assert.equal(dialog.querySelector("#gtPrintButton").textContent, "Print PDF anyway");
+    assert.match(dialog.querySelector("#gtPrintMessage").textContent, /PDF job, not a thermal tag/);
+    dialog.querySelector("#gtPrintButton").click();
+    assert.deepEqual(pdfJobs, ["label"], "a second press is a deliberate opt-in for a real label printer");
+    assert.equal(rasters.length, 1, "a PDF tag never travels down the raster bridge");
+    assert.equal(paired.stats.prints, 0);
+
+    // A deliberate choice is remembered; the safe strip stays one tap away.
+    dialog.querySelector("[data-gt-close]").click();
+    await paired.win.GarmentTools.openTag(PRODUCT.id);
+    let reopened = paired.doc.querySelector("#garmentTagDialog");
+    assert.equal(reopened.querySelector("#gtPaper").value, "label", "an explicit paper choice is remembered");
+    const back = reopened.querySelector("#gtPaper");
+    back.value = "mini"; back.dispatchEvent(new paired.win.Event("change"));
+    assert.equal(reopened.querySelector("#gtPdfWarning").hidden, true, "the warning clears when the strip is chosen again");
+    reopened.querySelector("[data-gt-close]").click();
+    await paired.win.GarmentTools.openTag(PRODUCT.id);
+    reopened = paired.doc.querySelector("#garmentTagDialog");
+    assert.equal(reopened.querySelector("#gtPaper").value, "mini", "choosing the strip is remembered too");
+    reopened.querySelector("[data-gt-close]").click();
+    console.log("✓ Bluetooth-printer phones default to the raster strip, label PDF sizes as PDF and require a deliberate opt-in");
+  } finally { paired.close(); }
 
   csstree.parse(source("css/garment-tools.css"));
   const server = source("serve.py");
