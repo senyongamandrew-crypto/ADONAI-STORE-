@@ -79,6 +79,11 @@
 .tt-empty { margin: 0 auto; max-width: 260px; font-size: 12px; line-height: 1.7; color: #7a3d33; text-align: center; }
 .gt-print-options { display: grid; grid-template-columns: minmax(0, 1fr) 90px; align-items: end; gap: 14px; margin-top: 20px; }
 .gt-print-help { margin: 10px 0 0; color: #647366; font-size: 11px; line-height: 1.8; }
+/* A Bluetooth receipt printer can only print the raster strip; the label and
+   A4 sizes are PDF jobs that come out as garbage characters there. */
+.gt-pdf-warning { margin: 12px 0 0; padding: 10px 12px; border: 1px solid #e2c7b9; border-left: 3px solid #a2543a; border-radius: 10px; background: #fdf4ef; color: #8a3d29; font-size: 11px; line-height: 1.8; }
+.gt-pdf-warning[hidden] { display: none; }
+.gt-pdf-warning strong { color: #7a3321; }
 .gt-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 #garmentPrintSheet { display: none; }
 .gt-panel button:focus-visible, .gt-panel a:focus-visible, .gt-panel input:focus-visible, .gt-panel select:focus-visible, .scan-tag-button:focus-visible { outline: 3px solid #809875; outline-offset: 3px; }
