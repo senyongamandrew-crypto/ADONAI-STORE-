@@ -7,8 +7,14 @@
     label: { name: "80 × 50 mm label", width: 80, height: 50, page: "80mm 50mm", margin: "0", sheet: false },
     compact: { name: "62 × 40 mm label", width: 62, height: 40, page: "62mm 40mm", margin: "0", sheet: false },
     a4: { name: "A4 · 80 × 50 mm cut-out tags", width: 80, height: 50, page: "A4", margin: "10mm", sheet: true },
-    wide: { name: "A4 · wide tags for long codes", width: 180, height: 60, page: "A4", margin: "10mm", sheet: true }
+    wide: { name: "A4 · wide tags for long codes", width: 180, height: 60, page: "A4", margin: "10mm", sheet: true },
+    // Printed straight to the Bluetooth ESC/POS printer as a 1-bit raster:
+    // 2 tags across, 5 rows, 10 per job, cut apart on the grey lines. This is
+    // the only format that never passes through Android's PDF print dialog.
+    mini: { name: "Thermal · 32 × 16 mm stock tags (80 mm roll)", width: 32, height: 16, thermal: true }
   };
+  // Layout sample for the thermal preview — never a real catalog piece.
+  const SAMPLE_TAG = { id: "LAYOUT-ONLY", name: "Cotton Shirt", size: "M", category: "Tops & Shirts", tag_code: "1001" };
   let tagDialog = null;
   let printing = false;
 
@@ -94,6 +100,18 @@
     // and two 10-module quiet zones. Keep modules at least 0.25 mm on paper.
     return ((model.code.length + 2) * 11 + 13 + 20) * 0.25 <= format.width - 6;
   }
+  function thermalCode(product) {
+    return global.ThermalTags ? ThermalTags.tagCode(product) : "";
+  }
+  function thermalFits(product) {
+    if (!global.ThermalTags) return { fits: false, reason: "This app build needs the stock-tag update. Reload the app and try again." };
+    const code = thermalCode(product);
+    if (!code) return { fits: false, reason: "This piece has no stock-tag code yet. Refresh the catalog, then print the tag again." };
+    const geometry = global.DB && DB.code128Modules ? DB.code128Modules(code) : null;
+    if (!geometry) return { fits: false, reason: "This stock-tag code cannot be printed as Code 128." };
+    const fits = Math.floor((256 - 12) / geometry.total) >= 2;
+    return { fits, reason: fits ? "" : "This code is too wide for a 32 × 16 mm tag. Print the standard 80 × 50 mm tag instead." };
+  }
   function printStyles(format) {
     return `@media print {
       @page { size: ${format.page}; margin: ${format.margin}; }
@@ -120,6 +138,7 @@
     if (style) style.remove();
   }
   function printTags(model, format, copies) {
+    if (format && format.thermal) throw new Error("Stock tags print on the Bluetooth thermal printer. Choose a label size to print a paper tag instead.");
     if (printing) return;
     const markup = Array.from({ length: copies }, () => tagHTML(model)).join("");
     const style = printStyles(format);
@@ -160,10 +179,27 @@
       <p class="gt-print-help">Print at <strong>100% / Actual size</strong>, with browser headers and footers off. Attach the label to a hangtag, not directly to fabric. A4 tags include cut lines.</p>
       <div class="gt-actions"><button class="btn" type="button" data-gt-close>Close</button><button class="btn primary" type="button" id="gtPrintButton">Print ${sample ? "layout" : "tag"}</button></div>`, () => { if (tagDialog === current) tagDialog = null; });
     tagDialog = current;
-    const paper = current.root.querySelector("#gtPaper"), copies = current.root.querySelector("#gtCopies"), message = current.root.querySelector("#gtPrintMessage"), button = current.root.querySelector("#gtPrintButton");
+    const paper = current.root.querySelector("#gtPaper"), copies = current.root.querySelector("#gtCopies"), message = current.root.querySelector("#gtPrintMessage"), button = current.root.querySelector("#gtPrintButton"), help = current.root.querySelector(".gt-print-help");
+    function liveProduct() { return sample ? Object.assign({}, SAMPLE_TAG) : productById(id); }
     function paint() {
       const format = FORMATS[paper.value];
       const stage = current.root.querySelector("#garmentTagPreview");
+      if (format.thermal) {
+        const product = liveProduct();
+        const check = thermalFits(product);
+        stage.style.removeProperty("--gt-tag-width");
+        stage.style.removeProperty("--gt-tag-ratio");
+        stage.innerHTML = check.fits && global.ThermalTags
+          ? `<div class="tt-stage">${ThermalTags.preview(product, 2.8)}</div>`
+          : `<p class="tt-empty">${esc(check.reason)}</p>`;
+        button.disabled = !check.fits;
+        message.classList.toggle("gt-error", !check.fits);
+        message.textContent = check.fits
+          ? `32 × 16 mm · Code 128 ${thermalCode(product)} · ${sample ? "layout example" : "10 tags per sheet, straight to the printer"}`
+          : check.reason;
+        help.innerHTML = "Sends straight to your <strong>Bluetooth thermal printer</strong> — no PDF, no print dialog. Cut along the grey lines.";
+        return;
+      }
       stage.style.setProperty("--gt-tag-width", Math.min(format.width * 4, 440) + "px");
       stage.style.setProperty("--gt-tag-ratio", format.width + " / " + format.height);
       stage.innerHTML = tagHTML(model);
@@ -171,9 +207,10 @@
       button.disabled = !fits;
       message.classList.toggle("gt-error", !fits);
       message.textContent = fits ? `${format.name} · Code 128 · ${model.sample ? "layout example" : "saved garment code"}` : "This code is too long for a reliably scannable tag at this size. Choose a larger label or A4 wide tags.";
+      help.innerHTML = "Print at <strong>100% / Actual size</strong>, with browser headers and footers off. Attach the label to a hangtag, not directly to fabric. A4 tags include cut lines.";
     }
     paper.addEventListener("change", () => { try { localStorage.setItem("adonai.tag-paper.v1", paper.value); } catch (e) {} paint(); });
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       if (!stockAllowed()) { current.close(); return; }
       const count = Number(copies.value);
       if (!Number.isInteger(count) || count < 1 || count > 100) { message.textContent = "Choose 1–100 whole copies."; message.classList.add("gt-error"); copies.focus(); return; }
@@ -181,11 +218,35 @@
         // Re-read the saved garment and storefront at print time; no draft data.
         if (!sample) model = tagModel(productById(id), false);
         paint();
+        if (FORMATS[paper.value].thermal) {
+          await printThermalTags(liveProduct(), count, message, button);
+          return;
+        }
         if (!codeFits(model, FORMATS[paper.value])) return;
         printTags(model, FORMATS[paper.value], count);
       } catch (error) { message.textContent = error.message; message.classList.add("gt-error"); }
     });
     paint();
+  }
+  /* Thermal stock tags: allocate the permanent code once, then send raster
+     data to the Bluetooth bridge. Never a HTML/PDF print job. */
+  async function printThermalTags(product, copies, message, button) {
+    if (!product || !product.id) throw new Error("Save this garment before printing its tag.");
+    button.disabled = true;
+    message.classList.remove("gt-error");
+    message.textContent = "Preparing the stock-tag sheet…";
+    try {
+      const codes = await DB.tagCodes([product.id]);
+      const code = codes[product.id];
+      if (!code) throw new Error("The server did not issue a stock-tag code for this piece. Refresh the catalog and try again.");
+      const tagged = Object.assign({}, product, { tag_code: code });
+      const result = await ThermalTags.print([tagged], { copies });
+      message.textContent = `${result.tags} tag(s) sent to the printer — cut along the grey lines.`;
+    } catch (error) {
+      message.textContent = error.message;
+      message.classList.add("gt-error");
+      throw error;
+    } finally { button.disabled = false; }
   }
   function notify(text) {
     const toast = doc.getElementById("toast");
@@ -198,5 +259,5 @@
   global.addEventListener("afterprint", cleanupPrint);
   global.addEventListener("pagehide", () => { if (tagDialog) tagDialog.close(); cleanupPrint(); });
   global.addEventListener("pos-access-change", () => { if (!stockAllowed()) { if (tagDialog) tagDialog.close(); cleanupPrint(); } });
-  global.GarmentTools = { dialog, openTag, websiteLabel };
+  global.GarmentTools = { dialog, openTag, websiteLabel, thermalFits };
 })(window);

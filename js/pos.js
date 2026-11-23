@@ -286,7 +286,7 @@
       .filter(p => activeDemo === "All" || p.demographic === activeDemo)
       .filter(p => activeCat === "All" || p.category === activeCat)
       .filter(p => activeInventory === "All" || (p.item_condition || "PRE_LOVED") === activeInventory)
-      .filter(p => !term || [p.name, p.brand, p.category, p.desc, p.size, p.color, p.sku, p.barcode_id, p.condition, p.item_condition, p.subcategory, (Array.isArray(p.search_tags) ? p.search_tags : []).join(" ")].join(" ").toLowerCase().includes(term))
+      .filter(p => !term || [p.name, p.brand, p.category, p.desc, p.size, p.color, p.sku, p.barcode_id, p.tag_code, p.condition, p.item_condition, p.subcategory, (Array.isArray(p.search_tags) ? p.search_tags : []).join(" ")].join(" ").toLowerCase().includes(term))
       .sort((a, b) => (b.in_stock_count > 0) - (a.in_stock_count > 0));
     $("#tileGrid").innerHTML = list.length ? list.map(p => {
       const out = p.in_stock_count <= 0;

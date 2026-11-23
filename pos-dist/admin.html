@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="css/admin-overhaul.css?v=1.0" />
 <link rel="stylesheet" href="css/consignment.css?v=1.0" />
 <link rel="stylesheet" href="css/pos-access.css?v=1.0" />
-<link rel="stylesheet" href="css/garment-tools.css?v=1.1" />
+<link rel="stylesheet" href="css/garment-tools.css?v=1.2" />
 <link rel="stylesheet" href="css/garment-media.css?v=1.0" />
 <link rel="stylesheet" href="css/catalog-schemas.css?v=1.2" />
 <link rel="stylesheet" href="css/adaptive-display.css?v=1.1" />
@@ -253,6 +253,7 @@
           <input class="search-wide" id="invSearch" type="search" placeholder="Filter by brand, size, color, keyword…" />
           <select class="sel" id="invStatusSel"></select>
           <button class="btn black" id="btnInvFilter">Filter</button>
+          <button class="btn ghost" id="btnPrintRackTags" title="Print 32 × 16 mm thermal stock tags for the in-stock pieces shown">Print stock tags</button>
         </div>
       </div>
 
@@ -957,7 +958,7 @@
 <script src="js/garment-media.js?v=1.0"></script>
 <script src="js/catalog-schemas.data.js?v=2026.10.18"></script>
 <script src="js/catalog-schemas.js?v=1.2"></script>
-<script src="js/garment-tools.js?v=1.1"></script>
+<script src="js/garment-tools.js?v=1.2"></script>
 <script src="js/file-downloads.js?v=1.0"></script>
 <script src="js/audit-exports.js?v=1.1"></script>
 <script src="js/receipt-printing.js?v=1.0"></script>
@@ -965,6 +966,7 @@
 <script src="js/dispatch-center.js?v=1.0"></script>
 <script src="js/vendor/html2canvas.min.js"></script>
 <script src="js/thermal-receipt.js"></script>
+<script src="js/thermal-tags.js?v=1.0"></script>
 <script src="app.js?v=8.8"></script>
   <script>
     /* Refresh the whole system from the menu: reloads this page at a fresh URL, so the browser

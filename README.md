@@ -505,10 +505,33 @@ After editing the JSON, run `npm run build:schemas` (`tests/catalog-schemas-engi
   camera permission. If an embedded preview blocks the camera, open the
   register in a separate phone-browser tab. The server grants camera access
   only to its own origin; microphone access stays disabled.
-- Printing opens the browser / Android **system print dialog**, including
-  Save as PDF where supported. A working printer driver / Android print
-  service is required. This does **not** claim universal direct Bluetooth
-  thermal-printer support; that needs the exact printer model.
+- Paper tag sizes (80 × 50 / 62 × 40 / A4) open the browser / Android
+  **system print dialog**, including Save as PDF where supported. A working
+  printer driver / Android print service is required. This does **not** claim
+  universal direct Bluetooth thermal-printer support; that needs the exact
+  printer model.
+- **Thermal · 32 × 16 mm stock tags (80 mm roll)** is a different path: the
+  sheet is packed as a 1-bit raster and sent straight to the paired Bluetooth
+  ESC/POS printer through the same `printThermalReceipt` bridge as receipts,
+  so it never becomes a PDF and never opens the print dialog. Two tags print
+  side by side, five rows per job (10 tags on ~85 mm of roll), with grey cut
+  lines: guillotine once down the middle and once between each row. Reach it
+  from **Inventory Rack → Print tag → Paper / tag size**, or label a whole rail
+  at once with **Inventory Rack → Print stock tags**: every in-stock piece the
+  current filters show (up to 50) goes on one strip, each with its permanent
+  code. The job is refused
+  (with an explanation) when the app was opened in a phone browser rather than
+  the ADONAI POS app, because only the app owns the Bluetooth printer.
+- Each piece carries a short **stock-tag code** (`products.tag_code`,
+  4–6 digits) — the only thing that fits a 32 mm tag as a scannable Code 128.
+  The code is allocated once, sequentially and never reused
+  (`tag_codes.py`), so a label already attached to a garment keeps its
+  identity when it is reprinted. Codes are assigned at intake, by
+  `POST /api/products/tag-codes` at print time (which also covers direct
+  Supabase inserts), and by the boot backfill. Scanning or typing `1042`,
+  `T-1042` or `T 1042` at the register resolves to that piece; the code is
+  never published to the storefront. `tests/thermal-tag-scan.test.js` decodes
+  the printed geometry with ZXing to prove 0.25 mm bars still read.
 - The Android wrapper includes scoped WebView + runtime camera permission
   handling and an isolated, script-free native tag-print bridge. Rebuild the
   APK to install native changes. Optional stock-area passwords continue to

@@ -268,6 +268,12 @@ class Product(Base):
     id = Column(String(50), primary_key=True)
     sku = Column(String(50), unique=True, nullable=False, index=True)
     barcode_id = Column(String(50), unique=True, nullable=False, index=True)
+    # Short stock-tag code printed as Code 128 on small thermal labels
+    # (32 × 16 mm). Assigned server-side, sequential and never reused, so a
+    # printed label keeps pointing at exactly one catalog piece for good.
+    # Nullable: legacy rows and direct Supabase inserts are given a code by
+    # the boot backfill / the tag-code allocator.
+    tag_code = Column(String(20), unique=True, nullable=True, index=True)
     name = Column(String(255), nullable=False, index=True)
     brand = Column(String(100), nullable=True, index=True)
     color = Column(String(50), nullable=True)
@@ -450,6 +456,8 @@ class Product(Base):
             "sku": self.sku,
             "slug": self.public_slug,
             "barcode_id": self.barcode_id,
+            # Short code printed as Code 128 on the 32 × 16 mm stock tags.
+            "tag_code": self.tag_code or "",
             "name": self.name,
             "brand": self.brand or "",
             "color": self.color or "",

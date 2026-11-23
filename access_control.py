@@ -176,6 +176,10 @@ STOREFRONT_INTERNAL_FIELDS = (
     "stock_lot_id",
     "lot_grade_id",
     "fulfillment_notes",
+    # The physical stock-tag code identifies a single piece on a rack. It is
+    # internal paperwork: publishing it would let anyone enumerate stock and
+    # forge a label that resolves to a real garment.
+    "tag_code",
 )
 
 

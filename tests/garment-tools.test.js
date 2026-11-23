@@ -24,7 +24,7 @@ function fixture(page, products = []) {
   win.Auth = { ready: async () => {}, guard: () => ({ id: "TEST", name: "Test", role: "cashier" }), locked: () => false, openAccess: () => true, suiteUnlocked: () => true, token: () => "", me: () => null, authHeaders: () => ({}) };
   win.Icons = { svg: () => '<svg aria-hidden="true"></svg>', icon: () => "" };
   win.Intake = { compressImage: async () => "", imageFieldHTML: () => "" };
-  const stats = { saves: 0, prints: 0, holds: 0, stopped: 0, constraints: null, rejectSave: false };
+  const stats = { saves: 0, prints: 0, holds: 0, stopped: 0, constraints: null, rejectSave: false, tagCodes: 0 };
   win.DB = {
     DEMOGRAPHICS: ["Men", "Women", "Children", "Unisex"], CATEGORIES: ["Tops & Shirts", "Shoes"], CONDITIONS: ["Grade A"], ROLE_LABELS: {},
     listProducts: () => products, getProduct: id => products.find(p => p.id === id),
@@ -37,6 +37,8 @@ function fixture(page, products = []) {
       const product = { ...values, id: PRODUCT.id, selling_price: values.base_price + values.total_transport_cost * 0.5 };
       products.push(product); return product;
     },
+    code128Modules: dbDOM.window.DB.code128Modules, normalizeTagCode: dbDOM.window.DB.normalizeTagCode,
+    tagCodes: async ids => { stats.tagCodes++; const out = {}; ids.forEach((id, i) => { out[id] = String(1042 + i); }); return out; },
     findByBarcode: code => products.find(p => [p.sku, p.barcode_id].some(c => String(c).toUpperCase() === code.toUpperCase())) || null,
     acquireInventoryLock: async () => { stats.holds++; }, releaseInventoryLockOwner: async () => {}, pullProducts: () => {}
   };
@@ -51,6 +53,7 @@ function fixture(page, products = []) {
   Object.defineProperty(win.navigator, "mediaDevices", { configurable: true, value: { getUserMedia: async constraints => { stats.constraints = constraints; return stream; } } });
   win.eval(source("js/garment-media.js"));
   win.eval(source("js/garment-tools.js"));
+  win.eval(source("js/thermal-tags.js"));
   win.eval(source("js/audit-exports.js")); win.eval(source("js/receipt-printing.js"));
   return { dom, win, doc: win.document, stats, products, stream, close: () => win.close() };
 }
@@ -123,6 +126,45 @@ async function main() {
     intake.doc.querySelector("#garmentTagDialog [data-gt-close]").click();
     intake.doc.querySelector("#btnPrintLastTag").click(); await settle();
     assert.equal(intake.doc.querySelector("#garmentTagDialog .gt-tag-code").textContent, PRODUCT.sku);
+    // Small thermal stock tags (32 × 16 mm): the dialog previews the exact
+    // markup that is rasterised, allocates the permanent code, and never
+    // falls back to window.print / the Android PDF dialog.
+    intake.products[0].tag_code = "1042";
+    intake.doc.querySelector("#btnPrintLastTag").click(); await settle();
+    const thermalDialog = intake.doc.querySelector("#garmentTagDialog");
+    const thermalPaper = thermalDialog.querySelector("#gtPaper");
+    thermalPaper.value = "mini";
+    thermalPaper.dispatchEvent(new intake.win.Event("change"));
+    assert(thermalDialog.querySelector(".tt-preview"), "the 32 × 16 mm tag previews from the printable markup");
+    assert.match(thermalDialog.querySelector("#gtPrintMessage").textContent, /1042/, "the dialog shows the permanent tag code");
+    assert.match(thermalDialog.querySelector(".gt-print-help").textContent, /Bluetooth thermal printer/);
+    const printsBeforeTag = intake.stats.prints, codesBeforeTag = intake.stats.tagCodes;
+    thermalDialog.querySelector("#gtPrintButton").click(); await settle();
+    assert.equal(intake.stats.prints, printsBeforeTag, "a thermal tag is never a browser/PDF print job");
+    assert.equal(intake.stats.tagCodes, codesBeforeTag + 1, "the permanent code is allocated before printing");
+    assert.match(thermalDialog.querySelector("#gtPrintMessage").textContent, /Bluetooth thermal printer/,
+      "without the app's print bridge the panel says so instead of opening a PDF");
+    thermalDialog.querySelector("[data-gt-close]").click();
+    // A piece with no allocated code cannot produce a label that scans.
+    delete intake.products[0].tag_code;
+    intake.doc.querySelector("#btnPrintLastTag").click(); await settle();
+    const uncoded = intake.doc.querySelector("#garmentTagDialog");
+    uncoded.querySelector("#gtPaper").value = "mini";
+    uncoded.querySelector("#gtPaper").dispatchEvent(new intake.win.Event("change"));
+    assert.equal(uncoded.querySelector("#gtPrintButton").disabled, true, "no code means no label");
+    assert.match(uncoded.querySelector("#gtPrintMessage").textContent, /no stock-tag code/);
+    uncoded.querySelector("[data-gt-close]").click();
+
+    // Whole-rack labelling: one job tags every in-stock piece the filters show,
+    // and it never becomes a browser/PDF print job either.
+    intake.products[0].in_stock_count = 1;
+    intake.products[0].tag_code = "1042";
+    const rackPrints = intake.stats.prints, rackCodes = intake.stats.tagCodes;
+    intake.doc.querySelector("#btnPrintRackTags").click(); await settle();
+    assert.equal(intake.stats.prints, rackPrints, "a rack tag strip is never a browser/PDF job");
+    assert(rackCodes < intake.stats.tagCodes, "the sheet asks the server for the permanent codes first");
+    assert.match(intake.doc.querySelector("#toast").textContent, /Bluetooth thermal printer/);
+
     // Optional area protections also apply to open print previews.
     intake.win.PosAccess = { canUse: () => false, ensure: async () => false, areaForView: () => null };
     intake.win.dispatchEvent(new intake.win.Event("pos-access-change"));

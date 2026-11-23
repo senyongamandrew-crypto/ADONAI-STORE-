@@ -51,6 +51,7 @@ from security import (
     canonical_image_url,
     verify_pin,
 )
+from tag_codes import TAG_CODE_CEILING, allocate_tag_code, normalize_tag_code
 from models import (
     AccountingJournalEntry,
     AccountingJournalLine,
@@ -466,6 +467,9 @@ def json_response(data, status=200):
 
 
 KAMPALA_TZ = ZoneInfo("Africa/Kampala")
+# One thermal print job carries at most this many distinct pieces; the sheet
+# holds 10 tags, so this is a generous ceiling for a batch re-tag of a rail.
+TAG_CODE_BATCH_LIMIT = 200
 FINANCE_MANAGER_ROLES = {"admin", "manager"}
 ACCOUNT_NAMES = {
     "1000": "Cash Drawer",
@@ -653,22 +657,24 @@ def compute_grade_unit_costs(total_landed: int, grades: list[dict]) -> list[int]
 
 
 def lookup_product(session, identifier: str):
-    """Resolve a catalog piece by permalink slug, id, SKU or barcode."""
+    """Resolve a catalog piece by permalink slug, id, SKU, barcode or tag code.
+
+    The tag code is what a phone camera reads off the small 32 × 16 mm label
+    printed from Catalog Intake, so it has to resolve here as well.
+    """
     needle = str(identifier or "").strip()
     if not needle:
         return None
-    return (
-        session.query(Product)
-        .filter(
-            or_(
-                Product.slug == needle,
-                Product.id == needle,
-                func.upper(Product.sku) == needle.upper(),
-                func.upper(Product.barcode_id) == needle.upper(),
-            )
-        )
-        .first()
-    )
+    tag_code = normalize_tag_code(needle)
+    filters = [
+        Product.slug == needle,
+        Product.id == needle,
+        func.upper(Product.sku) == needle.upper(),
+        func.upper(Product.barcode_id) == needle.upper(),
+    ]
+    if tag_code:
+        filters.append(Product.tag_code == tag_code)
+    return session.query(Product).filter(or_(*filters)).first()
 
 
 def unique_product_slug(session, name: str, sku: str, product_id: str, requested: str = "") -> str:
@@ -2064,6 +2070,59 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
         # ----------------------------------------------------
         # 2. Products API (Public Catalog Read, Protected Intake)
         # ----------------------------------------------------
+        if clean_path == "/api/products/tag-codes" and method == "POST":
+            # Small thermal stock tags. Allocates each piece's permanent tag
+            # code once and returns the same code on every reprint, so a label
+            # that stays on a garment never changes identity. Idempotent and
+            # staff-only: the code is internal paperwork, not shopper data.
+            staff_info, auth_error = authenticated_or_response(headers, body, query_params)
+            if auth_error:
+                return auth_error
+            if str((staff_info or {}).get("role", "")).lower() == "rider":
+                return json_response({"ok": False, "error": "Stock staff authorization is required"}, status=403)
+            requested = (body or {}).get("product_ids") if isinstance(body, dict) else None
+            if not isinstance(requested, list) or not requested:
+                return json_response({"ok": False, "error": "Send the saved pieces to tag."}, status=400)
+            if len(requested) > TAG_CODE_BATCH_LIMIT:
+                return json_response(
+                    {"ok": False, "error": f"Tag at most {TAG_CODE_BATCH_LIMIT} pieces per print job."},
+                    status=400,
+                )
+            wanted, seen = [], set()
+            for value in requested:
+                pid = clean_text(value, 50)
+                if pid and pid not in seen:
+                    seen.add(pid)
+                    wanted.append(pid)
+            if not wanted:
+                return json_response({"ok": False, "error": "Send the saved pieces to tag."}, status=400)
+            with get_db() as session:
+                products = (
+                    session.query(Product)
+                    .filter(Product.id.in_(wanted))
+                    .order_by(Product.id.asc())
+                    .with_for_update()
+                    .all()
+                )
+                codes, exhausted = {}, []
+                for product in products:
+                    code = allocate_tag_code(session, product)
+                    if code:
+                        codes[product.id] = code
+                    else:
+                        exhausted.append(product.id)
+                session.flush()
+            missing = [pid for pid in wanted if pid not in codes]
+            return json_response({
+                "ok": not exhausted,
+                "codes": codes,
+                "missing": [pid for pid in missing if pid not in exhausted],
+                "error": (
+                    f"Tag codes are exhausted at {TAG_CODE_CEILING}. Export the catalog before adding more stock."
+                    if exhausted else None
+                ),
+            }, status=507 if exhausted else 200)
+
         if clean_path == "/api/products" and method == "GET":
             with get_db() as session:
                 q = session.query(Product)
@@ -2077,6 +2136,7 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                         Product.brand.ilike(pattern),
                         Product.sku.ilike(pattern),
                         Product.barcode_id.ilike(pattern),
+                        Product.tag_code.ilike(pattern),
                         Product.desc.ilike(pattern)
                     ))
                 
@@ -2414,6 +2474,9 @@ def handle_api_request(method: str, path: str, query_params: dict, body_bytes: b
                 apply_catalog_schema_result(prod, schema_result, body)
                 apply_catalog_copy_fields(prod, body, refresh_tags=True)
                 session.add(prod)
+                # Permanent stock-tag code: a printed Code 128 label has to keep
+                # resolving to this exact piece for as long as it is attached.
+                allocate_tag_code(session, prod)
                 session.flush()
                 try:
                     media.attach_to_product(session, prod, body, staff_info or {})
