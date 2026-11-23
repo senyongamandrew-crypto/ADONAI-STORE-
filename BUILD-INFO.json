@@ -1,0 +1,21 @@
+{
+  "app_name": "Adonai POS Preview",
+  "package": "com.adonaithrift.pos.preview",
+  "version": "2.5.0-preview",
+  "version_code": 20500,
+  "preview_installs_alongside_existing_app": true,
+  "source_commit": "1c32749815cf1435f0b980beb77640782588c5d0",
+  "repository": "senyongamandrew-crypto/ADONAI-STORE-",
+  "workflow_run": "45238371595",
+  "apk_sha256": "6cfe23593ff5ceb85373aef522610aa97bf15d532e2cad6fad3b5f61da3ea623",
+  "signing_certificate_sha256": "17cc94200b14ff0b351a0fd5685992275d7f85500ace26c404f71537de277b15",
+  "verified": [
+    "Gradle compiled Android bytecode/resources",
+    "APK signature",
+    "compiled foreground-location manifest",
+    "native rider bridge/service bytecode",
+    "17 source-identical packaged screens/scripts/styles"
+  ],
+  "backend_deployed_by_this_build": false,
+  "real_phone_screen_lock_gps_verified": false
+}
