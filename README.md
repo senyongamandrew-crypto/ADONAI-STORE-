@@ -516,7 +516,10 @@ After editing the JSON, run `npm run build:schemas` (`tests/catalog-schemas-engi
   so it never becomes a PDF and never opens the print dialog. Two tags print
   side by side, five rows per job (10 tags on ~85 mm of roll), with grey cut
   lines: guillotine once down the middle and once between each row. Reach it
-  from **Inventory Rack → Print tag → Paper / tag size**. The job is refused
+  from **Inventory Rack → Print tag → Paper / tag size**, or label a whole rail
+  at once with **Inventory Rack → Print stock tags**: every in-stock piece the
+  current filters show (up to 50) goes on one strip, each with its permanent
+  code. The job is refused
   (with an explanation) when the app was opened in a phone browser rather than
   the ADONAI POS app, because only the app owns the Bluetooth printer.
 - Each piece carries a short **stock-tag code** (`products.tag_code`,

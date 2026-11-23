@@ -1501,12 +1501,47 @@ We will keep you updated on dispatch and delivery. Please reply here if any deta
   $("#btnInvFilter").addEventListener("click", renderInventory);
   $("#invStatusSel").addEventListener("change", e => { invStatus = e.target.value; renderInventory(); });
 
-  function renderInventory() {
-    renderInvPills(); renderInvStatus();
+  /* Batch stock tags: one thermal job for every in-stock piece the filters
+     currently show (up to one sheet-pair of 50). Staff cut the strip once and
+     label a whole rail in a single pass. */
+  async function printRackTags() {
+    if (!window.ThermalTags) return toast("This app build needs the stock-tag update. Reload the app and try again.", false);
+    const pieces = inventoryList()
+      .filter(p => Number(p.in_stock_count || 0) > 0)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")) || String(a.id).localeCompare(String(b.id)));
+    if (!pieces.length) return toast("No in-stock pieces match these filters.", false);
+    const batch = pieces.slice(0, ThermalTags.MAX_TAGS);
+    const button = $("#btnPrintRackTags");
+    button.disabled = true;
+    try {
+      const codes = await DB.tagCodes(batch.map(p => p.id));
+      const tagged = batch
+        .map(p => Object.assign({}, p, { tag_code: codes[p.id] || ThermalTags.tagCode(p) }))
+        .filter(p => ThermalTags.tagCode(p));
+      if (!tagged.length) throw new Error("The server did not issue stock-tag codes. Check the connection and try again.");
+      const result = await ThermalTags.print(tagged, { copies: 1 });
+      renderInventory();
+      const rest = pieces.length - batch.length;
+      toast(`${result.tags} tag(s) sent to the printer — cut along the grey lines.${rest > 0 ? ` ${rest} piece(s) left; print the next strip.` : ""}`);
+    } catch (error) {
+      toast(error.message, false);
+    } finally { button.disabled = false; }
+  }
+  $("#btnPrintRackTags").addEventListener("click", printRackTags);
+
+  /* The same filtered catalog drives the list and the thermal tag sheet:
+     staff narrow to one rack, then print exactly the labels on screen. */
+  function inventoryList() {
     let list = DB.listProducts();
     if (invDemo) list = list.filter(p => p.demographic === invDemo);
     if (invStatus !== "all") list = list.filter(p => invStatus === "live" ? p.in_stock_count > 0 : p.in_stock_count <= 0);
-    if (invTerm) list = list.filter(p => [p.name, p.brand, p.color, p.size, p.sku, p.category, p.condition].some(x => String(x || "").toLowerCase().includes(invTerm)));
+    if (invTerm) list = list.filter(p => [p.name, p.brand, p.color, p.size, p.sku, p.tag_code, p.category, p.condition].some(x => String(x || "").toLowerCase().includes(invTerm)));
+    return list;
+  }
+
+  function renderInventory() {
+    renderInvPills(); renderInvStatus();
+    const list = inventoryList();
     $("#navStockBadge").textContent = DB.listProducts().filter(p => p.in_stock_count <= 0).length || "";
 
     $("#invList").innerHTML = list.length ? list.map(p => {

@@ -155,6 +155,16 @@ async function main() {
     assert.match(uncoded.querySelector("#gtPrintMessage").textContent, /no stock-tag code/);
     uncoded.querySelector("[data-gt-close]").click();
 
+    // Whole-rack labelling: one job tags every in-stock piece the filters show,
+    // and it never becomes a browser/PDF print job either.
+    intake.products[0].in_stock_count = 1;
+    intake.products[0].tag_code = "1042";
+    const rackPrints = intake.stats.prints, rackCodes = intake.stats.tagCodes;
+    intake.doc.querySelector("#btnPrintRackTags").click(); await settle();
+    assert.equal(intake.stats.prints, rackPrints, "a rack tag strip is never a browser/PDF job");
+    assert(rackCodes < intake.stats.tagCodes, "the sheet asks the server for the permanent codes first");
+    assert.match(intake.doc.querySelector("#toast").textContent, /Bluetooth thermal printer/);
+
     // Optional area protections also apply to open print previews.
     intake.win.PosAccess = { canUse: () => false, ensure: async () => false, areaForView: () => null };
     intake.win.dispatchEvent(new intake.win.Event("pos-access-change"));
